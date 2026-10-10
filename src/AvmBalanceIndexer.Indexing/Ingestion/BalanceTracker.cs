@@ -67,6 +67,18 @@ public sealed class BalanceTracker(IBalanceReadStore store, int maxCacheEntries)
     {
         ArgumentNullException.ThrowIfNull(round);
 
+        if (round.FinalBalances.Count >= _generationSize)
+        {
+            // A round this large would not fit a generation. Forget what it changed instead of caching it; storage has it.
+            foreach (var key in round.FinalBalances.Keys)
+            {
+                _young.Remove(key);
+                _old.Remove(key);
+            }
+
+            return;
+        }
+
         foreach (var (key, amount) in round.FinalBalances)
         {
             _young[key] = amount;

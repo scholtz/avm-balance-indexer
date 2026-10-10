@@ -107,4 +107,26 @@ public class BalanceTrackerTests
         // Storage still says 100 (the first round was never written), so 30 proves the cache supplied the value.
         Assert.Equal(30UL, (ulong)again.Effects[0].BalanceAfter.Value);
     }
+
+    [Fact]
+    public async Task A_Round_Larger_Than_A_Generation_Is_Not_Cached_And_Invalidates_Stale_Entries()
+    {
+        var storage = await SeededAsync();
+        var tracker = new BalanceTracker(storage, 4);
+        var warm = await tracker.ApplyAsync([Delta(0, Alice, -10)], CancellationToken.None);
+        tracker.Commit(warm);
+
+        // Three accounts reach the generation size of two, so none of them may be cached; Alice's stale entry must go too.
+        var big = await tracker.ApplyAsync([Delta(0, Alice, -20), Delta(1, TestChain.Account(60), 1), Delta(2, TestChain.Account(61), 1)], CancellationToken.None);
+        await storage.WriteRoundAsync(
+            new ChainStatus(ChainId.AlgorandTestnet, 1, new byte[32], null, IngestionState.Following, DateTimeOffset.UnixEpoch),
+            big.Effects,
+            CancellationToken.None);
+        tracker.Commit(big);
+        var next = await tracker.ApplyAsync([Delta(0, Alice, -5)], CancellationToken.None);
+
+        // The large round took Alice from 90 (cached) to 70 and wrote that; storage therefore says 70 and the next balance is 65.
+        // Had her stale cached 90 survived the large round, the result would have been 85.
+        Assert.Equal(65UL, (ulong)next.Effects[0].BalanceAfter.Value);
+    }
 }

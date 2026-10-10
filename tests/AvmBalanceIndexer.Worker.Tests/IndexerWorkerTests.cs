@@ -102,6 +102,24 @@ public class IndexerWorkerTests : IDisposable
         Assert.Equal(2, adapter.Failures);
     }
 
+    [Theory]
+    [InlineData(401)]
+    [InlineData(400)]
+    public async Task Algod_Client_Errors_Are_Not_Retried(int status)
+    {
+        var storage = NewStorage();
+        var errors = new Queue<Exception>([new Algorand.ApiException("Denied", status, "denied", new Dictionary<string, IEnumerable<string>>(), new HttpRequestException("client error"))]);
+        var adapter = new FlakyAdapter(Scenario.Adapter(), failuresBeforeSuccess: 1, errors: errors);
+
+        var (worker, lifetime) = Create(storage, adapter, maxFailures: 1000);
+        await worker.StartAsync(CancellationToken.None);
+        await lifetime.WaitForStopAsync();
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.Equal(1, adapter.Failures);
+        Assert.Equal(1, Environment.ExitCode);
+    }
+
     private static InMemoryChainStorage NewStorage() => new(new ChainContext(ChainId.AlgorandTestnet));
 
     private static (IndexerWorker Worker, FakeLifetime Lifetime) Create(InMemoryChainStorage storage, IChainAdapter adapter, int maxFailures)

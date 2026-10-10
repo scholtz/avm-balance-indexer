@@ -106,9 +106,40 @@ public sealed class ApiTests : IDisposable
         Assert.Equal("algorand-testnet", body.GetProperty("served").GetString());
     }
 
-    private sealed class ThrowingStorage : IChainStorage
+    [Fact]
+    public async Task A_Chain_That_Has_Not_Been_Indexed_Yet_Is_A_503_With_A_Clear_Body()
     {
-        public Task<ChainStatus?> GetAsync(string chain, CancellationToken cancellationToken) => throw new InvalidOperationException("database is down");
+        using var client = CreateClient(new ThrowingStorage(new ChainNotStartedException(ChainId.AlgorandTestnet)));
+
+        using var response = await client.GetAsync(new Uri("/v1/algorand-testnet/status", UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("algorand-testnet", body.GetProperty("chain").GetString());
+    }
+
+    [Fact]
+    public async Task An_Unexpected_Storage_Failure_Is_Still_A_500()
+    {
+        using var client = CreateClient(new ThrowingStorage(new InvalidOperationException("database is down")));
+
+        using var response = await client.GetAsync(new Uri("/v1/algorand-testnet/status", UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+    }
+
+    [Fact]
+    public void Expected_Storage_Failures_Map_To_Client_Errors()
+    {
+        Assert.Equal(404, ApiExceptionHandler.Map(new RoundNotIndexedException(10, 7))!.Value.Status);
+        Assert.Equal(400, ApiExceptionHandler.Map(new ArgumentException("Invalid cursor.", "cursor"))!.Value.Status);
+        Assert.Null(ApiExceptionHandler.Map(new ArgumentException("something else", "other")));
+        Assert.Null(ApiExceptionHandler.Map(new InvalidOperationException("boom")));
+    }
+
+    private sealed class ThrowingStorage(Exception? failure = null) : IChainStorage
+    {
+        public Task<ChainStatus?> GetAsync(string chain, CancellationToken cancellationToken) => throw failure ?? new InvalidOperationException("database is down");
 
         public Task UpdateProgressAsync(ChainStatus status, CancellationToken cancellationToken) => throw new InvalidOperationException();
 

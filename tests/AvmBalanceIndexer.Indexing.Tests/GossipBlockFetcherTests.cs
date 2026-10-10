@@ -250,6 +250,19 @@ public class GossipBlockFetcherTests
     }
 
     [Fact]
+    public async Task Mostly_Errors_Mean_A_Broken_Fleet_Not_A_Block_That_Is_Not_Out_Yet()
+    {
+        var calls = 0;
+        var fetcher = CreateFetcher(
+            (_, _) => Task.FromResult(new HttpResponseMessage(Interlocked.Increment(ref calls) == 1 ? HttpStatusCode.NotFound : HttpStatusCode.InternalServerError)),
+            maxAttempts: 6);
+
+        var error = await Assert.ThrowsAsync<BlockFetchException>(() => fetcher.FetchBlockAsync(5, CancellationToken.None));
+
+        Assert.IsNotType<BlockNotAvailableException>(error);
+    }
+
+    [Fact]
     public async Task A_Wrong_Response_Makes_The_Fetch_A_Failure_Rather_Than_Not_Available()
     {
         var fetcher = CreateFetcher(

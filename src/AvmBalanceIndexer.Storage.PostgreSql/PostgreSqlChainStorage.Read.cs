@@ -240,17 +240,17 @@ public sealed partial class PostgreSqlChainStorage
         // from its own effect history (one index lookup per account). Cost is proportional to the page, not to the history.
         await using var command = new NpgsqlCommand(
             """
-            SELECT t.account, b.balance_after, b.round
+            SELECT t.account, COALESCE(b.balance_after, 0), COALESCE(b.round, t.first_round)
             FROM accounts_touched_by_token t
-            CROSS JOIN LATERAL (
+            LEFT JOIN LATERAL (
                 SELECT e.balance_after, e.round
                 FROM effects_by_account_token e
                 WHERE e.account = t.account AND e.token_kind = t.token_kind AND e.token_id = t.token_id AND e.round <= @round
                 ORDER BY e.round DESC, e.intra_round_order DESC, e.ordinal DESC
                 LIMIT 1
-            ) b
+            ) b ON true
             WHERE t.token_kind = @kind AND t.token_id = @id AND t.first_round <= @round AND t.account > @after
-              AND (@includeZero OR b.balance_after > 0)
+              AND (@includeZero OR COALESCE(b.balance_after, 0) > 0)
             ORDER BY t.account
             LIMIT @limit
             """,

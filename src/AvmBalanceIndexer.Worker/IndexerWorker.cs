@@ -100,8 +100,9 @@ public sealed partial class IndexerWorker(
     /// timeouts (a timed-out request throws a cancellation that did not come from shutdown), and transient database errors.
     /// </summary>
     private static bool IsTransient(Exception exception, CancellationToken stoppingToken) =>
-        exception is BlockFetchException or HttpRequestException or TimeoutException or IOException or Algorand.ApiException
-        || (exception is OperationCanceledException && !stoppingToken.IsCancellationRequested)
+        exception is BlockFetchException or HttpRequestException or TimeoutException or IOException
+        || exception is Algorand.ApiException { StatusCode: >= 500 or 408 or 429 }
+        || (exception is TaskCanceledException && !stoppingToken.IsCancellationRequested)
         || exception is DbException { IsTransient: true };
 
     [LoggerMessage(EventId = 1300, Level = LogLevel.Information, Message = "Indexer worker started for {Chain}")]
