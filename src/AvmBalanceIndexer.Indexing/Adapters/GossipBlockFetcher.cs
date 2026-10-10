@@ -60,8 +60,8 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
         var hosts = OrderHosts(discovered);
         Exception? last = null;
         var notFound = 0;
-        var failures = 0;
-        var sawBadData = false;
+        var errors = 0;
+        var badData = 0;
 
         for (var attempt = 0; attempt < _options.MaxAttempts; attempt++)
         {
@@ -86,8 +86,15 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
             catch (Exception ex) when (ex is HttpRequestException or BlockValidationException or TimeoutException or IOException)
             {
                 last = ex;
-                failures++;
-                sawBadData |= ex is BlockValidationException;
+                if (ex is BlockValidationException)
+                {
+                    badData++;
+                }
+                else
+                {
+                    errors++;
+                }
+
                 _cooldownUntil[host] = _time.GetUtcNow() + _options.HostCooldown;
                 LogAttemptFailed(_logger, ex, round, host, attempt + 1, _options.MaxAttempts);
             }
@@ -98,9 +105,9 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
             }
         }
 
-        // Hosts saying "not here" at least as often as they fail to answer means the block is not out yet. Mostly errors means
-        // the fleet is broken, and a wrong response is always a failure; both must reach the caller as such.
-        if (notFound > 0 && !sawBadData && notFound >= failures)
+        // Hosts saying "not here" at least as often as they fail to answer, and more often than they answer wrongly, means the
+        // block is not out yet. Mostly errors or wrong answers means a broken fleet and must reach the caller as a failure.
+        if (notFound > 0 && notFound >= errors && notFound > badData)
         {
             throw new BlockNotAvailableException(round);
         }

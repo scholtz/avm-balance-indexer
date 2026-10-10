@@ -15,7 +15,10 @@ public sealed class IndexerOptions : IValidatableObject
     [Range(typeof(TimeSpan), "00:00:00.100", "00:10:00")]
     public TimeSpan FollowPollInterval { get; set; } = TimeSpan.FromSeconds(2);
 
-    /// <summary>Upper bound of cached account balances; the cache is cleared when exceeded.</summary>
+    /// <summary>
+    /// Upper bound of cached account balances. The cache keeps two generations of half this size each, and a round that
+    /// touches more accounts than one generation holds bypasses it. Storage always supplies what is not cached.
+    /// </summary>
     [Range(1_000, 50_000_000)]
     public int BalanceCacheEntries { get; set; } = 500_000;
 

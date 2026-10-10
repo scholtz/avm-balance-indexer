@@ -47,7 +47,7 @@ public sealed partial class IndexerWorker(
         var settings = options.Value;
         var backoff = settings.RetryInitialBackoff;
         var failures = 0;
-        ulong? cursorAtLastFailure = null;
+        var committedAtLastFailure = indexer.RoundsCommitted;
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -61,10 +61,11 @@ public sealed partial class IndexerWorker(
             }
             catch (Exception ex) when (IsTransient(ex, stoppingToken))
             {
-                var cursor = await TryReadCursorAsync(cursorAtLastFailure, stoppingToken).ConfigureAwait(false);
-                if (cursor != cursorAtLastFailure)
+                // Rounds committed since the previous failure mean the indexer is making progress despite the trouble.
+                var committed = indexer.RoundsCommitted;
+                if (committed != committedAtLastFailure)
                 {
-                    cursorAtLastFailure = cursor;
+                    committedAtLastFailure = committed;
                     failures = 0;
                     backoff = settings.RetryInitialBackoff;
                 }
@@ -79,19 +80,6 @@ public sealed partial class IndexerWorker(
                 await Task.Delay(backoff, stoppingToken).ConfigureAwait(false);
                 backoff = TimeSpan.FromTicks(Math.Min(backoff.Ticks * 2, settings.RetryMaxBackoff.Ticks));
             }
-        }
-    }
-
-    /// <summary>The published round, or <paramref name="fallback"/> when storage cannot be read right now.</summary>
-    private async Task<ulong?> TryReadCursorAsync(ulong? fallback, CancellationToken cancellationToken)
-    {
-        try
-        {
-            return (await storage.GetAsync(chain.Chain, cancellationToken).ConfigureAwait(false))?.IndexedRound;
-        }
-        catch (Exception ex) when (IsTransient(ex, cancellationToken))
-        {
-            return fallback;
         }
     }
 

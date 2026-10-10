@@ -132,6 +132,20 @@ public class PostgreSqlSpecificTests(PostgresFixture postgres)
     }
 
     [Fact]
+    public async Task Changing_The_Partition_Count_Of_An_Existing_Database_Fails_With_A_Clear_Message()
+    {
+        var original = await postgres.CreateStorageAsync(accountPartitions: 4);
+        var changed = new AvmBalanceIndexer.Storage.PostgreSql.PostgreSqlChainStorage(
+            postgres.DataSourceOf(original),
+            new ChainContext(ChainId.AlgorandTestnet),
+            8);
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => changed.EnsureSchemaAsync(CancellationToken.None));
+
+        Assert.Contains("4 account hash partitions", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Schema_Bootstrap_Is_Idempotent()
     {
         var storage = await postgres.CreateStorageAsync();

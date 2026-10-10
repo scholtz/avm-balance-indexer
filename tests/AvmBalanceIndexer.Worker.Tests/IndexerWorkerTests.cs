@@ -102,6 +102,22 @@ public class IndexerWorkerTests : IDisposable
         Assert.Equal(2, adapter.Failures);
     }
 
+    [Fact]
+    public async Task A_Young_Network_Whose_First_Block_Is_Not_Served_Yet_Is_Waited_For_Not_Failed()
+    {
+        var storage = NewStorage();
+        var notYet = new Queue<Exception>([new BlockNotAvailableException(1), new BlockNotAvailableException(1), new BlockNotAvailableException(1)]);
+        var adapter = new FlakyAdapter(Scenario.Adapter(), failuresBeforeSuccess: 3, errors: notYet);
+
+        // Two failures would stop the worker, so surviving three missing fetches shows they were waited out inside the indexer.
+        var (worker, lifetime) = Create(storage, adapter, maxFailures: 2);
+        await worker.StartAsync(CancellationToken.None);
+        await WaitForRoundAsync(storage, Scenario.LastRound);
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.False(lifetime.StopRequested);
+    }
+
     [Theory]
     [InlineData(401)]
     [InlineData(400)]

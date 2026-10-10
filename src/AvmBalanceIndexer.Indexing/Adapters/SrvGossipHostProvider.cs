@@ -15,22 +15,21 @@ public sealed partial class SrvGossipHostProvider(
 {
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
     private readonly SemaphoreSlim _gate = new(1, 1);
-    private string[] _hosts = [];
-    private DateTimeOffset _expires = DateTimeOffset.MinValue;
+    private volatile Snapshot? _snapshot;
 
     public async Task<IReadOnlyList<string>> GetHostsAsync(CancellationToken cancellationToken)
     {
-        if (_time.GetUtcNow() < _expires && _hosts.Length > 0)
+        if (_snapshot is { } fresh && _time.GetUtcNow() < fresh.Expires)
         {
-            return _hosts;
+            return fresh.Hosts;
         }
 
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (_time.GetUtcNow() < _expires && _hosts.Length > 0)
+            if (_snapshot is { } current && _time.GetUtcNow() < current.Expires)
             {
-                return _hosts;
+                return current.Hosts;
             }
 
             try
@@ -39,17 +38,17 @@ public sealed partial class SrvGossipHostProvider(
                 var configuration = await Task.Run(
                     () => new GossipHttpConfiguration(GossipNodePurpose.Archival, network),
                     cancellationToken).ConfigureAwait(false);
-                _hosts = configuration.Hosts;
-                _expires = _time.GetUtcNow() + refreshInterval;
-                LogDiscovered(logger, _hosts.Length, network);
+                _snapshot = new Snapshot(configuration.Hosts, _time.GetUtcNow() + refreshInterval);
+                LogDiscovered(logger, configuration.Hosts.Length, network);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException && _hosts.Length > 0)
+            catch (Exception ex) when (ex is not OperationCanceledException && _snapshot is { Hosts.Length: > 0 } stale)
             {
-                _expires = _time.GetUtcNow() + TimeSpan.FromSeconds(30);
-                LogRefreshFailed(logger, ex, network, _hosts.Length);
+                // Keep serving the last known hosts and look again soon.
+                _snapshot = stale with { Expires = _time.GetUtcNow() + TimeSpan.FromSeconds(30) };
+                LogRefreshFailed(logger, ex, network, stale.Hosts.Length);
             }
 
-            return _hosts;
+            return _snapshot?.Hosts ?? [];
         }
         finally
         {
@@ -58,6 +57,8 @@ public sealed partial class SrvGossipHostProvider(
     }
 
     public void Dispose() => _gate.Dispose();
+
+    private sealed record Snapshot(string[] Hosts, DateTimeOffset Expires);
 
     [LoggerMessage(EventId = 1100, Level = LogLevel.Information, Message = "Discovered {Count} archival gossip nodes for {Network}")]
     private static partial void LogDiscovered(ILogger logger, int count, GossipNetwork network);

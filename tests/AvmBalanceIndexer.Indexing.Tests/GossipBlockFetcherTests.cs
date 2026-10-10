@@ -263,6 +263,17 @@ public class GossipBlockFetcherTests
     }
 
     [Fact]
+    public async Task One_Wrong_Host_Among_Many_That_Lack_The_Block_Still_Means_Not_Available_Yet()
+    {
+        var fetcher = CreateFetcher(
+            (request, _) => Task.FromResult(request.RequestUri!.Host == "c.test" ? Ok(Chain.Encode(1, [])) : new HttpResponseMessage(HttpStatusCode.NotFound)),
+            hosts: ["http://a.test:4160", "http://b.test:4160", "http://c.test:4160"],
+            maxAttempts: 3);
+
+        await Assert.ThrowsAsync<BlockNotAvailableException>(() => fetcher.FetchBlockAsync(2, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task A_Wrong_Response_Makes_The_Fetch_A_Failure_Rather_Than_Not_Available()
     {
         var fetcher = CreateFetcher(

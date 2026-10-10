@@ -19,6 +19,8 @@ public sealed partial class PostgreSqlChainStorage
             await ExecuteAsync(connection, transaction, script, cancellationToken).ConfigureAwait(false);
         }
 
+        await EnsurePartitionCountMatchesAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
+
         for (var remainder = 0; remainder < _accountPartitions; remainder++)
         {
             // Numbers only: the statement text contains no caller-supplied strings.
@@ -29,6 +31,22 @@ public sealed partial class PostgreSqlChainStorage
         }
 
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The number of hash partitions is part of the data layout and cannot change without a rebuild. Fail with a clear message
+    /// instead of letting PostgreSQL reject the overlapping partitions.
+    /// </summary>
+    private async Task EnsurePartitionCountMatchesAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, CancellationToken cancellationToken)
+    {
+        await using var command = new NpgsqlCommand(
+            "SELECT count(*) FROM pg_inherits WHERE inhparent = 'effects_by_account_token'::regclass", connection, transaction);
+        var existing = Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false), CultureInfo.InvariantCulture);
+        if (existing != 0 && existing != _accountPartitions)
+        {
+            throw new InvalidOperationException(
+                $"The database was created with {existing} account hash partitions but Storage:PostgreSql:AccountHashPartitions is {_accountPartitions}. The setting is fixed per database; restore the original value or reindex into a new database.");
+        }
     }
 
     /// <summary>Creates the range partition of the token-oriented effect table that holds a round bucket.</summary>

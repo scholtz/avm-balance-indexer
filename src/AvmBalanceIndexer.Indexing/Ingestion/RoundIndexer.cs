@@ -27,6 +27,10 @@ public sealed partial class RoundIndexer(
 {
     private readonly IndexerOptions _options = options.Value;
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
+    private long _roundsCommitted;
+
+    /// <summary>Total rounds this instance has committed; lets a supervisor tell progress from a stall without reading storage.</summary>
+    public long RoundsCommitted => Interlocked.Read(ref _roundsCommitted);
 
     /// <summary>
     /// Indexes from the stored cursor onwards.
@@ -41,13 +45,27 @@ public sealed partial class RoundIndexer(
         var chain = adapter.Profile.Chain;
         var status = await storage.GetAsync(chain, cancellationToken).ConfigureAwait(false);
         RewardsState rewards;
-        if (status is null)
+        while (true)
         {
-            (status, rewards) = await BootstrapGenesisAsync(stopAfterRound, cancellationToken).ConfigureAwait(false);
-        }
-        else
-        {
-            rewards = await SeedRewardsAsync(status, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                if (status is null)
+                {
+                    (status, rewards) = await BootstrapGenesisAsync(stopAfterRound, cancellationToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    rewards = await SeedRewardsAsync(status, cancellationToken).ConfigureAwait(false);
+                }
+
+                break;
+            }
+            catch (BlockNotAvailableException ex) when (stopAfterRound is null)
+            {
+                // A very young network or a lagging archival fleet: block 1 or the cursor block is not served yet.
+                LogWaitingForBlock(logger, ex.Round);
+                await Task.Delay(_options.FollowPollInterval, _time, cancellationToken).ConfigureAwait(false);
+            }
         }
 
         var tracker = new BalanceTracker(storage, _options.BalanceCacheEntries);
@@ -82,6 +100,7 @@ public sealed partial class RoundIndexer(
                     rewards = RewardsState.FromHeader(block.Block);
                     next = block.Round + 1;
                     rounds++;
+                    Interlocked.Increment(ref _roundsCommitted);
                     effects += written.EffectCount;
 
                     if (rounds % _options.LogEveryRounds == 0)

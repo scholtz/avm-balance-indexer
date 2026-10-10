@@ -18,6 +18,7 @@ public sealed class PostgresFixture : IAsyncLifetime
     private PostgreSqlContainer? _container;
     private string _adminConnectionString = string.Empty;
     private int _databaseCounter;
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<PostgreSqlChainStorage, NpgsqlDataSource> _dataSources = new();
 
     public async Task InitializeAsync()
     {
@@ -41,6 +42,9 @@ public sealed class PostgresFixture : IAsyncLifetime
         }
     }
 
+    /// <summary>The data source a storage created by this fixture is connected through, to build a second storage on the same database.</summary>
+    public NpgsqlDataSource DataSourceOf(PostgreSqlChainStorage storage) => _dataSources[storage];
+
     /// <summary>Creates an empty database, applies the schema (unless told not to) and returns the storage bound to it.</summary>
     public async Task<PostgreSqlChainStorage> CreateStorageAsync(string chain = ChainId.AlgorandTestnet, int accountPartitions = 4, bool applySchema = true)
     {
@@ -53,7 +57,9 @@ public sealed class PostgresFixture : IAsyncLifetime
         }
 
         var connectionString = new NpgsqlConnectionStringBuilder(_adminConnectionString) { Database = name, Pooling = true, MaxPoolSize = 8 }.ConnectionString;
-        var storage = new PostgreSqlChainStorage(NpgsqlDataSource.Create(connectionString), new ChainContext(chain), accountPartitions);
+        var dataSource = NpgsqlDataSource.Create(connectionString);
+        var storage = new PostgreSqlChainStorage(dataSource, new ChainContext(chain), accountPartitions);
+        _dataSources[storage] = dataSource;
         if (applySchema)
         {
             await storage.EnsureSchemaAsync(CancellationToken.None).ConfigureAwait(false);

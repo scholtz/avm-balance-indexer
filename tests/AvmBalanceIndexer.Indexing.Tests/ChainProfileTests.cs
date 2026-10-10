@@ -30,6 +30,37 @@ public class ChainProfileTests
         Assert.Equal(new byte[32], AlgorandChainFactory.ResolveGenesisHash(unpinned, options));
     }
 
+    [Theory]
+    [InlineData("https://gateway.test/algod")]
+    [InlineData("https://gateway.test/algod/")]
+    public async Task Genesis_Is_Requested_Below_The_Configured_Algod_Path(string algodUrl)
+    {
+        Uri? requested = null;
+        var handler = new RecordingHandler(request =>
+        {
+            requested = request.RequestUri;
+            return new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent("{\"alloc\":[],\"id\":\"v1.0\",\"network\":\"testnet\"}") };
+        });
+        using var algod = Algorand.HttpClientConfigurator.ConfigureHttpClient(algodUrl, string.Empty, string.Empty, -1, handler);
+        using var adapter = new AlgorandChainAdapter(ChainProfile.For(ChainId.AlgorandTestnet), new byte[32], new NoBlocks(), algod);
+
+        var genesis = await adapter.GetGenesisAsync(CancellationToken.None);
+
+        Assert.Equal("https://gateway.test/algod/genesis", requested!.ToString());
+        Assert.Equal("testnet-v1.0", genesis.Id);
+    }
+
+    private sealed class RecordingHandler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(respond(request));
+    }
+
+    private sealed class NoBlocks : IBlockFetcher
+    {
+        public Task<BlockData> FetchBlockAsync(ulong round, CancellationToken cancellationToken) => throw new NotSupportedException();
+    }
+
     [Fact]
     public void Unknown_Chains_Are_Rejected()
     {
