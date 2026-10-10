@@ -1,0 +1,28 @@
+# Build
+bin/
+obj/
+out/
+*.user
+*.suo
+.vs/
+.vscode/
+.idea/
+*.swp
+TestResults/
+coverage/
+*.trx
+
+# Secrets / local
+*.local.json
+appsettings.*.local.json
+.env
+.env.*
+!.env.example
+
+# Helm
+deploy/helm/**/charts/
+deploy/helm/**/*.tgz
+
+# OS
+.DS_Store
+Thumbs.db

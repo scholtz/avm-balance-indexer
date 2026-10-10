@@ -1,0 +1,17 @@
+# syntax=docker/dockerfile:1
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /src
+COPY global.json Directory.Build.props Directory.Packages.props AvmBalanceIndexer.slnx ./
+COPY src/ src/
+RUN dotnet restore src/AvmBalanceIndexer.Api/AvmBalanceIndexer.Api.csproj
+RUN dotnet publish src/AvmBalanceIndexer.Api/AvmBalanceIndexer.Api.csproj -c Release -o /app --no-restore
+
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
+WORKDIR /app
+ENV ASPNETCORE_URLS=http://+:8080 \
+    DOTNET_EnableDiagnostics=0
+EXPOSE 8080
+USER $APP_UID
+COPY --from=build /app .
+HEALTHCHECK --interval=30s --timeout=3s CMD wget -qO- http://localhost:8080/healthz/live || exit 1
+ENTRYPOINT ["dotnet", "AvmBalanceIndexer.Api.dll"]

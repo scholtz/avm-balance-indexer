@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Provider-agnostic storage contract suite; runs against PostgreSQL and Cassandra in CI.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\AvmBalanceIndexer.Domain\AvmBalanceIndexer.Domain.csproj" />
+    <ProjectReference Include="..\..\src\AvmBalanceIndexer.Storage.PostgreSql\AvmBalanceIndexer.Storage.PostgreSql.csproj" />
+    <ProjectReference Include="..\..\src\AvmBalanceIndexer.Storage.Cassandra\AvmBalanceIndexer.Storage.Cassandra.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+</Project>

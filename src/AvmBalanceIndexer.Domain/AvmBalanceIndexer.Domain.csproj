@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Chain-neutral domain model: tokens, effects, exact amounts and the storage contract shared by all providers.</Description>
+  </PropertyGroup>
+
+</Project>
