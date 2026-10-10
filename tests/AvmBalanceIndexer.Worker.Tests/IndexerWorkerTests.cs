@@ -118,6 +118,57 @@ public class IndexerWorkerTests : IDisposable
         Assert.False(lifetime.StopRequested);
     }
 
+    [Fact]
+    public async Task A_Database_That_Is_Not_Ready_At_Startup_Is_Waited_For()
+    {
+        var storage = new SchemaFlakyStorage(failures: 3);
+
+        var (worker, lifetime) = Create(storage, Scenario.Adapter(), maxFailures: 10);
+        await worker.StartAsync(CancellationToken.None);
+        await WaitForRoundAsync(storage, Scenario.LastRound);
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.False(lifetime.StopRequested);
+        Assert.Equal(4, storage.SchemaAttempts);
+    }
+
+    [Fact]
+    public async Task A_Block_The_Archive_Never_Serves_Although_Algod_Is_Far_Ahead_Stops_The_Worker()
+    {
+        var storage = NewStorage();
+        var adapter = Scenario.Adapter();
+        adapter.Latest = 1_000;
+
+        var (worker, lifetime) = Create(storage, adapter, maxFailures: 3);
+        await worker.StartAsync(CancellationToken.None);
+        await lifetime.WaitForStopAsync();
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.Equal(Scenario.LastRound, (await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!.IndexedRound);
+        Assert.Equal(1, Environment.ExitCode);
+    }
+
+    [Fact]
+    public async Task A_Block_That_Is_Just_Not_Out_Yet_At_The_Tip_Is_Waited_For()
+    {
+        var storage = NewStorage();
+        var chain = new TestChain();
+        var blocks = Scenario.Blocks(chain).ToList();
+        var next = chain.Block(6, rewards: Scenario.RewardsAt(6));
+        var adapter = Scenario.Adapter(blocks);
+        adapter.Latest = 6;
+
+        var (worker, lifetime) = Create(storage, adapter, maxFailures: 2);
+        await worker.StartAsync(CancellationToken.None);
+        await WaitForRoundAsync(storage, Scenario.LastRound);
+        await Task.Delay(50);
+        adapter.Add(next);
+        await WaitForRoundAsync(storage, 6);
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.False(lifetime.StopRequested);
+    }
+
     [Theory]
     [InlineData(401)]
     [InlineData(400)]
@@ -197,6 +248,18 @@ public class IndexerWorkerTests : IDisposable
 
             return inner.FetchBlockAsync(round, cancellationToken);
         }
+    }
+
+    private sealed class SchemaFlakyStorage(int failures) : InMemoryChainStorage(new ChainContext(ChainId.AlgorandTestnet))
+    {
+        private int _attempts;
+
+        public int SchemaAttempts => Volatile.Read(ref _attempts);
+
+        public override Task EnsureSchemaAsync(CancellationToken cancellationToken) =>
+            Interlocked.Increment(ref _attempts) <= failures
+                ? Task.FromException(new IOException("database is starting"))
+                : Task.CompletedTask;
     }
 
     private sealed class FakeLifetime : IHostApplicationLifetime

@@ -18,6 +18,11 @@ namespace AvmBalanceIndexer.Indexing.Normalization;
 /// </list>
 /// Intra-round order is 0 for start-of-block effects, the transaction index plus one for transaction effects, and
 /// the transaction count plus one for end-of-block effects.
+/// <para>
+/// Known limit: the ledger moves the proposer payout without recording rewards realized on the proposer in the block. An
+/// online proposer that still has unrealized rewards from before the rewards rate dropped to zero is therefore credited
+/// slightly more in the ledger than here, once, at its first payout. Tracking each account's rewards base would close it.
+/// </para>
 /// </summary>
 public sealed class AlgoEffectNormalizer : IEffectNormalizer
 {

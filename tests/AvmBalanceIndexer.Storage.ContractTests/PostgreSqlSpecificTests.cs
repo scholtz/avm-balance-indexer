@@ -164,6 +164,33 @@ public class PostgreSqlSpecificTests(PostgresFixture postgres)
     }
 
     [Fact]
+    public async Task Reading_Before_The_Schema_Exists_Reports_That_Nothing_Is_Indexed()
+    {
+        var storage = await postgres.CreateStorageAsync(applySchema: false);
+
+        await Assert.ThrowsAsync<ChainNotStartedException>(() => storage.GetBalanceAtRoundAsync(TestChain.Account(1), Native, 0, CancellationToken.None));
+        await Assert.ThrowsAsync<ChainNotStartedException>(() => storage.GetHoldingsAsync(TestChain.Account(1), true, null, 10, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task An_Unknown_Token_Kind_In_The_Database_Is_An_Error_Not_A_Wrong_Token()
+    {
+        var storage = await postgres.CreateStorageAsync();
+        var account = TestChain.Account(1);
+        await storage.WriteRoundAsync(
+            new ChainStatus(ChainId.AlgorandTestnet, 0, TestChain.FakeHash(0), null, IngestionState.Bootstrapping, DateTimeOffset.UnixEpoch),
+            [Effect(0, 0, "genesis", account, 5, 5)],
+            CancellationToken.None);
+        await using (var connection = await postgres.DataSourceOf(storage).OpenConnectionAsync())
+        await using (var command = new Npgsql.NpgsqlCommand("UPDATE holdings_by_account SET token_kind = 'futurekind'", connection))
+        {
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => storage.GetHoldingsAsync(account, true, null, 10, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task Schema_Bootstrap_Is_Idempotent()
     {
         var storage = await postgres.CreateStorageAsync();

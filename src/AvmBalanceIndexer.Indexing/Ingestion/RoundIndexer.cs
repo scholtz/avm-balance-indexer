@@ -62,9 +62,9 @@ public sealed partial class RoundIndexer(
             }
             catch (BlockNotAvailableException ex) when (stopAfterRound is null)
             {
-                // A very young network or a lagging archival fleet: block 1 or the cursor block is not served yet.
-                LogWaitingForBlock(logger, ex.Round);
-                await Task.Delay(_options.FollowPollInterval, _time, cancellationToken).ConfigureAwait(false);
+                // A very young network or a fleet that lags the tip: block 1 or the cursor block is not served yet. If algod
+                // is well ahead, the archive is missing the block for good and the supervisor must hear about it.
+                await WaitIfJustMissingAsync(ex, cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -111,13 +111,29 @@ public sealed partial class RoundIndexer(
             }
             catch (BlockNotAvailableException ex) when (stopAfterRound is null)
             {
-                // At the tip the archival nodes may not have the newest block yet; wait and ask again.
-                LogWaitingForBlock(logger, ex.Round);
-                await Task.Delay(_options.FollowPollInterval, _time, cancellationToken).ConfigureAwait(false);
+                // At the tip the archival nodes may not have the newest block yet; wait and ask again. A block far behind the
+                // tip that nobody serves is a stall, not a wait.
+                await WaitIfJustMissingAsync(ex, cancellationToken).ConfigureAwait(false);
             }
         }
 
         return new IndexingResult(first, status.IndexedRound, rounds, effects);
+    }
+
+    /// <summary>
+    /// Waits one poll interval when the missing block is within propagation distance of the chain tip; otherwise rethrows so
+    /// that the worker backs off, logs and eventually stops instead of polling a hole in the archive forever.
+    /// </summary>
+    private async Task WaitIfJustMissingAsync(BlockNotAvailableException missing, CancellationToken cancellationToken)
+    {
+        var latest = await adapter.GetLatestRoundAsync(cancellationToken).ConfigureAwait(false);
+        if (missing.Round + (ulong)_options.FollowingThresholdRounds <= latest)
+        {
+            throw missing;
+        }
+
+        LogWaitingForBlock(logger, missing.Round);
+        await Task.Delay(_options.FollowPollInterval, _time, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<(ChainStatus Status, RewardsState Rewards)> BootstrapGenesisAsync(ulong? stopAfterRound, CancellationToken cancellationToken)

@@ -333,7 +333,12 @@ public sealed partial class PostgreSqlChainStorage
 
     private static Holding ReadHolding(NpgsqlDataReader reader)
     {
-        _ = TokenKindExtensions.TryParseStorageName(reader.GetString(1), out var kind);
+        var storedKind = reader.GetString(1);
+        if (!TokenKindExtensions.TryParseStorageName(storedKind, out var kind))
+        {
+            throw new InvalidDataException($"The database holds an unknown token kind \"{storedKind}\".");
+        }
+
         return new Holding(
             new Address((byte[])reader[0]),
             new TokenKey(kind, (ulong)reader.GetInt64(2)),
@@ -415,8 +420,16 @@ public sealed partial class PostgreSqlChainStorage
     {
         await using var command = new NpgsqlCommand("SELECT indexed_round FROM chain_status WHERE chain = @chain", connection, transaction);
         command.Parameters.AddWithValue("chain", _chain);
-        return await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is long round
-            ? (ulong)round
-            : throw new ChainNotStartedException(_chain);
+        try
+        {
+            return await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is long round
+                ? (ulong)round
+                : throw new ChainNotStartedException(_chain);
+        }
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UndefinedTable)
+        {
+            // The worker has not created the schema yet.
+            throw new ChainNotStartedException(_chain);
+        }
     }
 }

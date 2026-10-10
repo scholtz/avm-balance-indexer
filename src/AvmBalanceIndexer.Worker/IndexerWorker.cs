@@ -26,8 +26,6 @@ public sealed partial class IndexerWorker(
     {
         try
         {
-            await storage.EnsureSchemaAsync(stoppingToken).ConfigureAwait(false);
-            LogStarted(logger, chain.Chain);
             await FollowAsync(stoppingToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -48,11 +46,20 @@ public sealed partial class IndexerWorker(
         var backoff = settings.RetryInitialBackoff;
         var failures = 0;
         var committedAtLastFailure = indexer.RoundsCommitted;
+        var schemaReady = false;
 
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
+                if (!schemaReady)
+                {
+                    // Inside the retry loop: a database that is still starting or failing over is a wait, not a crash.
+                    await storage.EnsureSchemaAsync(stoppingToken).ConfigureAwait(false);
+                    schemaReady = true;
+                    LogStarted(logger, chain.Chain);
+                }
+
                 await indexer.RunAsync(null, stoppingToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
