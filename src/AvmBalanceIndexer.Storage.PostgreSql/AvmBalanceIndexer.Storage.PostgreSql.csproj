@@ -1,14 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <Description>PostgreSQL storage provider (Npgsql + Dapper) implementing the shared storage contract.</Description>
+    <Description>PostgreSQL storage provider (Npgsql) implementing the shared storage contract.</Description>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Npgsql" />
-    <PackageReference Include="Dapper" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
-    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" />
+    <PackageReference Include="Microsoft.Extensions.Options" />
   </ItemGroup>
 
   <ItemGroup>

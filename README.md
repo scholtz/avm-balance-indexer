@@ -4,31 +4,48 @@ Self-hosted indexer and API for Algorand-family (AVM) token balances. Indexes a 
 rounds, and serves current and end-of-round balances, holders and per-token account history for native ALGO/VOI,
 ASAs, ARC-20 Smart ASAs and ARC-200 application tokens.
 
-Full design: [PRODUCT-DESCRIPTION.md](PRODUCT-DESCRIPTION.md).
+Full design: [PRODUCT-DESCRIPTION.md](PRODUCT-DESCRIPTION.md). Decisions: [docs/adr](docs/adr).
 
-## Highlights
+## Status
 
-- **One deployment per chain** (`algorand-testnet`, `algorand-mainnet`, `voi`) with isolated cursor, storage and API.
-- **Two storage providers** behind one contract: PostgreSQL (Npgsql + Dapper) and Apache Cassandra (DataStax driver),
-  selected per deployment by `Storage:Provider`. Same effects in, identical API results out.
-- **No snapshots.** Immutable per-effect rows carry `balance_after`, so "balance at round R" is a latest-row lookup;
-  historical holder lists are computed by streaming token effects.
-- **Exact arithmetic.** `Amount` wraps `BigInteger`; amounts travel as canonical decimal strings.
-- **Kubernetes native.** Helm chart with per-chain value overlays; databases provisioned by operators.
+| Area | State |
+|---|---|
+| Native token (ALGO/VOI) indexing from archival nodes | Done. Verified against the ledger for the first 1000 rounds of TestNet and MainNet. |
+| PostgreSQL provider | Done: schema, atomic round writer, current and historical balances, holders, history. |
+| Cassandra provider | Schema only. Selecting it fails at startup. |
+| ASA, ARC-20, ARC-200 effects | Not started. |
+| Read API | `/v1/{chain}/status` only. |
+| Voi | Needs a verified genesis hash before it can be indexed (`Algorand:ExpectedGenesisHash`). |
+
+## How indexing works
+
+1. **Block source.** Blocks come from archival gossip nodes, discovered through the network DNS SRV record with the
+   [Algorand5](https://www.nuget.org/packages/Algorand5) SDK, or from nodes you configure. Fetching adds host failover,
+   timeouts, backoff and validation on top of the SDK client. The latest round comes from an algod node.
+2. **Effects.** Each block is turned into exact, ordered native balance changes: payments, fees, realized rewards,
+   close-outs, inner transactions, proposer payouts, the per-round rewards pool withdrawal and known ledger hotfixes.
+3. **Storage.** The ordered indexer computes the running balance after each effect and commits a whole round in one
+   PostgreSQL transaction together with the publication cursor. A block must link to the previously published block hash.
+4. **Resume.** Restarting continues from the stored cursor and re-checks the cursor block against the archival source.
 
 ## Repository layout
 
 ```
 src/
-  AvmBalanceIndexer.Domain/              token/effect model, Amount, storage contract interfaces
-  AvmBalanceIndexer.Indexing/            chain adapters, effect normalization, ingestion
+  AvmBalanceIndexer.Domain/              token/effect model, exact Amount, storage contract interfaces
+  AvmBalanceIndexer.Indexing/            gossip block fetcher, block decoding, effect normalization, round indexer
   AvmBalanceIndexer.Storage.PostgreSql/  provider + Schema/*.sql
-  AvmBalanceIndexer.Storage.Cassandra/   provider + Schema/*.cql
+  AvmBalanceIndexer.Storage.Cassandra/   schema only (provider not implemented)
+  AvmBalanceIndexer.Hosting/             shared DI and configuration wiring
   AvmBalanceIndexer.Api/                 ASP.NET Core /v1/{chain} read API
   AvmBalanceIndexer.Worker/              indexer worker (single ordered writer per chain)
 tests/
-  AvmBalanceIndexer.Domain.Tests/        unit tests
-  AvmBalanceIndexer.Storage.ContractTests/ same suite run against both providers in CI
+  AvmBalanceIndexer.Domain.Tests/        domain unit tests
+  AvmBalanceIndexer.Indexing.Tests/      decoder, fetcher, normalizer, rewards pool, tracker unit tests
+  AvmBalanceIndexer.Hosting.Tests/       configuration and DI wiring tests
+  AvmBalanceIndexer.Storage.ContractTests/ one contract suite run against the in-memory reference and PostgreSQL
+  AvmBalanceIndexer.Live.Tests/          first 1000 rounds of real chains checked against the ledger (needs internet)
+  AvmBalanceIndexer.TestSupport/         in-memory provider, synthetic chain, shared contract suite
 deploy/helm/                             chart + stage-testnet / prod-algorand / prod-voi overlays
 docker/                                  Dockerfile.api, Dockerfile.worker
 docs/adr/                                architecture decision records
@@ -39,32 +56,67 @@ docs/adr/                                architecture decision records
 Requires the .NET 10 SDK and Docker.
 
 ```sh
-docker compose up -d                       # local PostgreSQL + Cassandra
+docker compose up -d postgres
 dotnet build AvmBalanceIndexer.slnx
-dotnet test  AvmBalanceIndexer.slnx
+
+# Index Algorand TestNet into PostgreSQL (starts from genesis, follows the tip)
+export Chain=algorand-testnet
+export Storage__Provider=PostgreSql
+export "Storage__PostgreSql__ConnectionString=Host=localhost;Port=5432;Database=avm_indexer;Username=avm;Password=avm"
+dotnet run --project src/AvmBalanceIndexer.Worker
+
+# In another shell: serve the status
 dotnet run --project src/AvmBalanceIndexer.Api
 curl http://localhost:5000/v1/algorand-testnet/status
 ```
 
-Provider selection and connection settings live under the `Storage` section of `appsettings*.json` or the matching
-`Storage__*` environment variables. Only the selected provider is initialised.
+### Configuration
+
+| Key | Meaning |
+|---|---|
+| `Chain` | `algorand-mainnet`, `algorand-testnet` or `voi`. One process serves one chain. |
+| `Storage:Provider` | `PostgreSql` (Cassandra is not implemented yet). Only the selected provider is opened. |
+| `Storage:PostgreSql:ConnectionString` | Required for PostgreSQL. Keep it in a secret. |
+| `Storage:PostgreSql:AccountHashPartitions` | Hash partitions of the account effect table, 1 to 1024. Fixed per database. |
+| `Algorand:AlgodUrl` / `AlgodToken` | Algod node for the latest round and genesis. Defaults to a public endpoint. |
+| `Algorand:GossipHosts` | Archival gossip node URLs. Empty discovers them through DNS SRV. Use your own nodes in production. |
+| `Algorand:ExpectedGenesisHash` | Base64 genesis hash. Pinned for Algorand MainNet and TestNet, required for Voi. |
+| `Indexer:FetchConcurrency` | Blocks fetched in parallel ahead of the commit position. |
+
+## Tests
+
+```sh
+dotnet test AvmBalanceIndexer.slnx                    # everything; PostgreSQL runs in a Testcontainers container
+AVM_SKIP_LIVE_TESTS=1 dotnet test AvmBalanceIndexer.slnx   # without the network tests
+AVM_TEST_POSTGRES="Host=...;Database=...;Username=...;Password=..." dotnet test ...   # use an existing server instead
+```
+
+The live tests fetch the first 1000 rounds of TestNet and MainNet from public archival nodes, index them into both
+providers and compare, for every round, the balance of every account the ledger changed with the ledger state delta from
+a public algod. They take a few minutes.
 
 ## API (v1)
 
-| Endpoint | Purpose |
-|---|---|
-| `GET /v1/{chain}/status` | indexed round, target round, lag, ingestion state |
-| `GET /v1/{chain}/accounts/{address}/tokens` | current holdings (`includeZero` for opted-in zero balances) |
-| `GET /v1/{chain}/accounts/{address}/tokens/{kind}/{tokenId}/balance?round=R` | end-of-round balance |
-| `GET /v1/{chain}/tokens/{kind}/{tokenId}/holders?round=R` | paginated end-of-round holders |
-| `GET /v1/{chain}/accounts/{address}/tokens/{kind}/{tokenId}/transactions` | account/token effect history |
-| `GET /v1/{chain}/tokens/{kind}/{tokenId}` | token metadata |
+| Endpoint | Purpose | State |
+|---|---|---|
+| `GET /v1/{chain}/status` | indexed round, target round, lag, ingestion state | available |
+| `GET /v1/{chain}/accounts/{address}/tokens` | current holdings | planned |
+| `GET /v1/{chain}/accounts/{address}/tokens/{kind}/{tokenId}/balance?round=R` | end-of-round balance | planned |
+| `GET /v1/{chain}/tokens/{kind}/{tokenId}/holders?round=R` | paginated end-of-round holders | planned |
+| `GET /v1/{chain}/accounts/{address}/tokens/{kind}/{tokenId}/transactions` | account/token effect history | planned |
+| `GET /v1/{chain}/tokens/{kind}/{tokenId}` | token metadata | planned |
 
-Every response carries `indexedRound`; requests for rounds beyond it are rejected explicitly.
+The storage contract behind these endpoints is implemented and tested; only the HTTP layer is missing.
 
-## Status
+## Known limitations
 
-Project scaffolding (issue #1). Storage implementations, ingestion and endpoints are tracked in follow-up issues.
+- Indexing speed is about 60 rounds per second with default settings, which is far too slow to backfill MainNet in a
+  reasonable time. Batching and fetch tuning are follow-up work.
+- Only one worker may run per chain. There is no leader election yet.
+- Block hashes are taken from the certificate digest; certificate signatures are not verified. Treat gossip hosts as
+  trusted and run your own archival nodes.
+- Proposer payouts are implemented from the block header but have not been verified against a payout-era chain.
+- Transaction effects other than native payments, fees, rewards and closes (assets, applications) are not indexed.
 
 ## License
 

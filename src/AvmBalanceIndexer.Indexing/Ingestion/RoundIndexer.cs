@@ -1,0 +1,195 @@
+using AvmBalanceIndexer.Domain.Chains;
+using AvmBalanceIndexer.Domain.Effects;
+using AvmBalanceIndexer.Domain.Storage;
+using AvmBalanceIndexer.Domain.Tokens;
+using AvmBalanceIndexer.Indexing.Adapters;
+using AvmBalanceIndexer.Indexing.Normalization;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+
+namespace AvmBalanceIndexer.Indexing.Ingestion;
+
+/// <summary>Outcome of one <see cref="RoundIndexer.RunAsync"/> call.</summary>
+public sealed record IndexingResult(ulong FirstRound, ulong LastRound, long RoundsIndexed, long EffectsWritten);
+
+/// <summary>
+/// Indexes one chain in round order: bootstraps genesis balances as round 0, then fetches blocks with bounded
+/// parallelism, derives effects, and commits each round through the storage provider. The published cursor
+/// (round and block hash) advances only as part of the round commit, and each block must link to the previous one.
+/// </summary>
+public sealed partial class RoundIndexer(
+    IChainAdapter adapter,
+    IEffectNormalizer normalizer,
+    IChainStorage storage,
+    IOptions<IndexerOptions> options,
+    ILogger<RoundIndexer> logger,
+    TimeProvider? timeProvider = null)
+{
+    private readonly IndexerOptions _options = options.Value;
+    private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
+
+    /// <summary>
+    /// Indexes from the stored cursor onwards.
+    /// </summary>
+    /// <param name="stopAfterRound">
+    /// Last round to index. When null the indexer follows the chain tip until cancelled.
+    /// </param>
+    /// <param name="cancellationToken">Stops indexing; the last committed round stays published.</param>
+    /// <exception cref="ChainDivergenceException">A block does not link to the published chain.</exception>
+    public async Task<IndexingResult> RunAsync(ulong? stopAfterRound, CancellationToken cancellationToken)
+    {
+        var chain = adapter.Profile.Chain;
+        var status = await storage.GetAsync(chain, cancellationToken).ConfigureAwait(false);
+        RewardsState rewards;
+        if (status is null)
+        {
+            (status, rewards) = await BootstrapGenesisAsync(stopAfterRound, cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            rewards = await SeedRewardsAsync(status, cancellationToken).ConfigureAwait(false);
+        }
+
+        var tracker = new BalanceTracker(storage, _options.BalanceCacheEntries);
+        var next = status.IndexedRound + 1;
+        var first = next;
+        long rounds = 0, effects = 0;
+
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var latest = await adapter.GetLatestRoundAsync(cancellationToken).ConfigureAwait(false);
+            var target = stopAfterRound is { } stop ? stop : latest;
+
+            if (next > target)
+            {
+                if (stopAfterRound is not null)
+                {
+                    break;
+                }
+
+                await Task.Delay(_options.FollowPollInterval, _time, cancellationToken).ConfigureAwait(false);
+                continue;
+            }
+
+            try
+            {
+                await foreach (var block in OrderedPrefetch.StreamAsync(
+                    next, target, _options.FetchConcurrency, adapter.FetchBlockAsync, cancellationToken).ConfigureAwait(false))
+                {
+                    var written = await IndexBlockAsync(chain, tracker, status, rewards, block, Math.Max(latest, target), cancellationToken).ConfigureAwait(false);
+                    status = written.Status;
+                    rewards = RewardsState.FromHeader(block.Block);
+                    next = block.Round + 1;
+                    rounds++;
+                    effects += written.EffectCount;
+
+                    if (rounds % _options.LogEveryRounds == 0)
+                    {
+                        LogProgress(logger, chain, block.Round, target);
+                    }
+                }
+            }
+            catch (BlockNotAvailableException ex) when (stopAfterRound is null)
+            {
+                // At the tip the archival nodes may not have the newest block yet; wait and ask again.
+                LogWaitingForBlock(logger, ex.Round);
+                await Task.Delay(_options.FollowPollInterval, _time, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        return new IndexingResult(first, status.IndexedRound, rounds, effects);
+    }
+
+    private async Task<(ChainStatus Status, RewardsState Rewards)> BootstrapGenesisAsync(ulong? stopAfterRound, CancellationToken cancellationToken)
+    {
+        var profile = adapter.Profile;
+        var genesis = await adapter.GetGenesisAsync(cancellationToken).ConfigureAwait(false);
+        if (!string.Equals(genesis.Id, profile.GenesisId, StringComparison.Ordinal))
+        {
+            throw new InvalidDataException($"Algod serves genesis \"{genesis.Id}\" but chain {profile.Chain} expects \"{profile.GenesisId}\".");
+        }
+
+        // Block 1 links back to the genesis block hash, which becomes the round 0 cursor hash.
+        var firstBlock = await adapter.FetchBlockAsync(1, cancellationToken).ConfigureAwait(false);
+
+        var effects = genesis.Accounts
+            .Where(static a => a.Balance > 0)
+            .Select((account, ordinal) => new TokenEffect(
+                new EffectId(0, 0, string.Empty, [], ordinal),
+                account.Address,
+                TokenKey.Native,
+                EffectType.Genesis,
+                account.Balance,
+                Amount.From(account.Balance),
+                null))
+            .ToArray();
+
+        await storage.UpsertAsync(
+            new TokenInfo(TokenKey.Native, null, 6, profile.NativeSymbol, profile.NativeName, TokenStandard.Native, true, null, 0, null, null),
+            cancellationToken).ConfigureAwait(false);
+
+        var status = new ChainStatus(profile.Chain, 0, firstBlock.PreviousHash, stopAfterRound, IngestionState.Bootstrapping, _time.GetUtcNow());
+        await storage.WriteRoundAsync(status, effects, cancellationToken).ConfigureAwait(false);
+        LogGenesis(logger, profile.Chain, effects.Length);
+        return (status, new RewardsState(0, 0, RewardsState.FromHeader(firstBlock.Block).Rate));
+    }
+
+    /// <summary>
+    /// Rebuilds the rewards state of the last published block when resuming. The block is re-fetched, which also
+    /// proves that the archival source still serves the chain the database was built from.
+    /// </summary>
+    private async Task<RewardsState> SeedRewardsAsync(ChainStatus status, CancellationToken cancellationToken)
+    {
+        var seedRound = Math.Max(status.IndexedRound, 1UL);
+        var seed = await adapter.FetchBlockAsync(seedRound, cancellationToken).ConfigureAwait(false);
+        if (status.IndexedRound == 0)
+        {
+            return new RewardsState(0, 0, RewardsState.FromHeader(seed.Block).Rate);
+        }
+
+        return seed.Hash.AsSpan().SequenceEqual(status.IndexedBlockHash.Span)
+            ? RewardsState.FromHeader(seed.Block)
+            : throw new ChainDivergenceException(
+                $"The archival source serves a different block {status.IndexedRound} than the one published. The database must be rebuilt.");
+    }
+
+    private async Task<(ChainStatus Status, int EffectCount)> IndexBlockAsync(
+        string chain,
+        BalanceTracker tracker,
+        ChainStatus previous,
+        RewardsState previousRewards,
+        BlockData block,
+        ulong targetRound,
+        CancellationToken cancellationToken)
+    {
+        if (block.Round != previous.IndexedRound + 1)
+        {
+            throw new ChainDivergenceException($"Expected round {previous.IndexedRound + 1} but received {block.Round}.");
+        }
+
+        if (!block.PreviousHash.AsSpan().SequenceEqual(previous.IndexedBlockHash.Span))
+        {
+            throw new ChainDivergenceException(
+                $"Round {block.Round} does not link to the published round {previous.IndexedRound}. The database must be rebuilt.");
+        }
+
+        var deltas = normalizer.Normalize(block, previousRewards);
+        var round = await tracker.ApplyAsync(deltas, cancellationToken).ConfigureAwait(false);
+
+        var state = targetRound - block.Round <= (ulong)_options.FollowingThresholdRounds ? IngestionState.Following : IngestionState.Backfilling;
+        var status = new ChainStatus(chain, block.Round, block.Hash, targetRound, state, _time.GetUtcNow());
+        await storage.WriteRoundAsync(status, round.Effects, cancellationToken).ConfigureAwait(false);
+        tracker.Commit(round);
+        return (status, round.Effects.Count);
+    }
+
+    [LoggerMessage(EventId = 1200, Level = LogLevel.Information, Message = "{Chain}: indexed round {Round} of {Target}")]
+    private static partial void LogProgress(ILogger logger, string chain, ulong round, ulong target);
+
+    [LoggerMessage(EventId = 1201, Level = LogLevel.Information, Message = "{Chain}: genesis applied with {Accounts} funded accounts")]
+    private static partial void LogGenesis(ILogger logger, string chain, int accounts);
+
+    [LoggerMessage(EventId = 1202, Level = LogLevel.Debug, Message = "Block {Round} is not available on archival nodes yet; waiting")]
+    private static partial void LogWaitingForBlock(ILogger logger, ulong round);
+}

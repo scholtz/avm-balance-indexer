@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Shared test helpers: in-memory reference storage provider, synthetic chains and fixtures.</Description>
+    <IsTestProject>false</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Testcontainers.PostgreSql" />
+    <PackageReference Include="xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\AvmBalanceIndexer.Domain\AvmBalanceIndexer.Domain.csproj" />
+    <ProjectReference Include="..\..\src\AvmBalanceIndexer.Indexing\AvmBalanceIndexer.Indexing.csproj" />
+    <ProjectReference Include="..\..\src\AvmBalanceIndexer.Storage.PostgreSql\AvmBalanceIndexer.Storage.PostgreSql.csproj" />
+  </ItemGroup>
+
+</Project>

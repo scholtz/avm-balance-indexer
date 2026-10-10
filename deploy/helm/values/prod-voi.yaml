@@ -1,10 +1,11 @@
 chain: voi
 storage:
-  provider: Cassandra
-  cassandra:
-    contactPoints: ["cassandra-voi-dc1-service.avm-voi.svc"]
-    keyspace: avm_voi
-    localDatacenter: dc1
-    existingSecret: avm-voi-cassandra
+  # The Cassandra provider is not implemented yet (see the follow-up issue); switch back once it ships.
+  provider: PostgreSql
+  postgreSql:
+    existingSecret: avm-voi-postgres
+algorand:
+  # Verify Voi genesis hash and archival endpoints first, then pin the hash here. The indexer refuses to start without it.
+  expectedGenesisHash: ""
 api:
   replicaCount: 3

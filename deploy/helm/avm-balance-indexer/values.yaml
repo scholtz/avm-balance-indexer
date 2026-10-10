@@ -32,16 +32,21 @@ api:
     minAvailable: 1
 
 worker:
-  # Single active ordered writer per chain. >1 replica requires leader election (follow-up).
+  # Single active ordered writer per chain. Keep at 1: leader election for failover is not implemented yet.
   replicaCount: 1
   resources:
     requests: { cpu: 500m, memory: 512Mi }
     limits: { cpu: "2", memory: 2Gi }
 
-blockSource:
-  # Algorand-compatible archival node / Conduit endpoint for this chain.
+algorand:
+  # Algod node used for the latest round and the genesis allocations. Empty uses the chain public endpoint.
   algodUrl: ""
-  existingSecret: ""   # key "token"
+  # Archival gossip nodes (for example http://archive.internal:4160). Empty discovers them through the DNS SRV record.
+  gossipHosts: []
+  # Base64 genesis hash the chain must present. Pinned for Algorand MainNet/TestNet; REQUIRED for voi.
+  expectedGenesisHash: ""
+  # Secret with key "token" holding the algod API token, if the node needs one.
+  existingSecret: ""
 
 networkPolicy:
   enabled: true

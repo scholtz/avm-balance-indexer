@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/AvmBalanceIndexer.Api/AvmBalanceIndexer.Api.csproj" />
     <Project Path="src/AvmBalanceIndexer.Domain/AvmBalanceIndexer.Domain.csproj" />
+    <Project Path="src/AvmBalanceIndexer.Hosting/AvmBalanceIndexer.Hosting.csproj" />
     <Project Path="src/AvmBalanceIndexer.Indexing/AvmBalanceIndexer.Indexing.csproj" />
     <Project Path="src/AvmBalanceIndexer.Storage.Cassandra/AvmBalanceIndexer.Storage.Cassandra.csproj" />
     <Project Path="src/AvmBalanceIndexer.Storage.PostgreSql/AvmBalanceIndexer.Storage.PostgreSql.csproj" />
@@ -9,6 +10,10 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/AvmBalanceIndexer.Domain.Tests/AvmBalanceIndexer.Domain.Tests.csproj" />
+    <Project Path="tests/AvmBalanceIndexer.Hosting.Tests/AvmBalanceIndexer.Hosting.Tests.csproj" />
+    <Project Path="tests/AvmBalanceIndexer.Indexing.Tests/AvmBalanceIndexer.Indexing.Tests.csproj" />
+    <Project Path="tests/AvmBalanceIndexer.Live.Tests/AvmBalanceIndexer.Live.Tests.csproj" />
     <Project Path="tests/AvmBalanceIndexer.Storage.ContractTests/AvmBalanceIndexer.Storage.ContractTests.csproj" />
+    <Project Path="tests/AvmBalanceIndexer.TestSupport/AvmBalanceIndexer.TestSupport.csproj" />
   </Folder>
 </Solution>

@@ -20,11 +20,11 @@
 {{- else }}
 {{- fail (printf "unsupported storage.provider %q" .Values.storage.provider) }}
 {{- end }}
-{{- if .Values.blockSource.existingSecret }}
-- name: BlockSource__Token
+{{- if .Values.algorand.existingSecret }}
+- name: Algorand__AlgodToken
   valueFrom:
     secretKeyRef:
-      name: {{ .Values.blockSource.existingSecret }}
+      name: {{ .Values.algorand.existingSecret }}
       key: token
 {{- end }}
 {{- end -}}

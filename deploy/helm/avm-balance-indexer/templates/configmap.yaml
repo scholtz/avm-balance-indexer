@@ -12,4 +12,8 @@ data:
   {{- range $i, $cp := .Values.storage.cassandra.contactPoints }}
   Storage__Cassandra__ContactPoints__{{ $i }}: {{ $cp | quote }}
   {{- end }}
-  BlockSource__AlgodUrl: {{ .Values.blockSource.algodUrl | quote }}
+  Algorand__AlgodUrl: {{ .Values.algorand.algodUrl | quote }}
+  Algorand__ExpectedGenesisHash: {{ .Values.algorand.expectedGenesisHash | quote }}
+  {{- range $i, $host := .Values.algorand.gossipHosts }}
+  Algorand__GossipHosts__{{ $i }}: {{ $host | quote }}
+  {{- end }}

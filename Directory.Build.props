@@ -27,4 +27,10 @@
     <NoWarn>$(NoWarn);CA1707;CS1591</NoWarn>
   </PropertyGroup>
 
+  <PropertyGroup Condition="$(MSBuildProjectName.EndsWith('TestSupport'))">
+    <IsPackable>false</IsPackable>
+    <!-- Shared test code follows test naming conventions and needs no XML docs. -->
+    <NoWarn>$(NoWarn);CA1707;CS1591</NoWarn>
+  </PropertyGroup>
+
 </Project>

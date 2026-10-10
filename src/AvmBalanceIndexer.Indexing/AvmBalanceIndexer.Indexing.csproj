@@ -1,11 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <Description>Chain adapters, effect normalization and replayable round ingestion.</Description>
+    <Description>Chain adapters (Algorand5 gossip block fetcher), effect normalization and replayable round ingestion.</Description>
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Algorand5" />
+    <PackageReference Include="MessagePack" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Options" />
   </ItemGroup>
 
   <ItemGroup>

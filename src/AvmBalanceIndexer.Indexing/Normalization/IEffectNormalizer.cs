@@ -3,8 +3,11 @@ using AvmBalanceIndexer.Indexing.Adapters;
 
 namespace AvmBalanceIndexer.Indexing.Normalization;
 
-/// <summary>Derives deterministic <see cref="TokenEffect"/>s from a block, including inner transactions and ARC-200 logs.</summary>
+/// <summary>Derives deterministic balance deltas from a block, including inner transactions.</summary>
 public interface IEffectNormalizer
 {
-    IReadOnlyList<TokenEffect> Normalize(RawBlock block);
+    /// <summary>Returns the deltas in ledger execution order with deterministic effect ids.</summary>
+    /// <param name="block">The block to process.</param>
+    /// <param name="previousRewards">Rewards state of the previous block, needed for the rewards pool withdrawal.</param>
+    IReadOnlyList<BalanceDelta> Normalize(BlockData block, RewardsState previousRewards);
 }

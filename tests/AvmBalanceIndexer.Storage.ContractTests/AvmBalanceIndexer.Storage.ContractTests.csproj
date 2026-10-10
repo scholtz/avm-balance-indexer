@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <Description>Provider-agnostic storage contract suite; runs against PostgreSQL and Cassandra in CI.</Description>
+    <Description>Provider-agnostic storage contract suite; runs against the in-memory reference and PostgreSQL.</Description>
   </PropertyGroup>
 
   <ItemGroup>
@@ -12,9 +12,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\AvmBalanceIndexer.Domain\AvmBalanceIndexer.Domain.csproj" />
-    <ProjectReference Include="..\..\src\AvmBalanceIndexer.Storage.PostgreSql\AvmBalanceIndexer.Storage.PostgreSql.csproj" />
-    <ProjectReference Include="..\..\src\AvmBalanceIndexer.Storage.Cassandra\AvmBalanceIndexer.Storage.Cassandra.csproj" />
+    <ProjectReference Include="..\AvmBalanceIndexer.TestSupport\AvmBalanceIndexer.TestSupport.csproj" />
   </ItemGroup>
 
   <ItemGroup>
