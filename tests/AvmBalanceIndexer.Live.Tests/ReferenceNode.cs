@@ -24,6 +24,8 @@ public sealed class ReferenceNode : IDisposable
 
     public static ReferenceNode TestNet() => new("https://testnet-api.4160.nodely.dev", "https://testnet-idx.4160.nodely.dev");
 
+    public static ReferenceNode Voi() => new("https://mainnet-api.voi.nodely.dev", "https://mainnet-idx.voi.nodely.dev");
+
     public static ReferenceNode MainNet() => new("https://mainnet-api.4160.nodely.dev", "https://mainnet-idx.4160.nodely.dev");
 
     public static string Encode(Address address) => new Algorand.Address(address.ToArray()).EncodeAsString();

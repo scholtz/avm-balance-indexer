@@ -40,12 +40,11 @@ public sealed record ChainProfile(
             "https://testnet-api.4160.nodely.dev",
             "ALGO",
             "Algo"),
-        // Voi's genesis hash must be configured explicitly: it has not been verified against this indexer yet.
         ChainId.Voi => new ChainProfile(
             chain,
             GossipNetwork.VoiMainNet,
             GossipHttpConfiguration.GetGenesisId(GossipNetwork.VoiMainNet),
-            null,
+            "r20fSQI8gWe/kFZziNonSPCXLwcQmH/nxROvnnueWOk=",
             "https://mainnet-api.voi.nodely.dev",
             "VOI",
             "Voi"),

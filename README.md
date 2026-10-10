@@ -10,12 +10,12 @@ Full design: [PRODUCT-DESCRIPTION.md](PRODUCT-DESCRIPTION.md). Decisions: [docs/
 
 | Area | State |
 |---|---|
-| Native token (ALGO/VOI) indexing from archival nodes | Done. Verified against the ledger for the first 1000 rounds of TestNet and MainNet. |
+| Native token (ALGO/VOI) indexing from archival nodes | Done. Verified against the ledger for the first 1000 rounds of TestNet and MainNet, and against the public indexer for Voi. |
 | PostgreSQL provider | Done: schema, atomic round writer, current and historical balances, holders, history. |
 | Cassandra provider | Schema only. Selecting it fails at startup. |
 | ASA, ARC-20, ARC-200 effects | Not started. |
 | Read API | `/v1/{chain}/status` only. |
-| Voi | Needs a verified genesis hash before it can be indexed (`Algorand:ExpectedGenesisHash`). |
+| Voi | Genesis pinned and verified; first 1000 rounds indexed (they contain no balance-moving transactions). |
 
 ## How indexing works
 
@@ -24,9 +24,11 @@ Full design: [PRODUCT-DESCRIPTION.md](PRODUCT-DESCRIPTION.md). Decisions: [docs/
    timeouts, backoff and validation on top of the SDK client. The latest round comes from an algod node.
 2. **Effects.** Each block is turned into exact, ordered native balance changes: payments, fees, realized rewards,
    close-outs, inner transactions, proposer payouts, the per-round rewards pool withdrawal and known ledger hotfixes.
-3. **Storage.** The ordered indexer computes the running balance after each effect and commits a whole round in one
+3. **Trust.** The genesis file served by algod must hash to the pinned genesis hash, and every block header must hash to its
+   certificate digest and link to the previous block. The starting balances and the blocks therefore belong to one chain.
+4. **Storage.** The ordered indexer computes the running balance after each effect and commits a whole round in one
    PostgreSQL transaction together with the publication cursor. A block must link to the previously published block hash.
-4. **Resume.** Restarting continues from the stored cursor and re-checks the cursor block against the archival source.
+5. **Resume.** Restarting continues from the stored cursor and re-checks the cursor block against the archival source.
 
 ## Repository layout
 
@@ -81,7 +83,7 @@ curl http://localhost:5000/v1/algorand-testnet/status
 | `Storage:PostgreSql:AccountHashPartitions` | Hash partitions of the account effect table, 1 to 1024. Fixed per database. |
 | `Algorand:AlgodUrl` / `AlgodToken` | Algod node for the latest round and genesis. Defaults to a public endpoint. |
 | `Algorand:GossipHosts` | Archival gossip node URLs. Empty discovers them through DNS SRV. Use your own nodes in production. |
-| `Algorand:ExpectedGenesisHash` | Base64 genesis hash. Pinned for Algorand MainNet and TestNet, required for Voi. |
+| `Algorand:ExpectedGenesisHash` | Base64 genesis hash. Pinned for Algorand MainNet, TestNet and Voi; set it only for another network. |
 | `Indexer:FetchConcurrency` | Blocks fetched in parallel ahead of the commit position. |
 
 ## Tests
@@ -92,9 +94,10 @@ AVM_SKIP_LIVE_TESTS=1 dotnet test AvmBalanceIndexer.slnx   # without the network
 AVM_TEST_POSTGRES="Host=...;Database=...;Username=...;Password=..." dotnet test ...   # use an existing server instead
 ```
 
-The live tests fetch the first 1000 rounds of TestNet and MainNet from public archival nodes, index them into both
-providers and compare, for every round, the balance of every account the ledger changed with the ledger state delta from
-a public algod. They take a few minutes.
+The live tests fetch the first 1000 rounds of TestNet, MainNet and Voi from public archival nodes and index them. For
+TestNet and MainNet, into both providers, they compare for every round the balance of every account the ledger changed with
+the ledger state delta from a public algod. Voi publishes no historical deltas, so it is checked against a public indexer.
+They take a few minutes.
 
 ## API (v1)
 
@@ -111,6 +114,8 @@ The storage contract behind these endpoints is implemented and tested; only the 
 
 ## Known limitations
 
+- Historical holder queries aggregate all effects of a token on every page. That is fine for tests and small tokens but
+  will not scale to MainNet ALGO; asynchronous scans are planned.
 - Indexing speed is about 60 rounds per second with default settings, which is far too slow to backfill MainNet in a
   reasonable time. Batching and fetch tuning are follow-up work.
 - Only one worker may run per chain. There is no leader election yet.

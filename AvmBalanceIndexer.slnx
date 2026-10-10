@@ -9,6 +9,7 @@
     <Project Path="src/AvmBalanceIndexer.Worker/AvmBalanceIndexer.Worker.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/AvmBalanceIndexer.Api.Tests/AvmBalanceIndexer.Api.Tests.csproj" />
     <Project Path="tests/AvmBalanceIndexer.Domain.Tests/AvmBalanceIndexer.Domain.Tests.csproj" />
     <Project Path="tests/AvmBalanceIndexer.Hosting.Tests/AvmBalanceIndexer.Hosting.Tests.csproj" />
     <Project Path="tests/AvmBalanceIndexer.Indexing.Tests/AvmBalanceIndexer.Indexing.Tests.csproj" />

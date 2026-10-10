@@ -8,6 +8,7 @@ public class ChainProfileTests
     [Theory]
     [InlineData(ChainId.AlgorandMainnet, "mainnet-v1.0", "wGHE2Pwdvd7S12BL5FaOP20EGYesN73ktiC1qzkkit8=")]
     [InlineData(ChainId.AlgorandTestnet, "testnet-v1.0", "SGO1GKSzyE7IEPItTxCByw9x8FmnrCDexi9/cOUJOiI=")]
+    [InlineData(ChainId.Voi, "voimain-v1.0", "r20fSQI8gWe/kFZziNonSPCXLwcQmH/nxROvnnueWOk=")]
     public void Algorand_Networks_Pin_Their_Genesis(string chain, string genesisId, string genesisHash)
     {
         var profile = ChainProfile.For(chain);
@@ -17,13 +18,16 @@ public class ChainProfileTests
     }
 
     [Fact]
-    public void Voi_Does_Not_Pin_A_Genesis_Hash_Until_It_Is_Verified()
+    public void A_Chain_Without_A_Pinned_Genesis_Hash_Must_Be_Configured_Explicitly()
     {
-        var profile = ChainProfile.For(ChainId.Voi);
+        var unpinned = ChainProfile.For(ChainId.Voi) with { GenesisHash = null };
+        var options = new AlgorandChainOptions { Chain = ChainId.Voi };
 
-        Assert.Null(profile.GenesisHash);
-        Assert.Equal("voimain-v1.0", profile.GenesisId);
-        Assert.Equal("VOI", profile.NativeSymbol);
+        var error = Assert.Throws<InvalidOperationException>(() => AlgorandChainFactory.ResolveGenesisHash(unpinned, options));
+
+        Assert.Contains("ExpectedGenesisHash", error.Message, StringComparison.Ordinal);
+        options.ExpectedGenesisHash = Convert.ToBase64String(new byte[32]);
+        Assert.Equal(new byte[32], AlgorandChainFactory.ResolveGenesisHash(unpinned, options));
     }
 
     [Fact]

@@ -30,13 +30,17 @@ public static class BlockDecoder
 
         CertifiedBlock certified;
         IReadOnlyList<TxnApplyData> apply;
+        byte[] computedHash;
         try
         {
             certified = Encoder.DecodeFromMsgPack<CertifiedBlock>(payload);
             apply = ApplyDataReader.ReadBlockTransactions(payload);
+            computedHash = BlockHashCalculator.Compute(payload);
         }
-        catch (Exception ex) when (ex is MessagePack.MessagePackSerializationException or InvalidDataException or EndOfStreamException or InvalidOperationException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            // Whatever the SDK or the readers throw for garbage input, it is this host response that is bad: the
+            // fetcher retries other hosts instead of the process failing.
             throw new BlockValidationException($"Round {expectedRound}: response is not a decodable block.", ex);
         }
 
@@ -65,7 +69,7 @@ public static class BlockDecoder
         }
 
         var hash = RequireHash(cert.Prop?.Dig, "certified proposal digest", expectedRound);
-        if (!BlockHashCalculator.Compute(payload).AsSpan().SequenceEqual(hash))
+        if (!computedHash.AsSpan().SequenceEqual(hash))
         {
             throw new BlockValidationException($"Round {expectedRound}: the block header does not hash to the certified digest.");
         }

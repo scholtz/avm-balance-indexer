@@ -5,33 +5,30 @@ namespace AvmBalanceIndexer.Storage.PostgreSql;
 
 public sealed partial class PostgreSqlChainStorage
 {
-    // Serializes concurrent bootstrap from several pods; any constant works as long as it is unique to this tool.
+    // Serializes concurrent schema changes from several pods; any constant works as long as it is unique to this tool.
     private const long SchemaLockKey = 0x41564D5F42414C21;
 
     public async Task EnsureSchemaAsync(CancellationToken cancellationToken)
     {
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-        await ExecuteAsync(connection, $"SELECT pg_advisory_lock({SchemaLockKey})", cancellationToken).ConfigureAwait(false);
-        try
-        {
-            foreach (var script in ReadEmbeddedScripts())
-            {
-                await ExecuteAsync(connection, script, cancellationToken).ConfigureAwait(false);
-            }
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        await LockSchemaAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
 
-            for (var remainder = 0; remainder < _accountPartitions; remainder++)
-            {
-                // Numbers only: the statement text contains no caller-supplied strings.
-                var statement = string.Create(
-                    CultureInfo.InvariantCulture,
-                    $"CREATE TABLE IF NOT EXISTS effects_by_account_token_p{remainder} PARTITION OF effects_by_account_token FOR VALUES WITH (MODULUS {_accountPartitions}, REMAINDER {remainder})");
-                await ExecuteAsync(connection, statement, cancellationToken).ConfigureAwait(false);
-            }
-        }
-        finally
+        foreach (var script in ReadEmbeddedScripts())
         {
-            await ExecuteAsync(connection, $"SELECT pg_advisory_unlock({SchemaLockKey})", CancellationToken.None).ConfigureAwait(false);
+            await ExecuteAsync(connection, transaction, script, cancellationToken).ConfigureAwait(false);
         }
+
+        for (var remainder = 0; remainder < _accountPartitions; remainder++)
+        {
+            // Numbers only: the statement text contains no caller-supplied strings.
+            var statement = string.Create(
+                CultureInfo.InvariantCulture,
+                $"CREATE TABLE IF NOT EXISTS effects_by_account_token_p{remainder} PARTITION OF effects_by_account_token FOR VALUES WITH (MODULUS {_accountPartitions}, REMAINDER {remainder})");
+            await ExecuteAsync(connection, transaction, statement, cancellationToken).ConfigureAwait(false);
+        }
+
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Creates the range partition of the token-oriented effect table that holds a round bucket.</summary>
@@ -49,20 +46,26 @@ public sealed partial class PostgreSqlChainStorage
             CultureInfo.InvariantCulture,
             $"CREATE TABLE IF NOT EXISTS effects_by_token_bucket_b{bucket} PARTITION OF effects_by_token_bucket FOR VALUES FROM ({bucket}) TO ({bucket + 1})");
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-        await ExecuteAsync(connection, $"SELECT pg_advisory_lock({SchemaLockKey})", cancellationToken).ConfigureAwait(false);
-        try
-        {
-            await ExecuteAsync(connection, statement, cancellationToken).ConfigureAwait(false);
-        }
-        finally
-        {
-            await ExecuteAsync(connection, $"SELECT pg_advisory_unlock({SchemaLockKey})", CancellationToken.None).ConfigureAwait(false);
-        }
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        await LockSchemaAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
+        await ExecuteAsync(connection, transaction, statement, cancellationToken).ConfigureAwait(false);
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
 
         lock (_knownBuckets)
         {
             _knownBuckets.Add(bucket);
         }
+    }
+
+    /// <summary>
+    /// Takes the schema lock for the rest of the transaction. A transaction-scoped lock is released by commit or rollback
+    /// (including a broken connection), so there is nothing to release in a finally block that could hide the real error.
+    /// </summary>
+    private static async Task LockSchemaAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, CancellationToken cancellationToken)
+    {
+        await using var command = new NpgsqlCommand("SELECT pg_advisory_xact_lock(@key)", connection, transaction);
+        command.Parameters.AddWithValue("key", SchemaLockKey);
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private static IEnumerable<string> ReadEmbeddedScripts()
@@ -79,9 +82,9 @@ public sealed partial class PostgreSqlChainStorage
         }
     }
 
-    private static async Task ExecuteAsync(NpgsqlConnection connection, string sql, CancellationToken cancellationToken)
+    private static async Task ExecuteAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, string sql, CancellationToken cancellationToken)
     {
-        await using var command = new NpgsqlCommand(sql, connection);
+        await using var command = new NpgsqlCommand(sql, connection, transaction);
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 }

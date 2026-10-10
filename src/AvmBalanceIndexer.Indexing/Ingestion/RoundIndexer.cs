@@ -110,6 +110,14 @@ public sealed partial class RoundIndexer(
             throw new InvalidDataException($"Algod serves genesis \"{genesis.Id}\" but chain {profile.Chain} expects \"{profile.GenesisId}\".");
         }
 
+        // The round 0 balances come from this document, the blocks from the archival nodes. Requiring the document to hash to
+        // the pinned genesis hash (which every block header carries) ties the two sources to the same chain.
+        if (!genesis.Hash.AsSpan().SequenceEqual(adapter.GenesisHash.Span))
+        {
+            throw new InvalidDataException(
+                $"The genesis served by algod does not hash to the genesis hash pinned for chain {profile.Chain}. Check Algorand:AlgodUrl.");
+        }
+
         // Block 1 links back to the genesis block hash, which becomes the round 0 cursor hash.
         var firstBlock = await adapter.FetchBlockAsync(1, cancellationToken).ConfigureAwait(false);
 

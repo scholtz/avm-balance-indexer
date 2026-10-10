@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS chain_status (
 );
 
 CREATE TABLE IF NOT EXISTS token (
-  token_kind text NOT NULL,
+  token_kind text COLLATE "C" NOT NULL,
   token_id bigint NOT NULL,
   creator bytea,
   decimals smallint,
@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS token (
 
 CREATE TABLE IF NOT EXISTS holdings_by_account (
   account bytea NOT NULL,
-  token_kind text NOT NULL,
+  token_kind text COLLATE "C" NOT NULL,
   token_id bigint NOT NULL,
   amount numeric(20,0) NOT NULL,
   opted_in boolean NOT NULL,
@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS holdings_by_account (
 -- using Storage:PostgreSql:AccountHashPartitions.
 CREATE TABLE IF NOT EXISTS effects_by_account_token (
   account bytea NOT NULL,
-  token_kind text NOT NULL,
+  token_kind text COLLATE "C" NOT NULL,
   token_id bigint NOT NULL,
   round bigint NOT NULL,
   intra_round_order integer NOT NULL,
@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS effects_by_account_token (
 -- Duplicated token-oriented view, range-partitioned by bounded round bucket (see RoundBuckets).
 -- Bucket partitions are created ahead of ingestion by the round writer.
 CREATE TABLE IF NOT EXISTS effects_by_token_bucket (
-  token_kind text NOT NULL,
+  token_kind text COLLATE "C" NOT NULL,
   token_id bigint NOT NULL,
   bucket integer NOT NULL,
   round bigint NOT NULL,
@@ -77,7 +77,7 @@ CREATE TABLE IF NOT EXISTS effects_by_token_bucket (
 ) PARTITION BY RANGE (bucket);
 
 CREATE TABLE IF NOT EXISTS accounts_touched_by_token (
-  token_kind text NOT NULL,
+  token_kind text COLLATE "C" NOT NULL,
   token_id bigint NOT NULL,
   account bytea NOT NULL,
   first_round bigint NOT NULL,

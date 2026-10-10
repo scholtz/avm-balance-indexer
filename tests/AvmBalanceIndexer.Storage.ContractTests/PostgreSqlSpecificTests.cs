@@ -44,6 +44,35 @@ public class PostgreSqlSpecificTests(PostgresFixture postgres)
     }
 
     [Fact]
+    public async Task A_Database_Without_A_Schema_Reports_Nothing_Indexed_Instead_Of_Failing()
+    {
+        var storage = await postgres.CreateStorageAsync(applySchema: false);
+
+        Assert.Null(await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Token_Kinds_Sort_Bytewise_Whatever_The_Database_Collation()
+    {
+        var storage = await postgres.CreateStorageAsync();
+        var account = TestChain.Account(1);
+        await storage.WriteRoundAsync(
+            new ChainStatus(ChainId.AlgorandTestnet, 0, TestChain.FakeHash(0), null, IngestionState.Bootstrapping, DateTimeOffset.UnixEpoch),
+            [
+                Effect(0, 0, "a", account, 5, 5),
+                new TokenEffect(new EffectId(0, 0, "b", [], 1), account, TokenKey.Asa(7), EffectType.Genesis, 6, Amount.From(6), null),
+                new TokenEffect(new EffectId(0, 0, "c", [], 2), account, TokenKey.Arc200(3), EffectType.Genesis, 7, Amount.From(7), null),
+            ],
+            CancellationToken.None);
+
+        var first = await storage.GetHoldingsAsync(account, true, null, 2, CancellationToken.None);
+        var second = await storage.GetHoldingsAsync(account, true, first.NextCursor, 2, CancellationToken.None);
+
+        Assert.Equal(["algo:0", "arc200:3"], first.Items.Select(static h => h.Token.ToString()));
+        Assert.Equal(["asa:7"], second.Items.Select(static h => h.Token.ToString()));
+    }
+
+    [Fact]
     public async Task Schema_Bootstrap_Is_Idempotent()
     {
         var storage = await postgres.CreateStorageAsync();

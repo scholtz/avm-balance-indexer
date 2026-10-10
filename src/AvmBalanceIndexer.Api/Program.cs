@@ -1,12 +1,14 @@
+using AvmBalanceIndexer.Api;
 using AvmBalanceIndexer.Domain.Chains;
 using AvmBalanceIndexer.Domain.Storage;
 using AvmBalanceIndexer.Hosting;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddOpenApi();
-builder.Services.AddHealthChecks();
+builder.Services.AddHealthChecks().AddCheck<StorageHealthCheck>("storage", tags: ["ready"]);
 builder.Services.AddChainStorage(builder.Configuration);
 
 var app = builder.Build();
@@ -16,8 +18,9 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
-app.MapHealthChecks("/healthz/live");
-app.MapHealthChecks("/healthz/ready");
+// Liveness only proves the process responds; readiness also requires the database.
+app.MapHealthChecks("/healthz/live", new HealthCheckOptions { Predicate = static _ => false });
+app.MapHealthChecks("/healthz/ready", new HealthCheckOptions { Predicate = static check => check.Tags.Contains("ready") });
 
 // One process serves exactly one chain; requests for any other chain are rejected explicitly.
 var v1 = app.MapGroup("/v1/{chain}")
@@ -51,3 +54,5 @@ v1.MapGet(
     .WithName("GetChainStatus");
 
 app.Run();
+
+public partial class Program;

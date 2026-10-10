@@ -335,6 +335,18 @@ public abstract class StorageContractTests
     }
 
     [Fact]
+    public async Task A_Genesis_That_Does_Not_Hash_To_The_Pinned_Hash_Is_Refused_Before_Anything_Is_Written()
+    {
+        var storage = await CreateStorageAsync();
+        var adapter = new FakeChainAdapter(Chain.Profile, Genesis with { Hash = new byte[32] });
+
+        var error = await Assert.ThrowsAsync<InvalidDataException>(() => CreateIndexer(storage, adapter).RunAsync(1, CancellationToken.None));
+
+        Assert.Contains("genesis", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Null(await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task Resuming_At_Genesis_Against_A_Different_First_Block_Is_Refused()
     {
         var storage = await CreateStorageAsync();

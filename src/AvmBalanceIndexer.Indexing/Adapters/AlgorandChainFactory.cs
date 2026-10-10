@@ -92,7 +92,7 @@ public static class AlgorandChainFactory
             algodHttp.Timeout = TimeSpan.FromSeconds(60);
 
             IDisposable[] resources = hosts is IDisposable disposableHosts ? [.. owned, disposableHosts] : owned;
-            return new AlgorandChainAdapter(profile, fetcher, algodHttp, resources);
+            return new AlgorandChainAdapter(profile, genesisHash, fetcher, algodHttp, resources);
         }
         catch
         {

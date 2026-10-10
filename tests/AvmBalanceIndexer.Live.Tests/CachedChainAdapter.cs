@@ -13,6 +13,8 @@ public sealed class CachedChainAdapter(IChainAdapter inner) : IChainAdapter
 
     public ChainProfile Profile => inner.Profile;
 
+    public ReadOnlyMemory<byte> GenesisHash => inner.GenesisHash;
+
     public Task<ulong> GetLatestRoundAsync(CancellationToken cancellationToken) => inner.GetLatestRoundAsync(cancellationToken);
 
     public Task<GenesisDocument> GetGenesisAsync(CancellationToken cancellationToken) => inner.GetGenesisAsync(cancellationToken);

@@ -37,7 +37,8 @@ public static class Scenario
             new GenesisAccount(Bob, 10_000, "Bob"),
             new GenesisAccount(Chain.FeeSink, 100, "FeeSink"),
             new GenesisAccount(Chain.Pool, 5_000_000, "RewardsPool"),
-        ]);
+        ],
+        Chain.GenesisHash);
 
     /// <summary>Rewards header state at the end of each round (rate 1,000; 1,500 reward units).</summary>
     public static RewardsState RewardsAt(ulong round) => round switch

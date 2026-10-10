@@ -41,8 +41,8 @@ public sealed class PostgresFixture : IAsyncLifetime
         }
     }
 
-    /// <summary>Creates an empty database, applies the schema and returns the storage bound to it.</summary>
-    public async Task<PostgreSqlChainStorage> CreateStorageAsync(string chain = ChainId.AlgorandTestnet, int accountPartitions = 4)
+    /// <summary>Creates an empty database, applies the schema (unless told not to) and returns the storage bound to it.</summary>
+    public async Task<PostgreSqlChainStorage> CreateStorageAsync(string chain = ChainId.AlgorandTestnet, int accountPartitions = 4, bool applySchema = true)
     {
         var name = $"avm_test_{Environment.ProcessId}_{Interlocked.Increment(ref _databaseCounter)}_{Guid.NewGuid():N}";
         await using (var admin = new NpgsqlConnection(_adminConnectionString))
@@ -54,7 +54,11 @@ public sealed class PostgresFixture : IAsyncLifetime
 
         var connectionString = new NpgsqlConnectionStringBuilder(_adminConnectionString) { Database = name, Pooling = true, MaxPoolSize = 8 }.ConnectionString;
         var storage = new PostgreSqlChainStorage(NpgsqlDataSource.Create(connectionString), new ChainContext(chain), accountPartitions);
-        await storage.EnsureSchemaAsync(CancellationToken.None).ConfigureAwait(false);
+        if (applySchema)
+        {
+            await storage.EnsureSchemaAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+
         return storage;
     }
 }

@@ -10,6 +10,8 @@ public sealed class FakeChainAdapter(ChainProfile profile, GenesisDocument genes
 
     public ChainProfile Profile { get; } = profile;
 
+    public ReadOnlyMemory<byte> GenesisHash { get; } = Convert.FromBase64String(profile.GenesisHash!);
+
     /// <summary>The round reported as latest; defaults to the highest added block.</summary>
     public ulong? Latest { get; set; }
 

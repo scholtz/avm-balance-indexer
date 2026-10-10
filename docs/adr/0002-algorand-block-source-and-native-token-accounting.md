@@ -29,6 +29,10 @@ Algorand5 SDK to talk to the network. Three facts shaped the design.
   and required to equal the certificate proposal digest, so a block is only accepted when its header is the one the
   certificate names. Chain continuity: each block's previous hash must equal the published block hash. A mismatch is a
   `ChainDivergenceException` and stops the indexer. Resuming re-fetches the cursor block and compares its hash.
+- Authenticate the starting balances: the genesis document served by algod is re-encoded canonically (sorted keys, minimal
+  integers, base64 key material as binary) and hashed with the `GE` prefix. The result must equal the pinned genesis hash,
+  which every block header also carries, so the round 0 balances and the blocks provably come from one chain. This
+  reproduces the pinned hashes of Algorand MainNet and TestNet and the hash found in every Voi block.
 - Compute transaction ids from the canonical stored msgpack with the stripped genesis fields re-inserted in sorted key
   position. This is exact for every transaction type and independent of SDK model coverage. Verified against the
   public indexer for TestNet round 1.
@@ -49,10 +53,11 @@ Algorand5 SDK to talk to the network. Three facts shaped the design.
 ## Verification
 
 `tests/AvmBalanceIndexer.Live.Tests` indexes the first 1000 rounds of Algorand TestNet and MainNet into the in-memory
-reference and into PostgreSQL. For every round it compares the balance of every account the ledger changed with the
+reference and into PostgreSQL, and the first 1000 rounds of Voi into the in-memory reference. For every round it compares the balance of every account the ledger changed with the
 ledger state delta published by a public algod (`/v2/deltas/{round}`), checks that no indexed change lacks a ledger
 change, compares transaction ids and amounts with a public indexer, and verifies that resuming mid-chain gives
-identical balances.
+identical balances. Voi publishes no historical ledger deltas, so it is checked against the public indexer; its first 1000
+rounds contain only transactions without balance impact.
 
 ## Consequences
 

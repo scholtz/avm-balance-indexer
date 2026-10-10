@@ -23,5 +23,6 @@ helm upgrade --install avm-testnet deploy/helm/avm-balance-indexer \
 Each release runs one API deployment and one indexer worker. The worker fetches blocks from archival gossip nodes
 (`algorand.gossipHosts`, or DNS SRV discovery when empty) and asks an algod node for the latest round
 (`algorand.algodUrl`). For production, point both at your own archival nodes instead of the public endpoints.
-Voi has no pinned genesis hash: set `algorand.expectedGenesisHash` after verifying it, or the worker refuses to start.
+The genesis hash is pinned for Algorand MainNet, TestNet and Voi; the worker refuses to start if the algod genesis or any
+block does not match it. Set `algorand.expectedGenesisHash` only for another network.
 Keep `worker.replicaCount` at 1; the worker is the single ordered writer and has no leader election yet.

@@ -43,7 +43,7 @@ algorand:
   algodUrl: ""
   # Archival gossip nodes (for example http://archive.internal:4160). Empty discovers them through the DNS SRV record.
   gossipHosts: []
-  # Base64 genesis hash the chain must present. Pinned for Algorand MainNet/TestNet; REQUIRED for voi.
+  # Base64 genesis hash the chain must present. Pinned for Algorand MainNet, TestNet and Voi; leave empty to use the pin.
   expectedGenesisHash: ""
   # Secret with key "token" holding the algod API token, if the node needs one.
   existingSecret: ""

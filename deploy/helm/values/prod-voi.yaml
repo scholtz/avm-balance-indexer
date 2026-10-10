@@ -4,8 +4,5 @@ storage:
   provider: PostgreSql
   postgreSql:
     existingSecret: avm-voi-postgres
-algorand:
-  # Verify Voi genesis hash and archival endpoints first, then pin the hash here. The indexer refuses to start without it.
-  expectedGenesisHash: ""
 api:
   replicaCount: 3

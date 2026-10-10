@@ -21,7 +21,18 @@ public sealed partial class PostgreSqlChainStorage
         await using var command = new NpgsqlCommand(
             "SELECT indexed_round, indexed_block_hash, target_round, status, updated_at FROM chain_status WHERE chain = @chain", connection);
         command.Parameters.AddWithValue("chain", chain);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        NpgsqlDataReader reader;
+        try
+        {
+            reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UndefinedTable)
+        {
+            // The worker creates the schema; until it has, nothing is indexed.
+            return null;
+        }
+
+        await using var _ = reader.ConfigureAwait(false);
         if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
             return null;
@@ -161,8 +172,8 @@ public sealed partial class PostgreSqlChainStorage
             FROM holdings_by_account
             WHERE account = @account
               AND (@includeZero OR amount > 0)
-              AND (token_kind COLLATE "C", token_id) > (@afterKind COLLATE "C", @afterId)
-            ORDER BY token_kind COLLATE "C", token_id
+              AND (token_kind, token_id) > (@afterKind, @afterId)
+            ORDER BY token_kind, token_id
             LIMIT @limit
             """,
             connection,

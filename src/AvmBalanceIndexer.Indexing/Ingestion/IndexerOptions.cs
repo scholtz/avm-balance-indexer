@@ -3,7 +3,7 @@ using System.ComponentModel.DataAnnotations;
 namespace AvmBalanceIndexer.Indexing.Ingestion;
 
 /// <summary>Tuning for the ordered round indexer.</summary>
-public sealed class IndexerOptions
+public sealed class IndexerOptions : IValidatableObject
 {
     public const string SectionName = "Indexer";
 
@@ -31,7 +31,7 @@ public sealed class IndexerOptions
     public int MaxConsecutiveFailures { get; set; } = 30;
 
     /// <summary>First wait after a transient failure; doubled per failure without progress up to <see cref="RetryMaxBackoff"/>.</summary>
-    [Range(typeof(TimeSpan), "00:00:00", "00:10:00")]
+    [Range(typeof(TimeSpan), "00:00:00.001", "00:10:00")]
     public TimeSpan RetryInitialBackoff { get; set; } = TimeSpan.FromSeconds(2);
 
     [Range(typeof(TimeSpan), "00:00:00", "01:00:00")]
@@ -40,4 +40,14 @@ public sealed class IndexerOptions
     /// <summary>A round within this distance of the target counts as following the tip rather than backfilling.</summary>
     [Range(0, 10_000)]
     public int FollowingThresholdRounds { get; set; } = 50;
+
+    public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+    {
+        if (RetryMaxBackoff < RetryInitialBackoff)
+        {
+            yield return new ValidationResult(
+                "Indexer:RetryMaxBackoff must not be smaller than Indexer:RetryInitialBackoff.",
+                [nameof(RetryMaxBackoff)]);
+        }
+    }
 }

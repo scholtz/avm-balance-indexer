@@ -125,20 +125,51 @@ public class HostingExtensionsTests
     }
 
     [Fact]
-    public void Voi_Requires_An_Explicit_Genesis_Hash()
+    public void Voi_Uses_Its_Pinned_Genesis_Hash_Without_Extra_Configuration()
     {
-        var withoutHash = Config(("Chain", ChainId.Voi), ("Storage:Provider", "PostgreSql"), ("Storage:PostgreSql:ConnectionString", Connection));
-        using var failing = Build(withoutHash, indexing: true);
-        var error = Assert.Throws<OptionsValidationException>(() => failing.GetRequiredService<IOptions<AlgorandChainOptions>>().Value);
-        Assert.Contains("ExpectedGenesisHash", error.Message, StringComparison.Ordinal);
+        using var provider = Build(
+            Config(("Chain", ChainId.Voi), ("Storage:Provider", "PostgreSql"), ("Storage:PostgreSql:ConnectionString", Connection)),
+            indexing: true);
 
-        var withHash = Config(
-            ("Chain", ChainId.Voi),
-            ("Storage:Provider", "PostgreSql"),
-            ("Storage:PostgreSql:ConnectionString", Connection),
-            ("Algorand:ExpectedGenesisHash", Convert.ToBase64String(new byte[32])));
-        using var working = Build(withHash, indexing: true);
-        Assert.Equal(ChainId.Voi, working.GetRequiredService<IChainAdapter>().Profile.Chain);
+        var adapter = provider.GetRequiredService<IChainAdapter>();
+
+        Assert.Equal(ChainId.Voi, adapter.Profile.Chain);
+        Assert.Equal(Convert.FromBase64String("r20fSQI8gWe/kFZziNonSPCXLwcQmH/nxROvnnueWOk="), adapter.GenesisHash.ToArray());
+    }
+
+    [Theory]
+    [InlineData("not base64!!")]
+    [InlineData("AAAA")]
+    public void A_Malformed_Configured_Genesis_Hash_Is_Rejected(string hash)
+    {
+        using var provider = Build(
+            Config(
+                ("Chain", ChainId.AlgorandTestnet),
+                ("Storage:Provider", "PostgreSql"),
+                ("Storage:PostgreSql:ConnectionString", Connection),
+                ("Algorand:ExpectedGenesisHash", hash)),
+            indexing: true);
+
+        var error = Assert.Throws<OptionsValidationException>(() => provider.GetRequiredService<IOptions<AlgorandChainOptions>>().Value);
+
+        Assert.Contains("ExpectedGenesisHash", error.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("00:00:00", "00:01:00")]
+    [InlineData("00:00:10", "00:00:05")]
+    public void An_Impossible_Retry_Window_Is_Rejected(string initial, string max)
+    {
+        using var provider = Build(
+            Config(
+                ("Chain", ChainId.AlgorandTestnet),
+                ("Storage:Provider", "PostgreSql"),
+                ("Storage:PostgreSql:ConnectionString", Connection),
+                ("Indexer:RetryInitialBackoff", initial),
+                ("Indexer:RetryMaxBackoff", max)),
+            indexing: true);
+
+        Assert.Throws<OptionsValidationException>(() => provider.GetRequiredService<IOptions<IndexerOptions>>().Value);
     }
 
     [Fact]

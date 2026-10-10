@@ -9,7 +9,11 @@ namespace AvmBalanceIndexer.Indexing.Normalization;
 /// <param name="Rate">Base units added to the participation stake per round (header field <c>rate</c>).</param>
 public readonly record struct RewardsState(ulong Level, ulong Residue, ulong Rate)
 {
-    /// <summary>Protocols before v31 keep using the previous rate in the round the rate is recalculated.</summary>
+    /// <summary>
+    /// Protocols before v31 keep using the previous rate in the round the rate is recalculated. The list is complete for the
+    /// go-algorand lineage (v0 to v30); every later protocol inherits the fix, so unknown protocols are treated as fixed.
+    /// A network on a fork with its own older protocol strings would need its strings added here.
+    /// </summary>
     private static readonly HashSet<string> ProtocolsWithoutImmediateRate = new(StringComparer.Ordinal)
     {
         "v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9", "v10", "v11", "v12",

@@ -64,6 +64,19 @@ public class FirstThousandRoundsTests(PostgresFixture postgres)
         await IndexAndVerifyAsync(ChainId.AlgorandMainnet, storage, expectPayments: false);
     }
 
+    /// <summary>
+    /// Voi publishes no historical ledger deltas, so it is checked against what a public indexer reports. Its first 1000
+    /// rounds only contain transactions without balance impact, so this mainly proves the pinned genesis, block header hashes,
+    /// hash chaining and genesis balances. Its archival nodes are patchy, which the fetcher has to absorb by failing over.
+    /// </summary>
+    [LiveFact]
+    public async Task Voi_First_1000_Rounds_Match_The_Indexer_In_Memory()
+    {
+        var storage = new InMemoryChainStorage(new ChainContext(ChainId.Voi));
+
+        await IndexAndVerifyAsync(ChainId.Voi, storage, expectPayments: false, ledgerDeltas: false);
+    }
+
     [LiveFact]
     public async Task Resuming_Midway_Through_The_Real_Chain_Gives_The_Same_Balances()
     {
@@ -82,7 +95,7 @@ public class FirstThousandRoundsTests(PostgresFixture postgres)
         Assert.Equal(expected.Select(static h => (h.Account, h.Amount)), actual.Select(static h => (h.Account, h.Amount)));
     }
 
-    private static async Task IndexAndVerifyAsync(string chain, IChainStorage storage, bool expectPayments)
+    private static async Task IndexAndVerifyAsync(string chain, IChainStorage storage, bool expectPayments, bool ledgerDeltas = true)
     {
         var adapter = Adapter(chain);
         var result = await CreateIndexer(storage, adapter).RunAsync(Rounds, CancellationToken.None);
@@ -96,7 +109,11 @@ public class FirstThousandRoundsTests(PostgresFixture postgres)
         var holders = await AllHoldersAsync(storage, Rounds);
         Assert.Equal(genesis.Accounts.Count(static a => a.Balance > 0), holders.Count(h => genesis.Accounts.Any(a => a.Address == h.Account)));
 
-        await AssertEveryRoundMatchesTheLedgerAsync(chain, storage, holders);
+        if (ledgerDeltas)
+        {
+            await AssertEveryRoundMatchesTheLedgerAsync(chain, storage, holders);
+        }
+
         await AssertTransactionsMatchTheIndexerAsync(chain, storage, holders, expectPayments, genesis);
     }
 
@@ -142,7 +159,12 @@ public class FirstThousandRoundsTests(PostgresFixture postgres)
     private static async Task AssertTransactionsMatchTheIndexerAsync(string chain, IChainStorage storage, IReadOnlyList<Holding> holders, bool expectPayments, GenesisDocument genesis)
     {
         using var reference = Reference(chain);
-        var expected = await reference.TransactionsUpToAsync(Rounds);
+        var all = await reference.TransactionsUpToAsync(Rounds);
+
+        // A transaction without any native balance impact (no fee, no amount, no rewards) leaves no effect behind.
+        var expected = all
+            .Where(static t => t.Fee > 0 || t.Amount > 0 || t.ClosingAmount > 0 || t.SenderRewards > 0 || t.ReceiverRewards > 0 || t.CloseRewards > 0)
+            .ToList();
         Assert.Equal(expectPayments, expected.Count > 0);
 
         var ids = new HashSet<string>(StringComparer.Ordinal);
@@ -202,12 +224,17 @@ public class FirstThousandRoundsTests(PostgresFixture postgres)
         Adapters.GetOrAdd(chain, c => new Lazy<CachedChainAdapter>(() =>
         {
             var http = AlgorandChainFactory.CreateBlockHttpClient();
-            var adapter = AlgorandChainFactory.Create(new AlgorandChainOptions { Chain = c }, http, NullLoggerFactory.Instance);
+            var options = new AlgorandChainOptions { Chain = c, MaxAttempts = 30, BaseRetryDelay = TimeSpan.FromMilliseconds(200), MaxRetryDelay = TimeSpan.FromSeconds(3) };
+            var adapter = AlgorandChainFactory.Create(options, http, NullLoggerFactory.Instance);
             return new CachedChainAdapter(adapter);
         })).Value;
 
-    private static ReferenceNode Reference(string chain) =>
-        chain == ChainId.AlgorandMainnet ? ReferenceNode.MainNet() : ReferenceNode.TestNet();
+    private static ReferenceNode Reference(string chain) => chain switch
+    {
+        ChainId.AlgorandMainnet => ReferenceNode.MainNet(),
+        ChainId.Voi => ReferenceNode.Voi(),
+        _ => ReferenceNode.TestNet(),
+    };
 
     private static Task<IReadOnlyDictionary<ulong, IReadOnlyDictionary<Address, ulong>>> LedgerAsync(string chain) =>
         Ledgers.GetOrAdd(chain, c => new Lazy<Task<IReadOnlyDictionary<ulong, IReadOnlyDictionary<Address, ulong>>>>(() => LoadLedgerAsync(c))).Value;
