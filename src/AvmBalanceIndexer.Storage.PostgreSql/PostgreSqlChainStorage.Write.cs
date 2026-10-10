@@ -35,15 +35,20 @@ public sealed partial class PostgreSqlChainStorage
                 throw new ChainDivergenceException($"The first round written must be 0 but round {round} was given.");
             }
         }
-        else if (round <= published.Value.Round)
+        else if (round == published.Value.Round)
         {
-            if (round == published.Value.Round && !roundStatus.IndexedBlockHash.Span.SequenceEqual(published.Value.Hash))
+            if (!roundStatus.IndexedBlockHash.Span.SequenceEqual(published.Value.Hash))
             {
                 throw new ChainDivergenceException($"Round {round} is already published with a different block hash.");
             }
 
-            // Idempotent replay of a published round: nothing to do.
+            // Idempotent replay of the latest published round: nothing to do.
             return;
+        }
+        else if (round < published.Value.Round)
+        {
+            throw new ChainDivergenceException(
+                $"Round {round} is older than the published round {published.Value.Round}; its block hash can no longer be verified, so it is refused.");
         }
         else if (round != published.Value.Round + 1)
         {

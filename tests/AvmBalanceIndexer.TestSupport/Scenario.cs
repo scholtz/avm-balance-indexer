@@ -56,14 +56,19 @@ public static class Scenario
     /// <summary>Total native supply at the end of <paramref name="round"/>, including realized rewards.</summary>
     public static ulong SupplyAt(ulong round) => 6_010_100UL + (round >= 1 ? 10UL : 0UL) - PoolWithdrawnThrough(round);
 
-    public static IReadOnlyList<BlockData> Blocks() =>
-    [
-        Chain.Block(1, [new TestPayment(Alice, Bob, 3_000, Fee: 1_000, SenderRewards: 10)], rewards: RewardsAt(1)),
-        Chain.Block(2, rewards: RewardsAt(2)),
-        Chain.Block(3, [new TestPayment(Bob, Carol, 5_000, Fee: 1_000)], rewards: RewardsAt(3)),
-        Chain.Block(4, [new TestPayment(Carol, Alice, 100, Fee: 1_000, CloseTo: Dave, ClosingAmount: 3_900)], rewards: RewardsAt(4)),
-        Chain.Block(5, [new TestPayment(Alice, Bob, 1, Fee: 2_000, Inner: [new TestPayment(Bob, Dave, 10, Fee: 0)])], rewards: RewardsAt(5)),
-    ];
+    /// <summary>Builds the five blocks on a chain instance (a fresh one by default) so their hashes link up.</summary>
+    public static IReadOnlyList<BlockData> Blocks(TestChain? chain = null)
+    {
+        chain ??= new TestChain();
+        return
+        [
+        chain.Block(1, [new TestPayment(Alice, Bob, 3_000, Fee: 1_000, SenderRewards: 10)], rewards: RewardsAt(1)),
+        chain.Block(2, rewards: RewardsAt(2)),
+        chain.Block(3, [new TestPayment(Bob, Carol, 5_000, Fee: 1_000)], rewards: RewardsAt(3)),
+        chain.Block(4, [new TestPayment(Carol, Alice, 100, Fee: 1_000, CloseTo: Dave, ClosingAmount: 3_900)], rewards: RewardsAt(4)),
+        chain.Block(5, [new TestPayment(Alice, Bob, 1, Fee: 2_000, Inner: [new TestPayment(Bob, Dave, 10, Fee: 0)])], rewards: RewardsAt(5)),
+        ];
+    }
 
     public static FakeChainAdapter Adapter(IEnumerable<BlockData>? blocks = null)
     {

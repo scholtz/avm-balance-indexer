@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using AvmBalanceIndexer.Domain.Chains;
@@ -36,6 +37,8 @@ public sealed class TestChain
     /// <summary>A protocol id that is not in the pre-v31 list, like every current protocol.</summary>
     public const string DefaultProtocol = "test-protocol";
 
+    private readonly ConcurrentDictionary<ulong, byte[]> _hashes = new();
+
     public ChainProfile Profile { get; }
 
     public byte[] GenesisHash { get; }
@@ -56,8 +59,15 @@ public sealed class TestChain
         return new Address(bytes);
     }
 
-    /// <summary>Deterministic block hash; round 0 is the hash of the genesis block.</summary>
-    public static byte[] BlockHash(ulong round) => SHA256.HashData(Encoding.UTF8.GetBytes($"block-{round}"));
+    /// <summary>A deterministic stand-in hash for tests that only need some 32 bytes, such as raw cursor writes.</summary>
+    public static byte[] FakeHash(ulong round) => SHA256.HashData(Encoding.UTF8.GetBytes($"block-{round}"));
+
+    /// <summary>Hash of the genesis block, which block 1 links back to.</summary>
+    public static byte[] GenesisBlockHash { get; } = FakeHash(0);
+
+    /// <summary>The real hash of a block built by this chain instance.</summary>
+    public byte[] HashOf(ulong round) =>
+        _hashes.TryGetValue(round, out var hash) ? hash : throw new InvalidOperationException($"Block {round} was not built by this chain.");
 
     /// <summary>Encodes and decodes a block with the given payments.</summary>
     public BlockData Block(
@@ -79,6 +89,23 @@ public sealed class TestChain
         RewardsState? rewards = null,
         string protocol = DefaultProtocol)
     {
+        var previous = round == 1 ? GenesisBlockHash : _hashes.GetValueOrDefault(round - 1) ?? FakeHash(round - 1);
+
+        // The certificate digest must be the real header hash, which does not depend on the certificate itself.
+        var hash = BlockHashCalculator.Compute(Write(round, payments, proposerPayout, rewards, protocol, previous, new byte[32]));
+        _hashes[round] = hash;
+        return Write(round, payments, proposerPayout, rewards, protocol, previous, hash);
+    }
+
+    private byte[] Write(
+        ulong round,
+        IReadOnlyList<TestPayment> payments,
+        ulong proposerPayout,
+        RewardsState? rewards,
+        string protocol,
+        byte[] previous,
+        byte[] digest)
+    {
         var buffer = new ArrayBufferWriter<byte>();
         var writer = new MessagePackWriter(buffer);
         writer.WriteMapHeader(2);
@@ -92,7 +119,7 @@ public sealed class TestChain
         writer.Write("gh");
         writer.Write(GenesisHash);
         writer.Write("prev");
-        writer.Write(BlockHash(round - 1));
+        writer.Write(previous);
         writer.Write("proto");
         writer.Write(protocol);
         writer.Write("rnd");
@@ -131,7 +158,7 @@ public sealed class TestChain
         writer.Write("prop");
         writer.WriteMapHeader(1);
         writer.Write("dig");
-        writer.Write(BlockHash(round));
+        writer.Write(digest);
         writer.Write("rnd");
         writer.Write(round);
 

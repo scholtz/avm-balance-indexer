@@ -19,8 +19,8 @@ public class BlockDecoderTests
             [new TestPayment(Alice, Bob, 10, SenderRewards: 5, ReceiverRewards: 6, CloseRewards: 7, CloseTo: closeTo, ClosingAmount: 8)]);
 
         Assert.Equal(42UL, block.Round);
-        Assert.Equal(TestChain.BlockHash(42), block.Hash);
-        Assert.Equal(TestChain.BlockHash(41), block.PreviousHash);
+        Assert.Equal(Chain.HashOf(42), block.Hash);
+        Assert.Equal(TestChain.FakeHash(41), block.PreviousHash);
         Assert.Equal(Chain.GenesisHash, block.GenesisHash);
 
         var apply = Assert.Single(block.ApplyData);
@@ -65,6 +65,46 @@ public class BlockDecoderTests
         var bytes = new TestChain(Chains.ChainId.AlgorandMainnet).Encode(10, []);
 
         Assert.Throws<BlockValidationException>(() => BlockDecoder.Decode(bytes, 10, Chain.Profile, Chain.GenesisHash));
+    }
+
+    [Fact]
+    public void A_Certificate_Digest_That_Is_Not_The_Header_Hash_Is_Rejected()
+    {
+        var bytes = Chain.Encode(10, [new TestPayment(Alice, Bob, 1)]);
+        var digest = Chain.HashOf(10);
+        var at = bytes.AsSpan().IndexOf(digest);
+        Assert.True(at > 0);
+        bytes[at] ^= 0xFF;
+
+        var error = Assert.Throws<BlockValidationException>(() => BlockDecoder.Decode(bytes, 10, Chain.Profile, Chain.GenesisHash));
+
+        Assert.Contains("hash", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_Tampered_Header_Field_Is_Rejected_Because_The_Hash_No_Longer_Matches()
+    {
+        var bytes = Chain.Encode(10, []);
+        var timestampKey = new byte[] { 0xA2, (byte)'t', (byte)'s' };
+        var at = bytes.AsSpan().IndexOf(timestampKey);
+        Assert.True(at > 0);
+        bytes[at + 6] ^= 0x01; // flips a bit inside the 32-bit timestamp value that follows the key and its type marker
+
+        Assert.Throws<BlockValidationException>(() => BlockDecoder.Decode(bytes, 10, Chain.Profile, Chain.GenesisHash));
+    }
+
+    [Fact]
+    public void The_Header_Hash_Ignores_The_Payset_And_Covers_Every_Header_Field()
+    {
+        var chain = new TestChain();
+        var empty = BlockHashCalculator.Compute(chain.Encode(7, []));
+        var withTransactions = BlockHashCalculator.Compute(chain.Encode(7, [new TestPayment(Alice, Bob, 1)]));
+        var otherRound = BlockHashCalculator.Compute(chain.Encode(8, []));
+
+        Assert.Equal(32, empty.Length);
+        Assert.Equal(empty, withTransactions);
+        Assert.NotEqual(empty, otherRound);
+        Assert.Throws<InvalidDataException>(() => BlockHashCalculator.Compute(new byte[] { 0x80 }));
     }
 
     [Theory]

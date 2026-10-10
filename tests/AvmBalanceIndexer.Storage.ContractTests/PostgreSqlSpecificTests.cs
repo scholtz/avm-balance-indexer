@@ -18,7 +18,7 @@ public class PostgreSqlSpecificTests(PostgresFixture postgres)
     {
         var storage = await postgres.CreateStorageAsync();
         await storage.WriteRoundAsync(
-            new ChainStatus(ChainId.AlgorandTestnet, 0, TestChain.BlockHash(0), null, IngestionState.Bootstrapping, DateTimeOffset.UnixEpoch),
+            new ChainStatus(ChainId.AlgorandTestnet, 0, TestChain.FakeHash(0), null, IngestionState.Bootstrapping, DateTimeOffset.UnixEpoch),
             [Effect(0, 0, "genesis", TestChain.Account(1), 100, 100)],
             CancellationToken.None);
 
@@ -30,7 +30,7 @@ public class PostgreSqlSpecificTests(PostgresFixture postgres)
         };
 
         await Assert.ThrowsAnyAsync<Exception>(() => storage.WriteRoundAsync(
-            new ChainStatus(ChainId.AlgorandTestnet, 1, TestChain.BlockHash(1), null, IngestionState.Following, DateTimeOffset.UnixEpoch),
+            new ChainStatus(ChainId.AlgorandTestnet, 1, TestChain.FakeHash(1), null, IngestionState.Following, DateTimeOffset.UnixEpoch),
             poisoned,
             CancellationToken.None));
 
@@ -66,7 +66,7 @@ public class PostgreSqlSpecificTests(PostgresFixture postgres)
         var storage = await postgres.CreateStorageAsync();
         var account = TestChain.Account(1);
         await storage.WriteRoundAsync(
-            new ChainStatus(ChainId.AlgorandTestnet, 0, TestChain.BlockHash(0), null, IngestionState.Bootstrapping, DateTimeOffset.UnixEpoch),
+            new ChainStatus(ChainId.AlgorandTestnet, 0, TestChain.FakeHash(0), null, IngestionState.Bootstrapping, DateTimeOffset.UnixEpoch),
             [Effect(0, 0, "genesis", account, 100, 100)],
             CancellationToken.None);
 

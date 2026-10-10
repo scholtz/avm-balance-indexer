@@ -42,19 +42,28 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
 
     public async Task<BlockData> FetchBlockAsync(ulong round, CancellationToken cancellationToken)
     {
-        var hosts = await _hosts.GetHostsAsync(cancellationToken).ConfigureAwait(false);
-        if (hosts.Count == 0)
+        IReadOnlyList<string> discovered;
+        try
+        {
+            discovered = await _hosts.GetHostsAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new BlockFetchException("Archival gossip nodes could not be discovered.", round, ex);
+        }
+
+        if (discovered.Count == 0)
         {
             throw new BlockFetchException("No archival gossip nodes are configured or discoverable.", round);
         }
 
-        var start = Random.Shared.Next(hosts.Count);
+        var hosts = OrderHosts(discovered);
         Exception? last = null;
         var onlyNotFound = true;
 
         for (var attempt = 0; attempt < _options.MaxAttempts; attempt++)
         {
-            var host = PickHost(hosts, start, attempt);
+            var host = hosts[attempt % hosts.Length];
             try
             {
                 var payload = await DownloadAsync(host, round, cancellationToken).ConfigureAwait(false);
@@ -93,12 +102,17 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
         throw new BlockFetchException($"Block {round} could not be fetched after {_options.MaxAttempts} attempts.", round, last);
     }
 
-    private string PickHost(IReadOnlyList<string> hosts, int start, int attempt)
+    /// <summary>
+    /// A random rotation of the hosts with the ones that are not cooling down first. Attempt N of a fetch uses the
+    /// Nth host, so every host is tried once before any is repeated.
+    /// </summary>
+    private string[] OrderHosts(IReadOnlyList<string> hosts)
     {
         var now = _time.GetUtcNow();
-        var healthy = hosts.Where(h => !_cooldownUntil.TryGetValue(h, out var until) || until <= now).ToArray();
-        var pool = healthy.Length > 0 ? healthy : hosts;
-        return pool[(start + attempt) % pool.Count];
+        var start = Random.Shared.Next(hosts.Count);
+        var rotated = Enumerable.Range(0, hosts.Count).Select(i => hosts[(start + i) % hosts.Count]).ToArray();
+        bool Healthy(string host) => !_cooldownUntil.TryGetValue(host, out var until) || until <= now;
+        return [.. rotated.Where(Healthy), .. rotated.Where(h => !Healthy(h))];
     }
 
     private TimeSpan BackoffDelay(int attempt)

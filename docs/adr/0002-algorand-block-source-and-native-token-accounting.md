@@ -25,8 +25,10 @@ Algorand5 SDK to talk to the network. Three facts shaped the design.
   exponential backoff and validation of every response (round, genesis id and hash, certificate, hash lengths).
 - Read the raw payload a second time with a forward-only msgpack reader (`ApplyDataReader`) for the apply data the SDK
   discards. Both decodes are checked for identical transaction counts including inner transactions.
-- Chain continuity: each block's previous hash must equal the published block hash, taken from the certificate
-  proposal digest. A mismatch is a `ChainDivergenceException` and stops the indexer.
+- Block hash: recomputed as SHA-512/256 of `"BH"` and the canonical header (the stored block map without its payset)
+  and required to equal the certificate proposal digest, so a block is only accepted when its header is the one the
+  certificate names. Chain continuity: each block's previous hash must equal the published block hash. A mismatch is a
+  `ChainDivergenceException` and stops the indexer. Resuming re-fetches the cursor block and compares its hash.
 - Compute transaction ids from the canonical stored msgpack with the stripped genesis fields re-inserted in sorted key
   position. This is exact for every transaction type and independent of SDK model coverage. Verified against the
   public indexer for TestNet round 1.
@@ -54,9 +56,12 @@ identical balances.
 
 ## Consequences
 
-- Block integrity relies on the certificate digest and hash chaining, not on verifying certificate signatures or the
-  block hash itself. Gossip hosts are trusted as a data source. Operators should point `Algorand:GossipHosts` at their
-  own archival nodes in production.
+- The certificate signatures and the transaction root are not verified, so the transactions themselves are only as
+  trustworthy as the archival host that serves them. The header hash and hash chaining detect inconsistent or corrupted
+  data, not a host that fabricates a whole consistent chain. Operators should point `Algorand:GossipHosts` at their own
+  archival nodes in production.
+- The writer refuses rounds older than the published cursor because their hash can no longer be verified; only the latest
+  round can be replayed idempotently.
 - Each transaction adds a fee credit effect for the fee sink, and every round adds a rewards pool effect while rewards
   are active. Those two accounts are single hot partitions; bucket sizes and sharding need load testing before MainNet.
 - ASA, ARC-20 and ARC-200 effects, proposer payout verification against live payout-era blocks, and any other

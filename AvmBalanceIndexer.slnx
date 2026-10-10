@@ -15,5 +15,6 @@
     <Project Path="tests/AvmBalanceIndexer.Live.Tests/AvmBalanceIndexer.Live.Tests.csproj" />
     <Project Path="tests/AvmBalanceIndexer.Storage.ContractTests/AvmBalanceIndexer.Storage.ContractTests.csproj" />
     <Project Path="tests/AvmBalanceIndexer.TestSupport/AvmBalanceIndexer.TestSupport.csproj" />
+    <Project Path="tests/AvmBalanceIndexer.Worker.Tests/AvmBalanceIndexer.Worker.Tests.csproj" />
   </Folder>
 </Solution>

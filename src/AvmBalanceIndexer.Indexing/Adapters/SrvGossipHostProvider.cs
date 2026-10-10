@@ -43,7 +43,7 @@ public sealed partial class SrvGossipHostProvider(
                 _expires = _time.GetUtcNow() + refreshInterval;
                 LogDiscovered(logger, _hosts.Length, network);
             }
-            catch (InvalidOperationException ex) when (_hosts.Length > 0)
+            catch (Exception ex) when (ex is not OperationCanceledException && _hosts.Length > 0)
             {
                 _expires = _time.GetUtcNow() + TimeSpan.FromSeconds(30);
                 LogRefreshFailed(logger, ex, network, _hosts.Length);

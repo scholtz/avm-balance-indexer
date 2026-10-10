@@ -201,6 +201,50 @@ public class GossipBlockFetcherTests
         Assert.Equal(1, calls);
     }
 
+    [Fact]
+    public async Task Every_Host_Is_Tried_Once_Before_Any_Is_Repeated()
+    {
+        var calls = new List<string>();
+        var fetcher = CreateFetcher(
+            (request, _) =>
+            {
+                lock (calls)
+                {
+                    calls.Add(request.RequestUri!.Host);
+                }
+
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.InternalServerError));
+            },
+            hosts: ["http://a.test:4160", "http://b.test:4160", "http://c.test:4160"],
+            maxAttempts: 3);
+
+        await Assert.ThrowsAsync<BlockFetchException>(() => fetcher.FetchBlockAsync(4, CancellationToken.None));
+
+        Assert.Equal(["a.test", "b.test", "c.test"], calls.Order());
+    }
+
+    [Fact]
+    public async Task A_Host_Discovery_Failure_Is_A_Retryable_Fetch_Failure()
+    {
+        var fetcher = new GossipBlockFetcher(
+            new HttpClient(new StubHandler((_, _) => throw new InvalidOperationException("must not be called"))),
+            new FailingHosts(),
+            Chain.Profile,
+            new AlgorandChainOptions { Chain = Chain.Profile.Chain },
+            Chain.GenesisHash,
+            NullLogger<GossipBlockFetcher>.Instance);
+
+        var error = await Assert.ThrowsAsync<BlockFetchException>(() => fetcher.FetchBlockAsync(4, CancellationToken.None));
+
+        Assert.IsType<System.Net.Sockets.SocketException>(error.InnerException);
+    }
+
+    private sealed class FailingHosts : IGossipHostProvider
+    {
+        public Task<IReadOnlyList<string>> GetHostsAsync(CancellationToken cancellationToken) =>
+            Task.FromException<IReadOnlyList<string>>(new System.Net.Sockets.SocketException());
+    }
+
     private sealed class StubHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> handler) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>

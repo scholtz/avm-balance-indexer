@@ -77,7 +77,7 @@ public sealed partial class RoundIndexer(
                 await foreach (var block in OrderedPrefetch.StreamAsync(
                     next, target, _options.FetchConcurrency, adapter.FetchBlockAsync, cancellationToken).ConfigureAwait(false))
                 {
-                    var written = await IndexBlockAsync(chain, tracker, status, rewards, block, Math.Max(latest, target), cancellationToken).ConfigureAwait(false);
+                    var written = await IndexBlockAsync(chain, tracker, status, rewards, block, target, cancellationToken).ConfigureAwait(false);
                     status = written.Status;
                     rewards = RewardsState.FromHeader(block.Block);
                     next = block.Round + 1;
@@ -132,8 +132,15 @@ public sealed partial class RoundIndexer(
         var status = new ChainStatus(profile.Chain, 0, firstBlock.PreviousHash, stopAfterRound, IngestionState.Bootstrapping, _time.GetUtcNow());
         await storage.WriteRoundAsync(status, effects, cancellationToken).ConfigureAwait(false);
         LogGenesis(logger, profile.Chain, effects.Length);
-        return (status, new RewardsState(0, 0, RewardsState.FromHeader(firstBlock.Block).Rate));
+        return (status, GenesisRewardsState(firstBlock));
     }
+
+    /// <summary>
+    /// The genesis block starts with rewards level 0 and residue 0 and the initial rate, which stays in force until the first
+    /// recalculation (round 500,000 on public networks), so it equals the rate carried by block 1.
+    /// </summary>
+    private static RewardsState GenesisRewardsState(BlockData firstBlock) =>
+        new(0, 0, RewardsState.FromHeader(firstBlock.Block).Rate);
 
     /// <summary>
     /// Rebuilds the rewards state of the last published block when resuming. The block is re-fetched, which also
@@ -145,7 +152,11 @@ public sealed partial class RoundIndexer(
         var seed = await adapter.FetchBlockAsync(seedRound, cancellationToken).ConfigureAwait(false);
         if (status.IndexedRound == 0)
         {
-            return new RewardsState(0, 0, RewardsState.FromHeader(seed.Block).Rate);
+            // Block 1 links back to the genesis block hash that was stored as the round 0 cursor.
+            return seed.PreviousHash.AsSpan().SequenceEqual(status.IndexedBlockHash.Span)
+                ? GenesisRewardsState(seed)
+                : throw new ChainDivergenceException(
+                    "The archival source serves a different first block than the one the database was started from. The database must be rebuilt.");
         }
 
         return seed.Hash.AsSpan().SequenceEqual(status.IndexedBlockHash.Span)

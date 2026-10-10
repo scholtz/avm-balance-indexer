@@ -43,6 +43,7 @@ tests/
   AvmBalanceIndexer.Domain.Tests/        domain unit tests
   AvmBalanceIndexer.Indexing.Tests/      decoder, fetcher, normalizer, rewards pool, tracker unit tests
   AvmBalanceIndexer.Hosting.Tests/       configuration and DI wiring tests
+  AvmBalanceIndexer.Worker.Tests/        worker retry, progress and fail-fast behaviour
   AvmBalanceIndexer.Storage.ContractTests/ one contract suite run against the in-memory reference and PostgreSQL
   AvmBalanceIndexer.Live.Tests/          first 1000 rounds of real chains checked against the ledger (needs internet)
   AvmBalanceIndexer.TestSupport/         in-memory provider, synthetic chain, shared contract suite
@@ -113,8 +114,8 @@ The storage contract behind these endpoints is implemented and tested; only the 
 - Indexing speed is about 60 rounds per second with default settings, which is far too slow to backfill MainNet in a
   reasonable time. Batching and fetch tuning are follow-up work.
 - Only one worker may run per chain. There is no leader election yet.
-- Block hashes are taken from the certificate digest; certificate signatures are not verified. Treat gossip hosts as
-  trusted and run your own archival nodes.
+- Block headers are hash-checked against their certificate digest, but certificate signatures and the transaction root
+  are not verified. Treat gossip hosts as trusted and run your own archival nodes.
 - Proposer payouts are implemented from the block header but have not been verified against a payout-era chain.
 - Transaction effects other than native payments, fees, rewards and closes (assets, applications) are not indexed.
 

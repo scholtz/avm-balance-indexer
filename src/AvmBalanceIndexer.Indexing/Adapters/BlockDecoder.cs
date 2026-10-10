@@ -17,6 +17,11 @@ public static class BlockDecoder
     /// <param name="expectedRound">Round that was requested.</param>
     /// <param name="profile">Chain the block must belong to.</param>
     /// <param name="expectedGenesisHash">Genesis hash the header must carry, or null to skip the check.</param>
+    /// <remarks>
+    /// The block hash is recomputed from the header and must equal the certificate proposal digest, so the hash used for
+    /// chain linking is the real block hash. Certificate signatures and the transaction root are not verified; the archival
+    /// source remains trusted for the transactions it serves.
+    /// </remarks>
     /// <exception cref="BlockValidationException">The response is not the expected block.</exception>
     public static BlockData Decode(byte[] payload, ulong expectedRound, ChainProfile profile, byte[]? expectedGenesisHash)
     {
@@ -60,6 +65,11 @@ public static class BlockDecoder
         }
 
         var hash = RequireHash(cert.Prop?.Dig, "certified proposal digest", expectedRound);
+        if (!BlockHashCalculator.Compute(payload).AsSpan().SequenceEqual(hash))
+        {
+            throw new BlockValidationException($"Round {expectedRound}: the block header does not hash to the certified digest.");
+        }
+
         EnsureShapesMatch(block.Transactions ?? [], apply, expectedRound);
         return new BlockData(expectedRound, hash, previous, genesisHash, profile.GenesisId, block, apply);
     }

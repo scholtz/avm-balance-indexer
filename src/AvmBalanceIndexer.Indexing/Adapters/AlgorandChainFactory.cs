@@ -67,26 +67,39 @@ public static class AlgorandChainFactory
         ArgumentNullException.ThrowIfNull(loggerFactory);
 
         var profile = ChainProfile.For(options.Chain);
+        var genesisHash = ResolveGenesisHash(profile, options);
+
         IGossipHostProvider hosts = options.GossipHosts.Length > 0
             ? new StaticGossipHostProvider(options.GossipHosts)
             : new SrvGossipHostProvider(profile.Network, options.HostRefreshInterval, loggerFactory.CreateLogger<SrvGossipHostProvider>());
+        HttpClient? algodHttp = null;
+        try
+        {
+            var fetcher = new GossipBlockFetcher(
+                blockHttpClient,
+                hosts,
+                profile,
+                options,
+                genesisHash,
+                loggerFactory.CreateLogger<GossipBlockFetcher>());
 
-        var fetcher = new GossipBlockFetcher(
-            blockHttpClient,
-            hosts,
-            profile,
-            options,
-            ResolveGenesisHash(profile, options),
-            loggerFactory.CreateLogger<GossipBlockFetcher>());
+            algodHttp = HttpClientConfigurator.ConfigureHttpClient(
+                string.IsNullOrWhiteSpace(options.AlgodUrl) ? profile.DefaultAlgodUrl : options.AlgodUrl,
+                options.AlgodToken ?? string.Empty,
+                string.Empty,
+                -1,
+                CreateHandler());
+            algodHttp.Timeout = TimeSpan.FromSeconds(60);
 
-        var algodHttp = HttpClientConfigurator.ConfigureHttpClient(
-            string.IsNullOrWhiteSpace(options.AlgodUrl) ? profile.DefaultAlgodUrl : options.AlgodUrl,
-            options.AlgodToken ?? string.Empty,
-            string.Empty,
-            -1,
-            CreateHandler());
-        algodHttp.Timeout = TimeSpan.FromSeconds(60);
-        return new AlgorandChainAdapter(profile, fetcher, algodHttp, hosts is IDisposable disposableHosts ? [.. owned, disposableHosts] : owned);
+            IDisposable[] resources = hosts is IDisposable disposableHosts ? [.. owned, disposableHosts] : owned;
+            return new AlgorandChainAdapter(profile, fetcher, algodHttp, resources);
+        }
+        catch
+        {
+            algodHttp?.Dispose();
+            (hosts as IDisposable)?.Dispose();
+            throw;
+        }
     }
 
     private static SocketsHttpHandler CreateHandler() => new()

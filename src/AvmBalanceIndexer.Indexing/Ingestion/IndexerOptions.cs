@@ -23,6 +23,20 @@ public sealed class IndexerOptions
     [Range(1, 10_000_000)]
     public int LogEveryRounds { get; set; } = 1_000;
 
+    /// <summary>
+    /// The worker stops (so the orchestrator can restart and alert) after this many consecutive failures without any
+    /// round being indexed in between.
+    /// </summary>
+    [Range(1, 10_000)]
+    public int MaxConsecutiveFailures { get; set; } = 30;
+
+    /// <summary>First wait after a transient failure; doubled per failure without progress up to <see cref="RetryMaxBackoff"/>.</summary>
+    [Range(typeof(TimeSpan), "00:00:00", "00:10:00")]
+    public TimeSpan RetryInitialBackoff { get; set; } = TimeSpan.FromSeconds(2);
+
+    [Range(typeof(TimeSpan), "00:00:00", "01:00:00")]
+    public TimeSpan RetryMaxBackoff { get; set; } = TimeSpan.FromMinutes(1);
+
     /// <summary>A round within this distance of the target counts as following the tip rather than backfilling.</summary>
     [Range(0, 10_000)]
     public int FollowingThresholdRounds { get; set; } = 50;

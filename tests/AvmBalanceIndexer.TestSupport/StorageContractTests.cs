@@ -48,7 +48,7 @@ public abstract class StorageContractTests
 
         Assert.NotNull(status);
         Assert.Equal(LastRound, status.IndexedRound);
-        Assert.Equal(TestChain.BlockHash(LastRound), status.IndexedBlockHash.ToArray());
+        Assert.Equal(Blocks()[(int)LastRound - 1].Hash, status.IndexedBlockHash.ToArray());
     }
 
     [Fact]
@@ -240,24 +240,35 @@ public abstract class StorageContractTests
     }
 
     [Fact]
-    public async Task Rewriting_Old_Rounds_Does_Not_Duplicate_Rows_Or_Regress_Holdings()
+    public async Task Writing_The_Latest_Published_Round_Again_Is_A_No_Op()
     {
         var storage = await IndexedAsync();
-        var tracker = new BalanceTracker(storage, 100);
-        var block = Blocks()[2];
+        var before = await storage.GetEffectsAsync(Alice, Native, null, null, null, 100, CancellationToken.None);
+        var block = Blocks()[(int)LastRound - 1];
+        var effects = (await new BalanceTracker(storage, 100).ApplyAsync(new AlgoEffectNormalizer().Normalize(block, RewardsAt(LastRound - 1)), CancellationToken.None)).Effects;
+        var status = new ChainStatus(ChainId.AlgorandTestnet, LastRound, block.Hash, null, IngestionState.Following, DateTimeOffset.UnixEpoch);
 
-        // The effects are derived against the current (round 5) balances on purpose: a published round must be
-        // ignored entirely, so even different running balances must not leak into storage.
-        var effects = (await tracker.ApplyAsync(new AlgoEffectNormalizer().Normalize(block, RewardsAt(2)), CancellationToken.None)).Effects;
-        var status = new ChainStatus(ChainId.AlgorandTestnet, 3, block.Hash, null, IngestionState.Following, DateTimeOffset.UnixEpoch);
-
+        // The effects are derived against the current balances on purpose: a published round must be ignored entirely.
         await storage.WriteRoundAsync(status, effects, CancellationToken.None);
 
+        var after = await storage.GetEffectsAsync(Alice, Native, null, null, null, 100, CancellationToken.None);
+        Assert.Equal(before.Items.Select(static e => (e.Id, e.BalanceAfter)), after.Items.Select(static e => (e.Id, e.BalanceAfter)));
+        var current = await storage.GetHoldingsAsync(Alice, false, null, 10, CancellationToken.None);
+        Assert.Equal(ExpectedBalance(Alice, LastRound), (ulong)Assert.Single(current.Items).Amount.Value);
+    }
+
+    [Fact]
+    public async Task Writing_A_Round_Older_Than_The_Cursor_Is_Refused_And_Changes_Nothing()
+    {
+        var storage = await IndexedAsync();
+        var block = Blocks()[2];
+        var status = new ChainStatus(ChainId.AlgorandTestnet, 3, block.Hash, null, IngestionState.Following, DateTimeOffset.UnixEpoch);
+
+        await Assert.ThrowsAsync<ChainDivergenceException>(() => storage.WriteRoundAsync(status, [], CancellationToken.None));
+
+        Assert.Equal(LastRound, (await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!.IndexedRound);
         var page = await storage.GetEffectsAsync(Bob, Native, 3, 3, null, 50, CancellationToken.None);
         Assert.Equal(2, page.Items.Count);
-        var current = await storage.GetHoldingsAsync(Bob, false, null, 10, CancellationToken.None);
-        Assert.Equal(ExpectedBalance(Bob, LastRound), (ulong)Assert.Single(current.Items).Amount.Value);
-        Assert.Equal(LastRound, (await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!.IndexedRound);
     }
 
     [Fact]
@@ -273,7 +284,7 @@ public abstract class StorageContractTests
     public async Task Skipping_A_Round_Is_Rejected_And_Nothing_Is_Published()
     {
         var storage = await IndexedAsync(3);
-        var status = new ChainStatus(ChainId.AlgorandTestnet, 5, TestChain.BlockHash(5), null, IngestionState.Following, DateTimeOffset.UnixEpoch);
+        var status = new ChainStatus(ChainId.AlgorandTestnet, 5, TestChain.FakeHash(5), null, IngestionState.Following, DateTimeOffset.UnixEpoch);
 
         await Assert.ThrowsAsync<ChainDivergenceException>(() => storage.WriteRoundAsync(status, [], CancellationToken.None));
 
@@ -284,7 +295,7 @@ public abstract class StorageContractTests
     public async Task The_First_Round_Written_Must_Be_Genesis()
     {
         var storage = await CreateStorageAsync();
-        var status = new ChainStatus(ChainId.AlgorandTestnet, 1, TestChain.BlockHash(1), null, IngestionState.Following, DateTimeOffset.UnixEpoch);
+        var status = new ChainStatus(ChainId.AlgorandTestnet, 1, TestChain.FakeHash(1), null, IngestionState.Following, DateTimeOffset.UnixEpoch);
 
         await Assert.ThrowsAsync<ChainDivergenceException>(() => storage.WriteRoundAsync(status, [], CancellationToken.None));
     }
@@ -324,11 +335,38 @@ public abstract class StorageContractTests
     }
 
     [Fact]
+    public async Task Resuming_At_Genesis_Against_A_Different_First_Block_Is_Refused()
+    {
+        var storage = await CreateStorageAsync();
+        await CreateIndexer(storage, Adapter()).RunAsync(0, CancellationToken.None);
+        var blocks = Blocks().ToArray();
+        blocks[0] = blocks[0] with { PreviousHash = new byte[32] };
+
+        await Assert.ThrowsAsync<ChainDivergenceException>(() => CreateIndexer(storage, Adapter(blocks)).RunAsync(LastRound, CancellationToken.None));
+
+        Assert.Equal(0UL, (await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!.IndexedRound);
+    }
+
+    [Fact]
+    public async Task Resuming_Against_A_Source_That_Serves_A_Different_Cursor_Block_Is_Refused()
+    {
+        var storage = await CreateStorageAsync();
+        await CreateIndexer(storage, Adapter()).RunAsync(3, CancellationToken.None);
+        var blocks = Blocks().ToArray();
+        blocks[2] = blocks[2] with { Hash = new byte[32] };
+
+        await Assert.ThrowsAsync<ChainDivergenceException>(() => CreateIndexer(storage, Adapter(blocks)).RunAsync(LastRound, CancellationToken.None));
+
+        Assert.Equal(3UL, (await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!.IndexedRound);
+    }
+
+    [Fact]
     public async Task An_Invalid_Block_That_Overdraws_An_Account_Is_Not_Published()
     {
         var storage = await CreateStorageAsync();
-        var blocks = Blocks().ToArray();
-        blocks[1] = Chain.Block(2, [new TestPayment(Carol, Alice, 1_000_000)]);
+        var chain = new TestChain();
+        var blocks = Blocks(chain).ToArray();
+        blocks[1] = chain.Block(2, [new TestPayment(Carol, Alice, 1_000_000)], rewards: RewardsAt(2));
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => CreateIndexer(storage, Adapter(blocks)).RunAsync(5, CancellationToken.None));
 

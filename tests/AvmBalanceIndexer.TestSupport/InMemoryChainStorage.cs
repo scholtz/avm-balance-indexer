@@ -96,14 +96,19 @@ public sealed class InMemoryChainStorage(ChainContext context) : IChainStorage
                     throw new ChainDivergenceException($"The first round written must be 0 but round {round} was given.");
                 }
             }
-            else if (round <= _status.IndexedRound)
+            else if (round == _status.IndexedRound)
             {
-                if (round == _status.IndexedRound && !roundStatus.IndexedBlockHash.Span.SequenceEqual(_status.IndexedBlockHash.Span))
+                if (!roundStatus.IndexedBlockHash.Span.SequenceEqual(_status.IndexedBlockHash.Span))
                 {
                     throw new ChainDivergenceException($"Round {round} is already published with a different block hash.");
                 }
 
                 return Task.CompletedTask;
+            }
+            else if (round < _status.IndexedRound)
+            {
+                throw new ChainDivergenceException(
+                    $"Round {round} is older than the published round {_status.IndexedRound}; its block hash can no longer be verified, so it is refused.");
             }
             else if (round != _status.IndexedRound + 1)
             {
