@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "avm.fullname" . }}-config
+  labels: {{- include "avm.labels" . | nindent 4 }}
+data:
+  Chain: {{ .Values.chain | quote }}
+  Storage__Provider: {{ .Values.storage.provider | quote }}
+  Storage__PostgreSql__AccountHashPartitions: {{ .Values.storage.postgreSql.accountHashPartitions | quote }}
+  Storage__Cassandra__Keyspace: {{ .Values.storage.cassandra.keyspace | quote }}
+  Storage__Cassandra__LocalDatacenter: {{ .Values.storage.cassandra.localDatacenter | quote }}
+  {{- range $i, $cp := .Values.storage.cassandra.contactPoints }}
+  Storage__Cassandra__ContactPoints__{{ $i }}: {{ $cp | quote }}
+  {{- end }}
+  BlockSource__AlgodUrl: {{ .Values.blockSource.algodUrl | quote }}

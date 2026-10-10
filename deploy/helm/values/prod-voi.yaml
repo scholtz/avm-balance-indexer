@@ -1,0 +1,10 @@
+chain: voi
+storage:
+  provider: Cassandra
+  cassandra:
+    contactPoints: ["cassandra-voi-dc1-service.avm-voi.svc"]
+    keyspace: avm_voi
+    localDatacenter: dc1
+    existingSecret: avm-voi-cassandra
+api:
+  replicaCount: 3

@@ -1,0 +1,11 @@
+chain: algorand-mainnet
+storage:
+  provider: PostgreSql
+  postgreSql:
+    existingSecret: avm-algorand-postgres
+api:
+  replicaCount: 3
+worker:
+  resources:
+    requests: { cpu: "1", memory: 1Gi }
+    limits: { cpu: "4", memory: 4Gi }

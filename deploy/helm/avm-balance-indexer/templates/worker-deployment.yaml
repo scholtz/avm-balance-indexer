@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "avm.fullname" . }}-worker
+  labels: {{- include "avm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  replicas: {{ .Values.worker.replicaCount }}
+  strategy:
+    type: Recreate   # single ordered writer: never run two generations side by side
+  selector:
+    matchLabels: {{- include "avm.selectorLabels" (merge (dict "component" "worker") .) | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "avm.labels" . | nindent 8 }}
+        app.kubernetes.io/component: worker
+    spec:
+      containers:
+        - name: worker
+          image: {{ include "avm.image" (merge (dict "component" "worker") .) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "avm.fullname" . }}-config
+          env:
+            {{- include "avm.storageEnv" . | nindent 12 }}
+          resources: {{- toYaml .Values.worker.resources | nindent 12 }}

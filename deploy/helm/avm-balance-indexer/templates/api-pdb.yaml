@@ -1,0 +1,9 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "avm.fullname" . }}-api
+  labels: {{- include "avm.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.api.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels: {{- include "avm.selectorLabels" (merge (dict "component" "api") .) | nindent 6 }}

@@ -1,0 +1,47 @@
+# One release per chain deployment. See deploy/helm/values/*.yaml for overlays.
+chain: algorand-testnet
+
+image:
+  repository: ghcr.io/scholtz/avm-balance-indexer
+  tag: ""          # defaults to Chart.appVersion
+  pullPolicy: IfNotPresent
+
+storage:
+  # PostgreSql | Cassandra  -- selected per deployment, never dual-written.
+  provider: PostgreSql
+  postgreSql:
+    accountHashPartitions: 64
+    # Secret with key "connectionString"
+    existingSecret: ""
+  cassandra:
+    contactPoints: []
+    keyspace: avm_indexer
+    localDatacenter: dc1
+    # Secret with keys "username" and "password"
+    existingSecret: ""
+
+api:
+  replicaCount: 2
+  resources:
+    requests: { cpu: 250m, memory: 256Mi }
+    limits: { cpu: "1", memory: 512Mi }
+  service:
+    type: ClusterIP
+    port: 80
+  podDisruptionBudget:
+    minAvailable: 1
+
+worker:
+  # Single active ordered writer per chain. >1 replica requires leader election (follow-up).
+  replicaCount: 1
+  resources:
+    requests: { cpu: 500m, memory: 512Mi }
+    limits: { cpu: "2", memory: 2Gi }
+
+blockSource:
+  # Algorand-compatible archival node / Conduit endpoint for this chain.
+  algodUrl: ""
+  existingSecret: ""   # key "token"
+
+networkPolicy:
+  enabled: true

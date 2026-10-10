@@ -1,0 +1,6 @@
+apiVersion: v2
+name: avm-balance-indexer
+description: Per-chain API and indexer worker for Algorand-family token balances (PostgreSQL or Cassandra backend).
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

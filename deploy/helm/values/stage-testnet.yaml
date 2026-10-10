@@ -1,0 +1,7 @@
+chain: algorand-testnet
+storage:
+  provider: PostgreSql
+  postgreSql:
+    existingSecret: avm-testnet-postgres
+api:
+  replicaCount: 1
