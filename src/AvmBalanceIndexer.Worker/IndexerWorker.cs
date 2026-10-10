@@ -59,7 +59,7 @@ public sealed partial class IndexerWorker(
             {
                 return;
             }
-            catch (Exception ex) when (IsTransient(ex))
+            catch (Exception ex) when (IsTransient(ex, stoppingToken))
             {
                 var cursor = await TryReadCursorAsync(cursorAtLastFailure, stoppingToken).ConfigureAwait(false);
                 if (cursor != cursorAtLastFailure)
@@ -89,14 +89,19 @@ public sealed partial class IndexerWorker(
         {
             return (await storage.GetAsync(chain.Chain, cancellationToken).ConfigureAwait(false))?.IndexedRound;
         }
-        catch (Exception ex) when (IsTransient(ex))
+        catch (Exception ex) when (IsTransient(ex, cancellationToken))
         {
             return fallback;
         }
     }
 
-    private static bool IsTransient(Exception exception) =>
-        exception is BlockFetchException or HttpRequestException or TimeoutException or IOException
+    /// <summary>
+    /// Network, node and database trouble that a later attempt can overcome: archival fetch failures, algod errors and
+    /// timeouts (a timed-out request throws a cancellation that did not come from shutdown), and transient database errors.
+    /// </summary>
+    private static bool IsTransient(Exception exception, CancellationToken stoppingToken) =>
+        exception is BlockFetchException or HttpRequestException or TimeoutException or IOException or Algorand.ApiException
+        || (exception is OperationCanceledException && !stoppingToken.IsCancellationRequested)
         || exception is DbException { IsTransient: true };
 
     [LoggerMessage(EventId = 1300, Level = LogLevel.Information, Message = "Indexer worker started for {Chain}")]

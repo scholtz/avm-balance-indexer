@@ -73,6 +73,65 @@ public class PostgreSqlSpecificTests(PostgresFixture postgres)
     }
 
     [Fact]
+    public async Task Two_Writers_Bootstrapping_At_Once_Cannot_Both_Win_With_Different_Chains()
+    {
+        var storage = await postgres.CreateStorageAsync();
+        var account = TestChain.Account(1);
+
+        Task Bootstrap(byte[] hash) => storage.WriteRoundAsync(
+            new ChainStatus(ChainId.AlgorandTestnet, 0, hash, null, IngestionState.Bootstrapping, DateTimeOffset.UnixEpoch),
+            [Effect(0, 0, "genesis", account, 100, 100)],
+            CancellationToken.None);
+
+        var results = await Task.WhenAll(
+            Enumerable.Range(0, 6).Select(async i =>
+            {
+                try
+                {
+                    await Bootstrap(TestChain.FakeHash((ulong)(i % 2)));
+                    return true;
+                }
+                catch (ChainDivergenceException)
+                {
+                    return false;
+                }
+            }));
+
+        // Whichever hash wins the lock, every writer with the other hash is refused instead of overwriting the cursor.
+        Assert.Equal(3, results.Count(static r => r));
+        var status = await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None);
+        Assert.Equal(0UL, status!.IndexedRound);
+        Assert.Single((await storage.GetEffectsAsync(account, Native, null, null, null, 10, CancellationToken.None)).Items);
+    }
+
+    [Fact]
+    public async Task A_Very_Large_Round_Is_Written_In_Bounded_Batches()
+    {
+        var storage = await postgres.CreateStorageAsync();
+        const int accounts = 12_345;
+        var effects = Enumerable.Range(0, accounts)
+            .Select(i => Effect(0, i, "genesis", TestChain.Account(1000 + i), 7, 7))
+            .ToArray();
+
+        await storage.WriteRoundAsync(
+            new ChainStatus(ChainId.AlgorandTestnet, 0, TestChain.FakeHash(0), null, IngestionState.Bootstrapping, DateTimeOffset.UnixEpoch),
+            effects,
+            CancellationToken.None);
+
+        var holders = 0;
+        string? cursor = null;
+        do
+        {
+            var page = await storage.GetHoldersAtRoundAsync(Native, 0, false, cursor, 1000, CancellationToken.None);
+            holders += page.Items.Count;
+            cursor = page.NextCursor;
+        }
+        while (cursor is not null);
+
+        Assert.Equal(accounts, holders);
+    }
+
+    [Fact]
     public async Task Schema_Bootstrap_Is_Idempotent()
     {
         var storage = await postgres.CreateStorageAsync();

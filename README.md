@@ -114,8 +114,8 @@ The storage contract behind these endpoints is implemented and tested; only the 
 
 ## Known limitations
 
-- Historical holder queries aggregate all effects of a token on every page. That is fine for tests and small tokens but
-  will not scale to MainNet ALGO; asynchronous scans are planned.
+- Holder queries read each holder's latest balance from its own history, one index lookup per account, so a page is cheap
+  but listing every holder of a huge token is still a long walk. Asynchronous scans are planned (#22).
 - Indexing speed is about 60 rounds per second with default settings, which is far too slow to backfill MainNet in a
   reasonable time. Batching and fetch tuning are follow-up work.
 - Only one worker may run per chain. There is no leader election yet.

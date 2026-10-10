@@ -226,7 +226,7 @@ public sealed partial class PostgreSqlChainStorage
     public async Task<Page<Holding>> GetHoldersAtRoundAsync(TokenKey token, ulong round, bool includeZero, string? cursor, int limit, CancellationToken cancellationToken)
     {
         var pageSize = ClampLimit(limit);
-        var after = cursor is null ? Array.Empty<byte>() : Convert.FromHexString(cursor);
+        var after = ParseHolderCursor(cursor);
 
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         await using var transaction = await BeginSnapshotAsync(connection, cancellationToken).ConfigureAwait(false);
@@ -236,16 +236,21 @@ public sealed partial class PostgreSqlChainStorage
             throw new RoundNotIndexedException(round, indexed);
         }
 
-        // Aggregates the token-oriented effects through the requested round; touched accounts supply zero balances.
+        // Pages over the accounts that ever touched the token and reads each one's latest balance at or before the round
+        // from its own effect history (one index lookup per account). Cost is proportional to the page, not to the history.
         await using var command = new NpgsqlCommand(
             """
-            SELECT t.account, COALESCE(SUM(e.delta), 0) AS amount, COALESCE(MAX(e.round), t.first_round) AS changed
+            SELECT t.account, b.balance_after, b.round
             FROM accounts_touched_by_token t
-            LEFT JOIN effects_by_token_bucket e
-              ON e.token_kind = t.token_kind AND e.token_id = t.token_id AND e.account = t.account AND e.round <= @round
+            CROSS JOIN LATERAL (
+                SELECT e.balance_after, e.round
+                FROM effects_by_account_token e
+                WHERE e.account = t.account AND e.token_kind = t.token_kind AND e.token_id = t.token_id AND e.round <= @round
+                ORDER BY e.round DESC, e.intra_round_order DESC, e.ordinal DESC
+                LIMIT 1
+            ) b
             WHERE t.token_kind = @kind AND t.token_id = @id AND t.first_round <= @round AND t.account > @after
-            GROUP BY t.account, t.first_round
-            HAVING @includeZero OR COALESCE(SUM(e.delta), 0) > 0
+              AND (@includeZero OR b.balance_after > 0)
             ORDER BY t.account
             LIMIT @limit
             """,
@@ -352,6 +357,23 @@ public sealed partial class PostgreSqlChainStorage
         return new Page<T>(fetched, cursorOf(fetched[^1]), indexed);
     }
 
+    private static byte[] ParseHolderCursor(string? cursor)
+    {
+        if (cursor is null)
+        {
+            return [];
+        }
+
+        try
+        {
+            return Convert.FromHexString(cursor);
+        }
+        catch (FormatException ex)
+        {
+            throw new ArgumentException("Invalid cursor.", nameof(cursor), ex);
+        }
+    }
+
     private static (string Kind, long Id) ParseHoldingCursor(string? cursor)
     {
         if (cursor is null)
@@ -395,6 +417,6 @@ public sealed partial class PostgreSqlChainStorage
         command.Parameters.AddWithValue("chain", _chain);
         return await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is long round
             ? (ulong)round
-            : throw new InvalidOperationException($"Chain {_chain} has not been initialised.");
+            : throw new ChainNotStartedException(_chain);
     }
 }

@@ -62,6 +62,9 @@ public static class HostingExtensions
         services.AddOptions<AlgorandChainOptions>()
             .Bind(configuration.GetSection(AlgorandChainOptions.SectionName))
             .Configure(options => options.Chain = string.IsNullOrWhiteSpace(options.Chain) ? configuration[ChainKey] ?? string.Empty : options.Chain)
+            .Validate(
+                options => string.IsNullOrWhiteSpace(configuration[ChainKey]) || string.Equals(options.Chain, configuration[ChainKey], StringComparison.Ordinal),
+                "Algorand:Chain must equal the top-level Chain setting; a deployment serves one chain.")
             .ValidateDataAnnotations()
             .ValidateOnStart();
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IValidateOptions<AlgorandChainOptions>, AlgorandChainOptionsValidator>());

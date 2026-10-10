@@ -107,6 +107,26 @@ public abstract class StorageContractTests
     }
 
     [Fact]
+    public async Task Reading_Before_Anything_Is_Indexed_Says_So()
+    {
+        var storage = await CreateStorageAsync();
+
+        await Assert.ThrowsAsync<ChainNotStartedException>(() => storage.GetBalanceAtRoundAsync(Alice, Native, 0, CancellationToken.None));
+        await Assert.ThrowsAsync<ChainNotStartedException>(() => storage.GetHoldersAtRoundAsync(Native, 0, false, null, 10, CancellationToken.None));
+        Assert.Null(await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None));
+    }
+
+    [Theory]
+    [InlineData("zz")]
+    [InlineData("0g")]
+    public async Task A_Malformed_Holder_Cursor_Is_An_Argument_Error(string cursor)
+    {
+        var storage = await IndexedAsync();
+
+        await Assert.ThrowsAsync<ArgumentException>(() => storage.GetHoldersAtRoundAsync(Native, 3, false, cursor, 10, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task Reading_A_Round_Beyond_The_Cursor_Is_Rejected()
     {
         var storage = await IndexedAsync(3);

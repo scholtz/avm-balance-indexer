@@ -173,6 +173,22 @@ public class HostingExtensionsTests
     }
 
     [Fact]
+    public void The_Algorand_Chain_Must_Match_The_Deployment_Chain()
+    {
+        using var provider = Build(
+            Config(
+                ("Chain", ChainId.AlgorandTestnet),
+                ("Storage:Provider", "PostgreSql"),
+                ("Storage:PostgreSql:ConnectionString", Connection),
+                ("Algorand:Chain", ChainId.Voi)),
+            indexing: true);
+
+        var error = Assert.Throws<OptionsValidationException>(() => provider.GetRequiredService<IOptions<AlgorandChainOptions>>().Value);
+
+        Assert.Contains("one chain", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void A_Malformed_Gossip_Host_Is_Rejected()
     {
         using var provider = Build(

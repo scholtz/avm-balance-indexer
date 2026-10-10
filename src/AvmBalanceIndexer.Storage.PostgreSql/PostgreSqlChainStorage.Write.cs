@@ -10,6 +10,9 @@ namespace AvmBalanceIndexer.Storage.PostgreSql;
 
 public sealed partial class PostgreSqlChainStorage
 {
+    /// <summary>Effects per statement; keeps array parameters and statement memory bounded for very large rounds such as genesis.</summary>
+    private const int WriteBatchSize = 5_000;
+
     public async Task WriteRoundAsync(ChainStatus roundStatus, IReadOnlyList<TokenEffect> effects, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(roundStatus);
@@ -27,6 +30,7 @@ public sealed partial class PostgreSqlChainStorage
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         await using var transaction = await connection.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken).ConfigureAwait(false);
 
+        await LockWriterAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
         var published = await LockCursorAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
         if (published is null)
         {
@@ -57,14 +61,29 @@ public sealed partial class PostgreSqlChainStorage
 
         if (effects.Count > 0)
         {
-            await InsertAccountEffectsAsync(connection, transaction, effects, cancellationToken).ConfigureAwait(false);
-            await InsertTokenEffectsAsync(connection, transaction, round, effects, cancellationToken).ConfigureAwait(false);
+            foreach (var batch in effects.Chunk(WriteBatchSize))
+            {
+                await InsertAccountEffectsAsync(connection, transaction, batch, cancellationToken).ConfigureAwait(false);
+                await InsertTokenEffectsAsync(connection, transaction, round, batch, cancellationToken).ConfigureAwait(false);
+            }
+
             await UpsertHoldingsAsync(connection, transaction, round, effects, cancellationToken).ConfigureAwait(false);
             await UpsertTouchedAsync(connection, transaction, round, effects, cancellationToken).ConfigureAwait(false);
         }
 
         await UpsertCursorAsync(connection, transaction, roundStatus, cancellationToken).ConfigureAwait(false);
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Serializes writers of this chain for the rest of the transaction. The cursor row lock alone cannot do that while no
+    /// cursor row exists yet, so two workers starting on an empty database could both bootstrap.
+    /// </summary>
+    private async Task LockWriterAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, CancellationToken cancellationToken)
+    {
+        await using var command = new NpgsqlCommand("SELECT pg_advisory_xact_lock(hashtextextended(@chain, 1))", connection, transaction);
+        command.Parameters.AddWithValue("chain", _chain);
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<(ulong Round, byte[] Hash)?> LockCursorAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, CancellationToken cancellationToken)
@@ -78,7 +97,7 @@ public sealed partial class PostgreSqlChainStorage
             : null;
     }
 
-    private static async Task InsertAccountEffectsAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, IReadOnlyList<TokenEffect> effects, CancellationToken cancellationToken)
+    private static async Task InsertAccountEffectsAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, TokenEffect[] effects, CancellationToken cancellationToken)
     {
         const string sql = """
             INSERT INTO effects_by_account_token
@@ -109,7 +128,7 @@ public sealed partial class PostgreSqlChainStorage
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private static async Task InsertTokenEffectsAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, ulong round, IReadOnlyList<TokenEffect> effects, CancellationToken cancellationToken)
+    private static async Task InsertTokenEffectsAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, ulong round, TokenEffect[] effects, CancellationToken cancellationToken)
     {
         const string sql = """
             INSERT INTO effects_by_token_bucket
@@ -138,10 +157,17 @@ public sealed partial class PostgreSqlChainStorage
     private static async Task UpsertHoldingsAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, ulong round, IReadOnlyList<TokenEffect> effects, CancellationToken cancellationToken)
     {
         // The last effect of a round per account/token carries the end-of-round absolute balance.
-        var latest = effects
+        foreach (var batch in effects
             .GroupBy(static e => new HoldingKey(e.Account, e.Token))
             .Select(static g => g.MaxBy(static e => e.Id.Ordinal)!)
-            .ToArray();
+            .Chunk(WriteBatchSize))
+        {
+            await UpsertHoldingsBatchAsync(connection, transaction, round, batch, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private static async Task UpsertHoldingsBatchAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, ulong round, TokenEffect[] latest, CancellationToken cancellationToken)
+    {
 
         const string sql = """
             INSERT INTO holdings_by_account (account, token_kind, token_id, amount, opted_in, last_changed_round)
@@ -166,7 +192,14 @@ public sealed partial class PostgreSqlChainStorage
 
     private static async Task UpsertTouchedAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, ulong round, IReadOnlyList<TokenEffect> effects, CancellationToken cancellationToken)
     {
-        var touched = effects.Select(static e => new HoldingKey(e.Account, e.Token)).Distinct().ToArray();
+        foreach (var batch in effects.Select(static e => new HoldingKey(e.Account, e.Token)).Distinct().Chunk(WriteBatchSize))
+        {
+            await UpsertTouchedBatchAsync(connection, transaction, round, batch, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private static async Task UpsertTouchedBatchAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, ulong round, HoldingKey[] touched, CancellationToken cancellationToken)
+    {
 
         const string sql = """
             INSERT INTO accounts_touched_by_token (token_kind, token_id, account, first_round, last_round)

@@ -82,6 +82,26 @@ public class IndexerWorkerTests : IDisposable
         Assert.Equal(1, Environment.ExitCode);
     }
 
+    [Fact]
+    public async Task Algod_Api_Errors_And_Timeouts_Are_Retried()
+    {
+        var storage = NewStorage();
+        var errors = new Queue<Exception>(
+        [
+            new Algorand.ApiException("Service Unavailable", 503, "unavailable", new Dictionary<string, IEnumerable<string>>(), new HttpRequestException("503")),
+            new TaskCanceledException("The request timed out"),
+        ]);
+        var adapter = new FlakyAdapter(Scenario.Adapter(), failuresBeforeSuccess: 2, errors: errors);
+
+        var (worker, lifetime) = Create(storage, adapter, maxFailures: 10);
+        await worker.StartAsync(CancellationToken.None);
+        await WaitForRoundAsync(storage, Scenario.LastRound);
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.False(lifetime.StopRequested);
+        Assert.Equal(2, adapter.Failures);
+    }
+
     private static InMemoryChainStorage NewStorage() => new(new ChainContext(ChainId.AlgorandTestnet));
 
     private static (IndexerWorker Worker, FakeLifetime Lifetime) Create(InMemoryChainStorage storage, IChainAdapter adapter, int maxFailures)
@@ -115,7 +135,7 @@ public class IndexerWorkerTests : IDisposable
     }
 
     /// <summary>Fails a number of block fetches (or every n-th fetch) with a transient error before delegating.</summary>
-    private sealed class FlakyAdapter(FakeChainAdapter inner, int failuresBeforeSuccess, int failEvery = 0) : IChainAdapter
+    private sealed class FlakyAdapter(FakeChainAdapter inner, int failuresBeforeSuccess, int failEvery = 0, Queue<Exception>? errors = null) : IChainAdapter
     {
         private int _calls;
         private int _failures;
@@ -137,7 +157,8 @@ public class IndexerWorkerTests : IDisposable
             if (fail)
             {
                 Interlocked.Increment(ref _failures);
-                return Task.FromException<BlockData>(new BlockFetchException("simulated outage", round));
+                var error = errors is { Count: > 0 } ? errors.Dequeue() : new BlockFetchException("simulated outage", round);
+                return Task.FromException<BlockData>(error);
             }
 
             return inner.FetchBlockAsync(round, cancellationToken);

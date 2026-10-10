@@ -68,10 +68,10 @@ public class BalanceTrackerTests
     }
 
     [Fact]
-    public async Task Cache_Is_Cleared_When_Full_And_Falls_Back_To_Storage()
+    public async Task Evicted_Entries_Are_Reloaded_From_Storage()
     {
         var storage = await SeededAsync();
-        var tracker = new BalanceTracker(storage, 1);
+        var tracker = new BalanceTracker(storage, 2);
         var first = await tracker.ApplyAsync([Delta(0, Alice, -60), Delta(1, Bob, 60)], CancellationToken.None);
         await storage.WriteRoundAsync(
             new ChainStatus(ChainId.AlgorandTestnet, 1, new byte[32], null, IngestionState.Following, DateTimeOffset.UnixEpoch),
@@ -79,8 +79,32 @@ public class BalanceTrackerTests
             CancellationToken.None);
         tracker.Commit(first);
 
+        // Push both accounts out of both generations with unrelated accounts.
+        for (var i = 0; i < 4; i++)
+        {
+            var filler = await tracker.ApplyAsync([Delta(0, TestChain.Account(100 + i), 1)], CancellationToken.None);
+            tracker.Commit(filler);
+        }
+
         var second = await tracker.ApplyAsync([Delta(0, Alice, -10)], CancellationToken.None);
 
         Assert.Equal(30UL, (ulong)second.Effects[0].BalanceAfter.Value);
+    }
+
+    [Fact]
+    public async Task Recently_Used_Entries_Survive_A_Generation_Rollover()
+    {
+        var storage = await SeededAsync();
+        var tracker = new BalanceTracker(storage, 4);
+        var first = await tracker.ApplyAsync([Delta(0, Alice, -60)], CancellationToken.None);
+        tracker.Commit(first);
+
+        // Fill the young generation so it rolls over; Alice is now in the old generation and is not lost.
+        var filler = await tracker.ApplyAsync([Delta(0, TestChain.Account(50), 1), Delta(1, TestChain.Account(51), 1)], CancellationToken.None);
+        tracker.Commit(filler);
+        var again = await tracker.ApplyAsync([Delta(0, Alice, -10)], CancellationToken.None);
+
+        // Storage still says 100 (the first round was never written), so 30 proves the cache supplied the value.
+        Assert.Equal(30UL, (ulong)again.Effects[0].BalanceAfter.Value);
     }
 }

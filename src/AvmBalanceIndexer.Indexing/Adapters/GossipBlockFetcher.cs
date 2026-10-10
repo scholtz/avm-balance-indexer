@@ -59,7 +59,8 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
 
         var hosts = OrderHosts(discovered);
         Exception? last = null;
-        var onlyNotFound = true;
+        var sawNotFound = false;
+        var sawBadData = false;
 
         for (var attempt = 0; attempt < _options.MaxAttempts; attempt++)
         {
@@ -78,12 +79,13 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
             catch (BlockNotOnHostException ex)
             {
                 last = ex;
+                sawNotFound = true;
                 LogNotOnHost(_logger, round, host, attempt + 1);
             }
             catch (Exception ex) when (ex is HttpRequestException or BlockValidationException or TimeoutException or IOException)
             {
                 last = ex;
-                onlyNotFound = false;
+                sawBadData |= ex is BlockValidationException;
                 _cooldownUntil[host] = _time.GetUtcNow() + _options.HostCooldown;
                 LogAttemptFailed(_logger, ex, round, host, attempt + 1, _options.MaxAttempts);
             }
@@ -94,7 +96,9 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
             }
         }
 
-        if (onlyNotFound)
+        // A host that says "not here" while the others merely fail to answer means the block is not out yet; only a response
+        // that was actually wrong makes this a fetch failure.
+        if (sawNotFound && !sawBadData)
         {
             throw new BlockNotAvailableException(round);
         }

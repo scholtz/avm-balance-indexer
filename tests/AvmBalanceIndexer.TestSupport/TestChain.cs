@@ -49,6 +49,12 @@ public sealed class TestChain
 
     public Address Pool { get; } = Account(249);
 
+    /// <summary>When false, blocks omit the rewards pool address from the header.</summary>
+    public bool IncludeRewardsPool { get; init; } = true;
+
+    /// <summary>When false, blocks omit the proposer from the header even when they pay a proposer payout.</summary>
+    public bool IncludeProposer { get; init; } = true;
+
     /// <summary>Deterministic account used throughout tests; distinct per index.</summary>
     public static Address Account(int index)
     {
@@ -111,7 +117,7 @@ public sealed class TestChain
         writer.WriteMapHeader(2);
 
         writer.Write("block");
-        writer.WriteMapHeader(9 + (proposerPayout > 0 ? 2 : 0) + (rewards is not null ? 3 : 0));
+        writer.WriteMapHeader(8 + (IncludeRewardsPool ? 1 : 0) + (proposerPayout > 0 ? 1 + (IncludeProposer ? 1 : 0) : 0) + (rewards is not null ? 3 : 0));
         writer.Write("fees");
         writer.Write(FeeSink.ToArray());
         writer.Write("gen");
@@ -124,8 +130,12 @@ public sealed class TestChain
         writer.Write(protocol);
         writer.Write("rnd");
         writer.Write(round);
-        writer.Write("rwd");
-        writer.Write(Pool.ToArray());
+        if (IncludeRewardsPool)
+        {
+            writer.Write("rwd");
+            writer.Write(Pool.ToArray());
+        }
+
         writer.Write("ts");
         writer.Write(1_560_000_000UL + round);
         writer.Write("txns");
@@ -149,8 +159,11 @@ public sealed class TestChain
         {
             writer.Write("pp");
             writer.Write(proposerPayout);
-            writer.Write("prp");
-            writer.Write(Proposer.ToArray());
+            if (IncludeProposer)
+            {
+                writer.Write("prp");
+                writer.Write(Proposer.ToArray());
+            }
         }
 
         writer.Write("cert");

@@ -44,8 +44,10 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
             ApplyTransaction(round, transactions[index], apply, []);
         }
 
-        if (header.ProposerPayout is > 0 && header.Proposer is { } proposer)
+        if (header.ProposerPayout is > 0)
         {
+            var proposer = header.Proposer
+                ?? throw new InvalidDataException($"Round {block.Round}: block header pays a proposer payout but names no proposer.");
             round.BeginTransaction(transactions.Length + 1, string.Empty);
             var payout = new BigInteger(header.ProposerPayout.Value);
             var proposerAddress = ToDomain(proposer);
@@ -59,9 +61,15 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
     private static void ApplyStartOfBlock(RoundBuilder round, BlockData block, RewardsState previousRewards)
     {
         var header = block.Block;
+        var withdrawal = RewardsState.PoolWithdrawal(previousRewards, RewardsState.FromHeader(header), header.CurrentProtocol);
         if (header.RewardsPool is not { } poolAddress)
         {
-            return;
+            if (withdrawal.IsZero)
+            {
+                return;
+            }
+
+            throw new InvalidDataException($"Round {block.Round}: block header moves rewards but has no rewards pool.");
         }
 
         var pool = ToDomain(poolAddress);
@@ -71,7 +79,6 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
             round.Add(adjustment.To, adjustment.Amount, EffectType.LedgerAdjustment, adjustment.From, []);
         }
 
-        var withdrawal = RewardsState.PoolWithdrawal(previousRewards, RewardsState.FromHeader(header), header.CurrentProtocol);
         round.Add(pool, -withdrawal, EffectType.RewardsWithdrawal, null, []);
     }
 

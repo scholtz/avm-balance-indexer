@@ -106,6 +106,31 @@ public class AlgoEffectNormalizerTests
     }
 
     [Fact]
+    public void A_Proposer_Payout_Without_A_Proposer_Is_An_Error_Not_A_Silent_Skip()
+    {
+        var chain = new TestChain { IncludeProposer = false };
+
+        Assert.Throws<InvalidDataException>(() => Normalizer.Normalize(chain.Block(14, [], proposerPayout: 500), default));
+    }
+
+    [Fact]
+    public void Rewards_Moving_Without_A_Rewards_Pool_In_The_Header_Is_An_Error()
+    {
+        var chain = new TestChain { IncludeRewardsPool = false };
+        var block = chain.Block(2, rewards: new RewardsState(1, 500, 1_000));
+
+        Assert.Throws<InvalidDataException>(() => Normalizer.Normalize(block, new RewardsState(0, 1_000, 1_000)));
+    }
+
+    [Fact]
+    public void A_Header_Without_A_Rewards_Pool_Is_Fine_While_No_Rewards_Move()
+    {
+        var chain = new TestChain { IncludeRewardsPool = false };
+
+        Assert.Empty(Normalizer.Normalize(chain.Block(2), default));
+    }
+
+    [Fact]
     public void Normalization_Is_Deterministic()
     {
         var block = Chain.Block(15, [new TestPayment(Alice, Bob, 77, SenderRewards: 5)]);

@@ -193,7 +193,7 @@ public sealed class InMemoryChainStorage(ChainContext context) : IChainStorage
                 throw new RoundNotIndexedException(round, indexed);
             }
 
-            var after = cursor is null ? [] : Convert.FromHexString(cursor);
+            var after = ParseHolderCursor(cursor);
             var rows = _effects
                 .Where(kv => kv.Key.Token == token)
                 .Select(kv => (kv.Key.Account, Effects: kv.Value.Where(e => e.Id.Round <= round).ToList()))
@@ -233,7 +233,24 @@ public sealed class InMemoryChainStorage(ChainContext context) : IChainStorage
         }
     }
 
-    private ulong IndexedRound() => _status?.IndexedRound ?? throw new InvalidOperationException("Chain has not been initialised.");
+    private ulong IndexedRound() => _status?.IndexedRound ?? throw new ChainNotStartedException(context.Chain);
+
+    private static byte[] ParseHolderCursor(string? cursor)
+    {
+        if (cursor is null)
+        {
+            return [];
+        }
+
+        try
+        {
+            return Convert.FromHexString(cursor);
+        }
+        catch (FormatException ex)
+        {
+            throw new ArgumentException("Invalid cursor.", nameof(cursor), ex);
+        }
+    }
 
     private static int Clamp(int limit) => limit < 1 ? 1 : Math.Min(limit, 1000);
 

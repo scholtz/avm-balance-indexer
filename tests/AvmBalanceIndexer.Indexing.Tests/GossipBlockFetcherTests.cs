@@ -239,6 +239,28 @@ public class GossipBlockFetcherTests
         Assert.IsType<System.Net.Sockets.SocketException>(error.InnerException);
     }
 
+    [Fact]
+    public async Task A_Missing_Block_Is_Not_Available_Even_When_Other_Hosts_Merely_Error()
+    {
+        var fetcher = CreateFetcher(
+            (request, _) => Task.FromResult(new HttpResponseMessage(request.RequestUri!.Host == "a.test" ? HttpStatusCode.NotFound : HttpStatusCode.ServiceUnavailable)),
+            maxAttempts: 4);
+
+        await Assert.ThrowsAsync<BlockNotAvailableException>(() => fetcher.FetchBlockAsync(77, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task A_Wrong_Response_Makes_The_Fetch_A_Failure_Rather_Than_Not_Available()
+    {
+        var fetcher = CreateFetcher(
+            (request, _) => Task.FromResult(request.RequestUri!.Host == "a.test" ? new HttpResponseMessage(HttpStatusCode.NotFound) : Ok(Chain.Encode(1, []))),
+            maxAttempts: 4);
+
+        var error = await Assert.ThrowsAsync<BlockFetchException>(() => fetcher.FetchBlockAsync(2, CancellationToken.None));
+
+        Assert.IsNotType<BlockNotAvailableException>(error);
+    }
+
     private sealed class FailingHosts : IGossipHostProvider
     {
         public Task<IReadOnlyList<string>> GetHostsAsync(CancellationToken cancellationToken) =>
