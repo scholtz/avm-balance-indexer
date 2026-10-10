@@ -119,8 +119,8 @@ The storage contract behind these endpoints is implemented and tested; only the 
 - Indexing speed is about 60 rounds per second with default settings, which is far too slow to backfill MainNet in a
   reasonable time. Batching and fetch tuning are follow-up work.
 - Only one worker may run per chain. There is no leader election yet.
-- Block headers are hash-checked against their certificate digest, but certificate signatures and the transaction root
-  are not verified. Treat gossip hosts as trusted and run your own archival nodes.
+- Block headers are hash-checked against their certificate digest, but certificate signatures and the transaction
+  commitment are not verified (#23). Treat gossip hosts as trusted and run your own archival nodes.
 - Proposer payouts are implemented from the block header but have not been verified against a payout-era chain.
 - Transaction effects other than native payments, fees, rewards and closes (assets, applications) are not indexed.
 

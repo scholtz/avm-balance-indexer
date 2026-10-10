@@ -106,6 +106,17 @@ public class AlgoEffectNormalizerTests
     }
 
     [Fact]
+    public void A_Payment_To_The_Zero_Address_Whose_Receiver_Field_Is_Omitted_Burns_To_The_Zero_Address()
+    {
+        var zero = new Chains.Address(new byte[Chains.Address.Length]);
+
+        var deltas = Normalize(Chain.Block(20, [new TestPayment(Alice, zero, 500, Fee: 1_000)]));
+
+        Assert.Contains(deltas, d => d.Account == zero && d.Type == EffectType.Payment && d.Delta == 500);
+        Assert.Contains(deltas, d => d.Account == Alice && d.Type == EffectType.Payment && d.Delta == -500);
+    }
+
+    [Fact]
     public void A_Proposer_Payout_Without_A_Proposer_Is_An_Error_Not_A_Silent_Skip()
     {
         var chain = new TestChain { IncludeProposer = false };

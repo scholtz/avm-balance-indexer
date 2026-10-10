@@ -146,6 +146,24 @@ public class PostgreSqlSpecificTests(PostgresFixture postgres)
     }
 
     [Fact]
+    public async Task Token_Ids_That_Do_Not_Fit_The_Signed_Column_Are_Refused_Instead_Of_Misordered()
+    {
+        var storage = await postgres.CreateStorageAsync();
+        var account = TestChain.Account(1);
+        await storage.WriteRoundAsync(
+            new ChainStatus(ChainId.AlgorandTestnet, 0, TestChain.FakeHash(0), null, IngestionState.Bootstrapping, DateTimeOffset.UnixEpoch),
+            [Effect(0, 0, "genesis", account, 5, 5)],
+            CancellationToken.None);
+        var huge = new TokenEffect(new EffectId(1, 1, "tx", [], 0), account, TokenKey.Asa(ulong.MaxValue), EffectType.AssetTransfer, 1, Amount.From(1), null);
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => storage.WriteRoundAsync(
+            new ChainStatus(ChainId.AlgorandTestnet, 1, TestChain.FakeHash(1), null, IngestionState.Following, DateTimeOffset.UnixEpoch),
+            [huge],
+            CancellationToken.None));
+        Assert.Equal(0UL, (await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!.IndexedRound);
+    }
+
+    [Fact]
     public async Task Schema_Bootstrap_Is_Idempotent()
     {
         var storage = await postgres.CreateStorageAsync();

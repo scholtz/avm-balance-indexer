@@ -72,7 +72,7 @@ public sealed class InMemoryChainStorage(ChainContext context) : IChainStorage
         return Task.CompletedTask;
     }
 
-    public Task WriteRoundAsync(ChainStatus roundStatus, IReadOnlyList<TokenEffect> effects, CancellationToken cancellationToken)
+    public Task<bool> WriteRoundAsync(ChainStatus roundStatus, IReadOnlyList<TokenEffect> effects, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(roundStatus);
         ArgumentNullException.ThrowIfNull(effects);
@@ -103,7 +103,7 @@ public sealed class InMemoryChainStorage(ChainContext context) : IChainStorage
                     throw new ChainDivergenceException($"Round {round} is already published with a different block hash.");
                 }
 
-                return Task.CompletedTask;
+                return Task.FromResult(false);
             }
             else if (round < _status.IndexedRound)
             {
@@ -135,7 +135,7 @@ public sealed class InMemoryChainStorage(ChainContext context) : IChainStorage
             _status = roundStatus;
         }
 
-        return Task.CompletedTask;
+        return Task.FromResult(true);
     }
 
     public Task<IReadOnlyDictionary<HoldingKey, Holding>> GetCurrentHoldingsAsync(IReadOnlyCollection<HoldingKey> keys, CancellationToken cancellationToken)

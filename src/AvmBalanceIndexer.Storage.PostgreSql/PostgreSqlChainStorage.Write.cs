@@ -13,7 +13,7 @@ public sealed partial class PostgreSqlChainStorage
     /// <summary>Effects per statement; keeps array parameters and statement memory bounded for very large rounds such as genesis.</summary>
     private const int WriteBatchSize = 5_000;
 
-    public async Task WriteRoundAsync(ChainStatus roundStatus, IReadOnlyList<TokenEffect> effects, CancellationToken cancellationToken)
+    public async Task<bool> WriteRoundAsync(ChainStatus roundStatus, IReadOnlyList<TokenEffect> effects, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(roundStatus);
         ArgumentNullException.ThrowIfNull(effects);
@@ -47,7 +47,7 @@ public sealed partial class PostgreSqlChainStorage
             }
 
             // Idempotent replay of the latest published round: nothing to do.
-            return;
+            return false;
         }
         else if (round < published.Value.Round)
         {
@@ -73,6 +73,7 @@ public sealed partial class PostgreSqlChainStorage
 
         await UpsertCursorAsync(connection, transaction, roundStatus, cancellationToken).ConfigureAwait(false);
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        return true;
     }
 
     /// <summary>
@@ -115,7 +116,7 @@ public sealed partial class PostgreSqlChainStorage
         await using var command = new NpgsqlCommand(sql, connection, transaction);
         AddArray(command, "account", NpgsqlDbType.Bytea, effects.Select(static e => e.Account.ToArray()).ToArray());
         AddArray(command, "kind", NpgsqlDbType.Text, effects.Select(static e => e.Token.Kind.ToStorageName()).ToArray());
-        AddArray(command, "id", NpgsqlDbType.Bigint, effects.Select(static e => unchecked((long)e.Token.TokenId)).ToArray());
+        AddArray(command, "id", NpgsqlDbType.Bigint, effects.Select(static e => StorageId(e.Token.TokenId)).ToArray());
         AddArray(command, "round", NpgsqlDbType.Bigint, effects.Select(static e => unchecked((long)e.Id.Round)).ToArray());
         AddArray(command, "order", NpgsqlDbType.Integer, effects.Select(static e => e.Id.IntraRoundOrder).ToArray());
         AddArray(command, "ordinal", NpgsqlDbType.Integer, effects.Select(static e => e.Id.Ordinal).ToArray());
@@ -144,7 +145,7 @@ public sealed partial class PostgreSqlChainStorage
         command.Parameters.AddWithValue("bucket", RoundBuckets.ForRound(round));
         command.Parameters.AddWithValue("round", unchecked((long)round));
         AddArray(command, "kind", NpgsqlDbType.Text, effects.Select(static e => e.Token.Kind.ToStorageName()).ToArray());
-        AddArray(command, "id", NpgsqlDbType.Bigint, effects.Select(static e => unchecked((long)e.Token.TokenId)).ToArray());
+        AddArray(command, "id", NpgsqlDbType.Bigint, effects.Select(static e => StorageId(e.Token.TokenId)).ToArray());
         AddArray(command, "order", NpgsqlDbType.Integer, effects.Select(static e => e.Id.IntraRoundOrder).ToArray());
         AddArray(command, "ordinal", NpgsqlDbType.Integer, effects.Select(static e => e.Id.Ordinal).ToArray());
         AddArray(command, "account", NpgsqlDbType.Bytea, effects.Select(static e => e.Account.ToArray()).ToArray());
@@ -184,7 +185,7 @@ public sealed partial class PostgreSqlChainStorage
         command.Parameters.AddWithValue("round", unchecked((long)round));
         AddArray(command, "account", NpgsqlDbType.Bytea, latest.Select(static e => e.Account.ToArray()).ToArray());
         AddArray(command, "kind", NpgsqlDbType.Text, latest.Select(static e => e.Token.Kind.ToStorageName()).ToArray());
-        AddArray(command, "id", NpgsqlDbType.Bigint, latest.Select(static e => unchecked((long)e.Token.TokenId)).ToArray());
+        AddArray(command, "id", NpgsqlDbType.Bigint, latest.Select(static e => StorageId(e.Token.TokenId)).ToArray());
         AddArray(command, "amount", NpgsqlDbType.Text, latest.Select(static e => e.BalanceAfter.ToString()).ToArray());
         AddArray(command, "optedin", NpgsqlDbType.Boolean, latest.Select(static e => e.Type != EffectType.AssetOptOut).ToArray());
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
@@ -213,7 +214,7 @@ public sealed partial class PostgreSqlChainStorage
         await using var command = new NpgsqlCommand(sql, connection, transaction);
         command.Parameters.AddWithValue("round", unchecked((long)round));
         AddArray(command, "kind", NpgsqlDbType.Text, touched.Select(static k => k.Token.Kind.ToStorageName()).ToArray());
-        AddArray(command, "id", NpgsqlDbType.Bigint, touched.Select(static k => unchecked((long)k.Token.TokenId)).ToArray());
+        AddArray(command, "id", NpgsqlDbType.Bigint, touched.Select(static k => StorageId(k.Token.TokenId)).ToArray());
         AddArray(command, "account", NpgsqlDbType.Bytea, touched.Select(static k => k.Account.ToArray()).ToArray());
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
@@ -240,6 +241,12 @@ public sealed partial class PostgreSqlChainStorage
         command.Parameters.AddWithValue("updated", status.UpdatedAt.UtcDateTime);
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
+
+    /// <summary>Token ids are stored as signed bigint; ids beyond its range would sort wrongly, so they are refused.</summary>
+    private static long StorageId(ulong tokenId) =>
+        tokenId <= long.MaxValue
+            ? (long)tokenId
+            : throw new ArgumentOutOfRangeException(nameof(tokenId), tokenId, "Token ids above 2^63 - 1 are not supported by the PostgreSQL provider.");
 
     private static void AddArray<T>(NpgsqlCommand command, string name, NpgsqlDbType elementType, T[] values) =>
         command.Parameters.Add(new NpgsqlParameter(name, NpgsqlDbType.Array | elementType) { Value = values });

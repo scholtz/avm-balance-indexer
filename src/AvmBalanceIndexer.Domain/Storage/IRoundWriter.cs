@@ -13,11 +13,12 @@ public interface IRoundWriter
     /// <summary>
     /// Persists all effects of the round carried by <paramref name="roundStatus"/>, updates current
     /// holdings and touched accounts, and publishes the round as the final step.
-    /// Writing the latest published round again with the same block hash is a no-op.
+    /// Writing the latest published round again with the same block hash changes nothing and returns false.
     /// </summary>
+    /// <returns>True when the round was applied; false when it was already published.</returns>
     /// <exception cref="ChainDivergenceException">
     /// The round skips ahead of the published cursor, is older than it (its hash can no longer be verified), or has a
     /// block hash that differs from the published one.
     /// </exception>
-    Task WriteRoundAsync(ChainStatus roundStatus, IReadOnlyList<TokenEffect> effects, CancellationToken cancellationToken);
+    Task<bool> WriteRoundAsync(ChainStatus roundStatus, IReadOnlyList<TokenEffect> effects, CancellationToken cancellationToken);
 }

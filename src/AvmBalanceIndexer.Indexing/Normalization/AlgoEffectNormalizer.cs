@@ -27,7 +27,7 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
 
         var header = block.Block;
         var feeSink = header.FeeSink is { } sink
-            ? ToDomain(sink)
+            ? ToDomain(sink, "fee sink")
             : throw new InvalidDataException($"Round {block.Round}: block header has no fee sink.");
 
         var transactions = (header.Transactions ?? []).ToArray();
@@ -50,7 +50,7 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
                 ?? throw new InvalidDataException($"Round {block.Round}: block header pays a proposer payout but names no proposer.");
             round.BeginTransaction(transactions.Length + 1, string.Empty);
             var payout = new BigInteger(header.ProposerPayout.Value);
-            var proposerAddress = ToDomain(proposer);
+            var proposerAddress = ToDomain(proposer, "proposer");
             round.Add(feeSink, -payout, EffectType.ProposerPayout, proposerAddress, []);
             round.Add(proposerAddress, payout, EffectType.ProposerPayout, feeSink, []);
         }
@@ -72,7 +72,7 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
             throw new InvalidDataException($"Round {block.Round}: block header moves rewards but has no rewards pool.");
         }
 
-        var pool = ToDomain(poolAddress);
+        var pool = ToDomain(poolAddress, "rewards pool");
         if (KnownLedgerAdjustments.StartOfRound(block.GenesisHash, block.Round, pool) is { } adjustment)
         {
             round.Add(adjustment.From, -adjustment.Amount, EffectType.LedgerAdjustment, adjustment.To, []);
@@ -85,10 +85,12 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
     private static void ApplyTransaction(RoundBuilder round, SignedTransaction signed, TxnApplyData apply, int[] path)
     {
         var transaction = signed.Tx ?? throw new InvalidDataException("Block transaction without a txn body.");
-        var sender = ToDomain(transaction.Sender);
+        var sender = ToDomain(transaction.Sender, "sender");
         var payment = transaction as PaymentTransaction;
-        var receiver = payment is null ? (DomainAddress?)null : ToDomain(payment.Receiver);
-        var closeTo = payment?.CloseRemainderTo is { } close && !IsZero(close) ? ToDomain(close) : (DomainAddress?)null;
+
+        // The receiver field is omitted from the stored transaction when it is the zero address (a burn).
+        var receiver = payment is null ? (DomainAddress?)null : payment.Receiver is null ? ZeroAddress : ToDomain(payment.Receiver, "receiver");
+        var closeTo = payment?.CloseRemainderTo is { } close && !IsZero(close) ? ToDomain(close, "close-to") : (DomainAddress?)null;
 
         round.Add(sender, apply.SenderRewards, EffectType.Reward, null, path);
         if (receiver is { } rewardedReceiver)
@@ -126,8 +128,10 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
         }
     }
 
-    private static DomainAddress ToDomain(Algorand.Address address) =>
-        new(address?.Bytes ?? new byte[DomainAddress.Length]);
+    private static readonly DomainAddress ZeroAddress = new(new byte[DomainAddress.Length]);
+
+    private static DomainAddress ToDomain(Algorand.Address? address, string role) =>
+        address is null ? throw new InvalidDataException($"A transaction has no {role} address.") : new DomainAddress(address.Bytes);
 
     private static bool IsZero(Algorand.Address address) => address.Bytes.All(static b => b == 0);
 

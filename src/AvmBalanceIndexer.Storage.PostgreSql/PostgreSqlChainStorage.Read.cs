@@ -74,7 +74,7 @@ public sealed partial class PostgreSqlChainStorage
             """,
             connection);
         command.Parameters.AddWithValue("kind", key.Kind.ToStorageName());
-        command.Parameters.AddWithValue("id", unchecked((long)key.TokenId));
+        command.Parameters.AddWithValue("id", StorageId(key.TokenId));
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
@@ -112,7 +112,7 @@ public sealed partial class PostgreSqlChainStorage
             """,
             connection);
         command.Parameters.AddWithValue("kind", token.Key.Kind.ToStorageName());
-        command.Parameters.AddWithValue("id", unchecked((long)token.Key.TokenId));
+        command.Parameters.AddWithValue("id", StorageId(token.Key.TokenId));
         command.Parameters.Add(new NpgsqlParameter("creator", NpgsqlDbType.Bytea) { Value = (object?)token.Creator?.ToArray() ?? DBNull.Value });
         command.Parameters.Add(new NpgsqlParameter("decimals", NpgsqlDbType.Smallint) { Value = token.Decimals is { } d ? (short)d : DBNull.Value });
         command.Parameters.Add(new NpgsqlParameter("symbol", NpgsqlDbType.Text) { Value = (object?)token.Symbol ?? DBNull.Value });
@@ -146,7 +146,7 @@ public sealed partial class PostgreSqlChainStorage
         var list = keys.ToArray();
         AddArray(command, "account", NpgsqlDbType.Bytea, list.Select(static k => k.Account.ToArray()).ToArray());
         AddArray(command, "kind", NpgsqlDbType.Text, list.Select(static k => k.Token.Kind.ToStorageName()).ToArray());
-        AddArray(command, "id", NpgsqlDbType.Bigint, list.Select(static k => unchecked((long)k.Token.TokenId)).ToArray());
+        AddArray(command, "id", NpgsqlDbType.Bigint, list.Select(static k => StorageId(k.Token.TokenId)).ToArray());
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
@@ -217,7 +217,7 @@ public sealed partial class PostgreSqlChainStorage
             transaction);
         command.Parameters.AddWithValue("account", account.ToArray());
         command.Parameters.AddWithValue("kind", token.Kind.ToStorageName());
-        command.Parameters.AddWithValue("id", unchecked((long)token.TokenId));
+        command.Parameters.AddWithValue("id", StorageId(token.TokenId));
         command.Parameters.AddWithValue("round", unchecked((long)round));
         var value = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
         return value is decimal balance ? ToAmount(balance) : Amount.Zero;
@@ -258,7 +258,7 @@ public sealed partial class PostgreSqlChainStorage
             transaction);
         command.Parameters.AddWithValue("round", unchecked((long)round));
         command.Parameters.AddWithValue("kind", token.Kind.ToStorageName());
-        command.Parameters.AddWithValue("id", unchecked((long)token.TokenId));
+        command.Parameters.AddWithValue("id", StorageId(token.TokenId));
         command.Parameters.AddWithValue("after", after);
         command.Parameters.AddWithValue("includeZero", includeZero);
         command.Parameters.AddWithValue("limit", pageSize + 1);
@@ -298,7 +298,7 @@ public sealed partial class PostgreSqlChainStorage
             transaction);
         command.Parameters.AddWithValue("account", account.ToArray());
         command.Parameters.AddWithValue("kind", token.Kind.ToStorageName());
-        command.Parameters.AddWithValue("id", unchecked((long)token.TokenId));
+        command.Parameters.AddWithValue("id", StorageId(token.TokenId));
         command.Parameters.AddWithValue("from", unchecked((long)(fromRound ?? 0)));
         command.Parameters.AddWithValue("to", unchecked((long)Math.Min(toRound ?? indexed, indexed)));
         command.Parameters.AddWithValue("cr", cursorRound);

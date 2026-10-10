@@ -163,7 +163,7 @@ public sealed class ApiTests : IDisposable
         public Task<Page<AvmBalanceIndexer.Domain.Effects.TokenEffect>> GetEffectsAsync(Address account, AvmBalanceIndexer.Domain.Tokens.TokenKey token, ulong? fromRound, ulong? toRound, string? cursor, int limit, CancellationToken cancellationToken) =>
             throw new InvalidOperationException();
 
-        public Task WriteRoundAsync(ChainStatus roundStatus, IReadOnlyList<AvmBalanceIndexer.Domain.Effects.TokenEffect> effects, CancellationToken cancellationToken) =>
+        public Task<bool> WriteRoundAsync(ChainStatus roundStatus, IReadOnlyList<AvmBalanceIndexer.Domain.Effects.TokenEffect> effects, CancellationToken cancellationToken) =>
             throw new InvalidOperationException();
 
         public Task EnsureSchemaAsync(CancellationToken cancellationToken) => throw new InvalidOperationException();

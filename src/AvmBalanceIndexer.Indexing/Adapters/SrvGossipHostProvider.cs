@@ -38,6 +38,11 @@ public sealed partial class SrvGossipHostProvider(
                 var configuration = await Task.Run(
                     () => new GossipHttpConfiguration(GossipNodePurpose.Archival, network),
                     cancellationToken).ConfigureAwait(false);
+                if (configuration.Hosts.Length == 0)
+                {
+                    throw new InvalidOperationException("DNS SRV discovery returned no archival nodes.");
+                }
+
                 _snapshot = new Snapshot(configuration.Hosts, _time.GetUtcNow() + refreshInterval);
                 LogDiscovered(logger, configuration.Hosts.Length, network);
             }

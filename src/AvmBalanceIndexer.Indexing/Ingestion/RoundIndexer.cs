@@ -157,7 +157,11 @@ public sealed partial class RoundIndexer(
             cancellationToken).ConfigureAwait(false);
 
         var status = new ChainStatus(profile.Chain, 0, firstBlock.PreviousHash, stopAfterRound, IngestionState.Bootstrapping, _time.GetUtcNow());
-        await storage.WriteRoundAsync(status, effects, cancellationToken).ConfigureAwait(false);
+        if (!await storage.WriteRoundAsync(status, effects, cancellationToken).ConfigureAwait(false))
+        {
+            throw new ChainDivergenceException($"Genesis of {profile.Chain} was published by another writer. Only one indexer may write a chain.");
+        }
+
         LogGenesis(logger, profile.Chain, effects.Length);
         return (status, GenesisRewardsState(firstBlock));
     }
@@ -217,7 +221,13 @@ public sealed partial class RoundIndexer(
 
         var state = targetRound - block.Round <= (ulong)_options.FollowingThresholdRounds ? IngestionState.Following : IngestionState.Backfilling;
         var status = new ChainStatus(chain, block.Round, block.Hash, targetRound, state, _time.GetUtcNow());
-        await storage.WriteRoundAsync(status, round.Effects, cancellationToken).ConfigureAwait(false);
+        if (!await storage.WriteRoundAsync(status, round.Effects, cancellationToken).ConfigureAwait(false))
+        {
+            // This indexer only ever writes the next round, so finding it published means a second writer is active; its
+            // balances may differ from the ones computed here, which must not be cached.
+            throw new ChainDivergenceException($"Round {block.Round} of {chain} was published by another writer. Only one indexer may write a chain.");
+        }
+
         tracker.Commit(round);
         return (status, round.Effects.Count);
     }

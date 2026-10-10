@@ -240,7 +240,8 @@ public sealed class TestChain
 
     private static void WritePaymentBody(ref MessagePackWriter writer, TestPayment payment)
     {
-        var entries = 5;
+        var omitReceiver = payment.Receiver.Bytes.ToArray().All(static b => b == 0);
+        var entries = omitReceiver ? 4 : 5;
         entries += payment.Amount > 0 ? 1 : 0;
         entries += payment.Fee > 0 ? 1 : 0;
         entries += payment.CloseTo is not null ? 1 : 0;
@@ -268,8 +269,12 @@ public sealed class TestChain
         writer.Write(1UL);
         writer.Write("lv");
         writer.Write(1001UL);
-        writer.Write("rcv");
-        writer.Write(payment.Receiver.ToArray());
+        if (!omitReceiver)
+        {
+            writer.Write("rcv");
+            writer.Write(payment.Receiver.ToArray());
+        }
+
         writer.Write("snd");
         writer.Write(payment.Sender.ToArray());
         writer.Write("type");

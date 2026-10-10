@@ -278,6 +278,53 @@ public abstract class StorageContractTests
     }
 
     [Fact]
+    public async Task The_Writer_Reports_Whether_It_Applied_The_Round()
+    {
+        var storage = await CreateStorageAsync();
+        var blocks = Blocks();
+        var genesis = new ChainStatus(ChainId.AlgorandTestnet, 0, blocks[0].PreviousHash, null, IngestionState.Bootstrapping, DateTimeOffset.UnixEpoch);
+
+        var first = await storage.WriteRoundAsync(genesis, [], CancellationToken.None);
+        var again = await storage.WriteRoundAsync(genesis, [], CancellationToken.None);
+
+        Assert.True(first);
+        Assert.False(again);
+    }
+
+    [Fact]
+    public async Task A_Second_Indexer_On_The_Same_Chain_Is_Stopped_Instead_Of_Corrupting_The_Cache()
+    {
+        var storage = await CreateStorageAsync();
+        await CreateIndexer(storage, Adapter()).RunAsync(2, CancellationToken.None);
+
+        // Both indexers resume from round 2 and race to publish round 3. The loser must stop: either its write finds the round
+        // already published (a divergence), or it read balances after the winner committed and fails earlier on arithmetic.
+        // What it must never do is leave anything but the correct state behind.
+        var outcomes = await Task.WhenAll(
+            Enumerable.Range(0, 2).Select(async _ =>
+            {
+                try
+                {
+                    await CreateIndexer(storage, Adapter()).RunAsync(LastRound, CancellationToken.None);
+                    return (Exception?)null;
+                }
+                catch (Exception ex) when (ex is ChainDivergenceException or InvalidOperationException)
+                {
+                    return ex;
+                }
+            }));
+
+        Assert.Contains(outcomes, static e => e is null);
+        Assert.Equal(LastRound, (await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!.IndexedRound);
+        foreach (var account in new[] { Alice, Bob, Carol, Dave, Chain.FeeSink, Chain.Pool })
+        {
+            Assert.Equal(
+                ExpectedBalance(account, LastRound),
+                (ulong)(await storage.GetBalanceAtRoundAsync(account, Native, LastRound, CancellationToken.None)).Value);
+        }
+    }
+
+    [Fact]
     public async Task Writing_A_Round_Older_Than_The_Cursor_Is_Refused_And_Changes_Nothing()
     {
         var storage = await IndexedAsync();
