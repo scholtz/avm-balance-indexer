@@ -3,7 +3,7 @@ using System.ComponentModel.DataAnnotations;
 namespace AvmBalanceIndexer.Indexing.Adapters;
 
 /// <summary>Connection settings for one chain's archival block source and algod node.</summary>
-public sealed class AlgorandChainOptions
+public sealed class AlgorandChainOptions : IValidatableObject
 {
     public const string SectionName = "Algorand";
 
@@ -52,4 +52,14 @@ public sealed class AlgorandChainOptions
     /// <summary>Upper bound for one block response, protecting memory from misbehaving nodes.</summary>
     [Range(1024, 512 * 1024 * 1024)]
     public int MaxBlockBytes { get; set; } = 64 * 1024 * 1024;
+
+    public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+    {
+        if (MaxRetryDelay < BaseRetryDelay)
+        {
+            yield return new ValidationResult(
+                "Algorand:MaxRetryDelay must not be smaller than Algorand:BaseRetryDelay.",
+                [nameof(MaxRetryDelay)]);
+        }
+    }
 }

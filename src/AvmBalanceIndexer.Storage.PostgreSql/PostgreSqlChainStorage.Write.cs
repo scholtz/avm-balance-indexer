@@ -110,7 +110,6 @@ public sealed partial class PostgreSqlChainStorage
             FROM unnest(@account, @kind, @id, @round, @order, @ordinal, @txid, @path, @type, @delta, @after, @counterparty)
                  AS u(account, token_kind, token_id, round, intra_round_order, ordinal, transaction_id, inner_path,
                       effect_type, delta, balance_after, counterparty)
-            ON CONFLICT DO NOTHING
             """;
 
         await using var command = new NpgsqlCommand(sql, connection, transaction);
@@ -138,7 +137,6 @@ public sealed partial class PostgreSqlChainStorage
                    u.transaction_id, u.effect_type, u.delta::numeric
             FROM unnest(@kind, @id, @order, @ordinal, @account, @txid, @type, @delta)
                  AS u(token_kind, token_id, intra_round_order, ordinal, account, transaction_id, effect_type, delta)
-            ON CONFLICT DO NOTHING
             """;
 
         await using var command = new NpgsqlCommand(sql, connection, transaction);

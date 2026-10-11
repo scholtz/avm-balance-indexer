@@ -203,6 +203,21 @@ public class HostingExtensionsTests
     }
 
     [Fact]
+    public void An_Impossible_Fetch_Retry_Window_Is_Rejected()
+    {
+        using var provider = Build(
+            Config(
+                ("Chain", ChainId.AlgorandTestnet),
+                ("Storage:Provider", "PostgreSql"),
+                ("Storage:PostgreSql:ConnectionString", Connection),
+                ("Algorand:BaseRetryDelay", "00:00:30"),
+                ("Algorand:MaxRetryDelay", "00:00:01")),
+            indexing: true);
+
+        Assert.Throws<OptionsValidationException>(() => provider.GetRequiredService<IOptions<AlgorandChainOptions>>().Value);
+    }
+
+    [Fact]
     public void Out_Of_Range_Indexer_Settings_Are_Rejected()
     {
         using var provider = Build(

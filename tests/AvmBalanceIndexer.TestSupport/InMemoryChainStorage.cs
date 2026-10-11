@@ -115,6 +115,15 @@ public class InMemoryChainStorage(ChainContext context) : IChainStorage
                 throw new ChainDivergenceException($"Round {round} would leave a gap after published round {_status.IndexedRound}.");
             }
 
+            var seen = new HashSet<(HoldingKey, int, int)>();
+            foreach (var effect in effects)
+            {
+                if (!seen.Add((new HoldingKey(effect.Account, effect.Token), effect.Id.IntraRoundOrder, effect.Id.Ordinal)))
+                {
+                    throw new InvalidOperationException($"Round {round} contains two effects with the same identity (ordinal {effect.Id.Ordinal}).");
+                }
+            }
+
             foreach (var effect in effects)
             {
                 var key = new HoldingKey(effect.Account, effect.Token);

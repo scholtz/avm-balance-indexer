@@ -373,6 +373,24 @@ public abstract class StorageContractTests
     }
 
     [Fact]
+    public async Task Two_Effects_With_The_Same_Identity_Fail_The_Round_Instead_Of_Being_Dropped()
+    {
+        var storage = await CreateStorageAsync();
+        await CreateIndexer(storage, Adapter()).RunAsync(1, CancellationToken.None);
+        var id = new EffectId(2, 1, "TX", [], 0);
+        var effects = new[]
+        {
+            new TokenEffect(id, Alice, Native, EffectType.Payment, -5, Amount.From(1), null),
+            new TokenEffect(id, Alice, Native, EffectType.Payment, -5, Amount.From(1), null),
+        };
+        var status = new ChainStatus(ChainId.AlgorandTestnet, 2, TestChain.FakeHash(2), null, IngestionState.Following, DateTimeOffset.UnixEpoch);
+
+        await Assert.ThrowsAnyAsync<Exception>(() => storage.WriteRoundAsync(status, effects, CancellationToken.None));
+
+        Assert.Equal(1UL, (await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!.IndexedRound);
+    }
+
+    [Fact]
     public async Task Skipping_A_Round_Is_Rejected_And_Nothing_Is_Published()
     {
         var storage = await IndexedAsync(3);
