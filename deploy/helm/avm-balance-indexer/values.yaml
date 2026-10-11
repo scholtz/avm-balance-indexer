@@ -47,7 +47,10 @@ cassandra:
     enabled: false
     # Directory on the node that keeps the data (created when missing). Required when enabled.
     hostPath: ""
-    # Pins the pod to the node that owns the directory, for example {kubernetes.io/hostname: node-1}.
+    # Name of the node (label kubernetes.io/hostname) that owns the directory. Required (or nodeSelector): the pod must never
+    # start on another node, where the directory would be created empty and a new, empty database would be indexed.
+    node: ""
+    # Extra node labels instead of or in addition to the node name.
     nodeSelector: {}
     image: cassandra:5.0
     initImage: busybox:1.37

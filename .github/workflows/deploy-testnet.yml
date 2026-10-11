@@ -27,6 +27,7 @@ jobs:
     outputs:
       sha: ${{ steps.sha.outputs.sha }}
       tag: ${{ steps.sha.outputs.tag }}
+      current: ${{ steps.sha.outputs.current }}
     steps:
       - id: sha
         env:
@@ -41,10 +42,19 @@ jobs:
           fi
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "tag=main-${sha:0:7}" >> "$GITHUB_OUTPUT"
+          # A slower CI run of an older commit must not roll the testnet back: only the head of main is deployed.
+          head="$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq .sha)"
+          if [ "$sha" = "$head" ] || [ "${{ github.event_name }}" = workflow_dispatch ]; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "current=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::$sha is not the head of main ($head); a newer run deploys it"
+          fi
 
   images:
     name: Images
     needs: plan
+    if: needs.plan.outputs.current == 'true'
     uses: ./.github/workflows/docker-publish.yml
     with:
       ref: ${{ needs.plan.outputs.sha }}
@@ -56,6 +66,7 @@ jobs:
   deploy:
     name: Testnet
     needs: [plan, images]
+    if: needs.plan.outputs.current == 'true'
     uses: ./.github/workflows/helm-deploy.yml
     with:
       environment: testnet

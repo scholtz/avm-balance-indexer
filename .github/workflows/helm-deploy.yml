@@ -78,15 +78,29 @@ jobs:
         env:
           RELEASE: ${{ inputs.release }}
           VALUES: ${{ inputs.values }}
+          CHAIN: ${{ inputs.chain }}
           IMAGE_TAG: ${{ inputs.image-tag }}
+          CASSANDRA_NODE: ${{ vars.CASSANDRA_NODE }}
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
         run: |
-          helm upgrade --install "$RELEASE" deploy/helm/avm-balance-indexer \
-            --namespace "$NAMESPACE" \
-            -f "deploy/helm/values/$VALUES" \
-            --set "image.repository=docker.io/${DOCKERHUB_USERNAME}/avm-balance-indexer" \
-            --set "image.tag=$IMAGE_TAG" \
-            --wait --timeout 25m
+          if ! [[ "$IMAGE_TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then echo "::error::Invalid image tag"; exit 1; fi
+          if [ -z "$CASSANDRA_NODE" ]; then
+            echo "::error::Set the Actions variable CASSANDRA_NODE to the name of the node that owns /mnt/nvme1/avm-balance-indexer (docs/deployment-pipelines.md)"; exit 1
+          fi
+          common=(--namespace "$NAMESPACE" -f "deploy/helm/values/$VALUES"
+            --set-string "image.repository=docker.io/${DOCKERHUB_USERNAME}/avm-balance-indexer"
+            --set-string "cassandra.embedded.node=$CASSANDRA_NODE" --wait --timeout 25m)
+
+          # Upgrade rules of docs/operations.md: the worker first (it applies schema changes; Recreate so that no old writer runs meanwhile),
+          # the API only after the new worker is ready. A first installation has nothing to protect and goes in one step.
+          api_image="$(kubectl -n "$NAMESPACE" get deployment "${RELEASE}-${CHAIN}-api" -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || true)"
+          if [ -n "$api_image" ] && [ "${api_image##*:}" != "$IMAGE_TAG" ]; then
+            echo "Step 1: worker ${IMAGE_TAG}, API stays on ${api_image##*:}"
+            helm upgrade --install "$RELEASE" deploy/helm/avm-balance-indexer "${common[@]}" \
+              --set-string "image.tag=$IMAGE_TAG" --set-string "image.apiTag=${api_image##*:}" --set worker.strategy=Recreate
+          fi
+          echo "Step 2: everything on ${IMAGE_TAG}"
+          helm upgrade --install "$RELEASE" deploy/helm/avm-balance-indexer "${common[@]}" --set-string "image.tag=$IMAGE_TAG"
       - name: What runs
         if: always()
         env:

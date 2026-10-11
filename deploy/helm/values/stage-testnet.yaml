@@ -16,6 +16,9 @@ ingress:
     enabled: true
     clusterIssuer: letsencrypt-prod
 api:
+  # Behind the ingress every request comes from a cluster address: believe X-Forwarded-For so that the rate limit counts real clients.
+  trustForwardedHeaders: true
+  knownProxyNetworks: ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
   replicaCount: 1
 worker:
   replicaCount: 1

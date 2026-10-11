@@ -34,6 +34,9 @@ On the `production` environment enable *Required reviewers* so that a release ta
 | `DOCKERHUB_TOKEN` | image publish | Docker Hub access token with *Read & Write* (Account settings, Security, New access token). Not your password. |
 | `KUBE_CONFIG` | deploy | Kube config file of the deployer account (section 2), either the YAML itself or its base64 encoding. |
 
+One **variable** (not a secret; Settings, Secrets and variables, Actions, Variables): `CASSANDRA_NODE`, the name of the node (`kubectl get nodes`) that owns
+`/mnt/nvme1/avm-balance-indexer`. The chart pins the Cassandra pods to it and refuses to render without it, because on any other node the hostPath would be created empty and a new database would be indexed.
+
 Docker Hub creates the repositories `avm-balance-indexer-api` and `avm-balance-indexer-worker` on the first push (create them first if your
 organisation forbids that). Make them public, or give the cluster a pull secret (section 3).
 
@@ -71,8 +74,7 @@ runs Cassandra.
    ```
 
    If you use your own kube config with rights in the namespace, paste that instead; the workflow only needs permission for the objects listed in `deploy/rbac/deployer.yaml`.
-3. Cassandra stores its data in a directory of **one** node. Label or name the node and pin the pod to it in the overlay (`cassandra.embedded.nodeSelector`, for example
-   `kubernetes.io/hostname: <node>`), otherwise the pod can start on another node with an empty directory. The directory is created on first start, owned by uid 999.
+3. Cassandra stores its data in a directory of **one** node: set the variable `CASSANDRA_NODE` (section 1). The directory is created on first start and handed to uid 999.
 
 ## 3. Kubernetes secrets
 
@@ -93,15 +95,17 @@ The chart refuses to render when a required secret name is missing (`required` c
 
 ## 4. First deployment and day-to-day
 
-1. Add the secrets (1), prepare the cluster (2), push to `main`. The testnet workflow builds the images, installs the release and waits until the API,
+1. Add the secrets and the variable (1), prepare the cluster (2), push to `main`. The testnet workflow builds the images, installs the release and waits until the API,
    worker and Cassandra are ready (the first Cassandra start takes a few minutes; the wait is 25 minutes). The smoke test only warns, because DNS and the certificate can lag.
 2. Production: merge to `main`, then `git tag v0.1.0 && git push origin v0.1.0`. Approve the run in the `production` environment. MainNet starts the backfill from round 0; plan disk and time
    (benchmark figures in the README) and consider your own archival nodes (`algorand.gossipHosts`).
 3. Roll back or redeploy: Actions, *Deploy production*, Run workflow, give an existing image tag (for example `v0.1.0`). No images are built.
 4. Look at it: `kubectl -n avm-balance-indexer get pods -l app.kubernetes.io/instance=testnet` and `kubectl -n avm-balance-indexer logs deploy/testnet-algorand-testnet-worker`.
 
-Schema migrations: the testnet workflow upgrades workers with `RollingUpdate`. A release that contains a migration must be deployed as described in
-[operations.md](operations.md) (`worker.strategy=Recreate`): set it in the overlay for that one commit.
+Upgrades follow the rules of [operations.md](operations.md) automatically: when the release already exists, the deploy job first upgrades the worker alone
+(`worker.strategy=Recreate`, so no old writer runs while a migration is applied), waits until it is ready, and then moves the API and everything else to the new tag. Indexing pauses for the
+seconds a worker restart takes. Deployments of one release queue (they never overlap), testnet only ever deploys the head of `main`, and a production tag is refused unless CI succeeded on its commit.
+For a rollback give *Deploy production* the image tag **and** the `ref` (tag or commit) whose chart and values belong to it.
 
 Known limits of this setup: one Cassandra node per chain on one disk (no replication; back up the directories), `hostPath` ties the data to a machine, and the three Cassandra instances plus
 the workers compete for the memory of that machine (see `cassandra.embedded.resources`).

@@ -130,23 +130,23 @@ jobs:
       - run: |
           for v in deploy/helm/values/*.yaml; do
             echo "== $v"
-            helm lint deploy/helm/avm-balance-indexer -f "$v"
-            helm template ci deploy/helm/avm-balance-indexer -f "$v" > /dev/null
+            helm lint deploy/helm/avm-balance-indexer -f "$v" --set cassandra.embedded.node=ci-node
+            helm template ci deploy/helm/avm-balance-indexer -f "$v" --set cassandra.embedded.node=ci-node > /dev/null
           done
       - name: Upgrade options render (per-component tags, Recreate strategy, invalid strategy refused)
         run: |
           out=$(helm template ci deploy/helm/avm-balance-indexer -f deploy/helm/values/stage-testnet.yaml \
-            --set image.apiTag=old-api --set image.workerTag=new-worker --set worker.strategy=Recreate)
+            --set cassandra.embedded.node=ci-node --set image.apiTag=old-api --set image.workerTag=new-worker --set worker.strategy=Recreate)
           echo "$out" | grep -q 'image: .*-api:old-api'
           echo "$out" | grep -q 'image: .*-worker:new-worker'
           echo "$out" | grep -q 'type: Recreate'
-          if helm template ci deploy/helm/avm-balance-indexer -f deploy/helm/values/stage-testnet.yaml --set worker.strategy=recreate > /dev/null 2>&1; then
+          if helm template ci deploy/helm/avm-balance-indexer -f deploy/helm/values/stage-testnet.yaml --set cassandra.embedded.node=ci-node --set worker.strategy=recreate > /dev/null 2>&1; then
             echo "an invalid worker.strategy must fail the render"; exit 1
           fi
       - name: Deployment overlays render (hostPath, ingress host, embedded Cassandra contact point)
         run: |
           check() { # overlay release hostPath host
-            out=$(helm template "$2" deploy/helm/avm-balance-indexer -f "deploy/helm/values/$1.yaml" --set image.repository=docker.io/acme/avm-balance-indexer --set image.tag=t1)
+            out=$(helm template "$2" deploy/helm/avm-balance-indexer -f "deploy/helm/values/$1.yaml" --set image.repository=docker.io/acme/avm-balance-indexer --set image.tag=t1 --set cassandra.embedded.node=node-1)
             echo "$out" | grep -q "path: \"$3\"" || { echo "$1: hostPath $3 missing"; exit 1; }
             echo "$out" | grep -q "host: \"$4\"" || { echo "$1: ingress host $4 missing"; exit 1; }
             echo "$out" | grep -q "image: docker.io/acme/avm-balance-indexer-api:t1" || { echo "$1: api image name wrong"; exit 1; }
@@ -156,6 +156,11 @@ jobs:
           check stage-testnet testnet /mnt/nvme1/avm-balance-indexer/testnet testnet.balance-indexer.biatec.io
           check prod-algorand mainnet /mnt/nvme1/avm-balance-indexer/mainnet mainnet.balance-indexer.biatec.io
           check prod-voi voi /mnt/nvme1/avm-balance-indexer/voi voi.balance-indexer.biatec.io
-          if helm template x deploy/helm/avm-balance-indexer --set cassandra.embedded.enabled=true --set storage.provider=Cassandra > /dev/null 2>&1; then
+          out=$(helm template x deploy/helm/avm-balance-indexer -f deploy/helm/values/stage-testnet.yaml --set cassandra.embedded.node=node-1)
+          echo "$out" | grep -q 'kubernetes.io/hostname: "node-1"' || { echo "the node selector is missing"; exit 1; }
+          if helm template x deploy/helm/avm-balance-indexer --set cassandra.embedded.enabled=true --set storage.provider=Cassandra --set cassandra.embedded.node=n > /dev/null 2>&1; then
             echo "the embedded Cassandra without a hostPath must fail the render"; exit 1
+          fi
+          if helm template x deploy/helm/avm-balance-indexer -f deploy/helm/values/stage-testnet.yaml > /dev/null 2>&1; then
+            echo "the embedded Cassandra without a node must fail the render"; exit 1
           fi

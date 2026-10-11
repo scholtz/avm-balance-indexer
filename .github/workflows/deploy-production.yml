@@ -24,6 +24,9 @@ jobs:
   plan:
     name: Choose what to deploy
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
     outputs:
       sha: ${{ steps.plan.outputs.sha }}
       tag: ${{ steps.plan.outputs.tag }}
@@ -37,14 +40,20 @@ jobs:
           EVENT: ${{ github.event_name }}
           IMAGE_TAG: ${{ inputs.image-tag }}
           REQUESTED: ${{ inputs.ref }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           if [ "$EVENT" = push ]; then
             sha="$(git rev-parse HEAD)"
             git merge-base --is-ancestor "$sha" origin/main || { echo "::error::Tag ${GITHUB_REF_NAME} is not on main; only commits of main are released"; exit 1; }
+            # CI (build, tests, live checks) must have passed on exactly this commit.
+            passed="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${sha}&status=success" --jq '.total_count')"
+            [ "${passed:-0}" -gt 0 ] || { echo "::error::CI has not succeeded on ${sha}; wait for it (or re-run it) and push the tag again"; exit 1; }
             echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
             echo "build=true" >> "$GITHUB_OUTPUT"
           else
-            sha="$(git rev-parse "${REQUESTED:-${IMAGE_TAG}}^{commit}" 2>/dev/null || git rev-parse origin/main)"
+            # The chart and values of a rollback must match the image: say which commit (or tag) they come from.
+            [ -n "$REQUESTED" ] || REQUESTED="$IMAGE_TAG"
+            sha="$(git rev-parse --verify --quiet "${REQUESTED}^{commit}")" || { echo "::error::'${REQUESTED}' is not a commit or tag of this repository; pass the ref input"; exit 1; }
             echo "tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
             echo "build=false" >> "$GITHUB_OUTPUT"
           fi
