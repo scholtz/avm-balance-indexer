@@ -76,8 +76,12 @@ public sealed partial class PostgreSqlChainStorage
                 await InsertTokenEffectsAsync(connection, transaction, batch, cancellationToken).ConfigureAwait(false);
             }
 
-            await UpsertHoldingsAsync(connection, transaction, effects, cancellationToken).ConfigureAwait(false);
-            await UpsertTouchedAsync(connection, transaction, effects, cancellationToken).ConfigureAwait(false);
+            var perHolding = effects
+                .GroupBy(static e => new HoldingKey(e.Account, e.Token))
+                .Select(static g => (Newest: g.MaxBy(static e => (e.Id.Round, e.Id.Ordinal))!, First: g.Min(static e => e.Id.Round), Last: g.Max(static e => e.Id.Round)))
+                .ToArray();
+            await UpsertHoldingsAsync(connection, transaction, perHolding.Select(static h => h.Newest), cancellationToken).ConfigureAwait(false);
+            await UpsertTouchedAsync(connection, transaction, perHolding.Select(static h => (new HoldingKey(h.Newest.Account, h.Newest.Token), h.First, h.Last)), cancellationToken).ConfigureAwait(false);
         }
 
         await UpsertCursorAsync(connection, transaction, last, cancellationToken).ConfigureAwait(false);
@@ -162,13 +166,10 @@ public sealed partial class PostgreSqlChainStorage
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private static async Task UpsertHoldingsAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, IReadOnlyList<TokenEffect> effects, CancellationToken cancellationToken)
+    private static async Task UpsertHoldingsAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, IEnumerable<TokenEffect> newestPerHolding, CancellationToken cancellationToken)
     {
         // The newest effect per account/token (by round, then ordinal) carries the absolute balance after the whole batch.
-        foreach (var batch in effects
-            .GroupBy(static e => new HoldingKey(e.Account, e.Token))
-            .Select(static g => g.MaxBy(static e => (e.Id.Round, e.Id.Ordinal))!)
-            .Chunk(WriteBatchSize))
+        foreach (var batch in newestPerHolding.Chunk(WriteBatchSize))
         {
             await UpsertHoldingsBatchAsync(connection, transaction, batch, cancellationToken).ConfigureAwait(false);
         }
@@ -219,11 +220,8 @@ public sealed partial class PostgreSqlChainStorage
         }
     }
 
-    private static async Task UpsertTouchedAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, IReadOnlyList<TokenEffect> effects, CancellationToken cancellationToken)
+    private static async Task UpsertTouchedAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, IEnumerable<(HoldingKey Key, ulong First, ulong Last)> touched, CancellationToken cancellationToken)
     {
-        var touched = effects
-            .GroupBy(static e => new HoldingKey(e.Account, e.Token))
-            .Select(static g => (Key: g.Key, First: g.Min(static e => e.Id.Round), Last: g.Max(static e => e.Id.Round)));
         foreach (var batch in touched.Chunk(WriteBatchSize))
         {
             await UpsertTouchedBatchAsync(connection, transaction, batch, cancellationToken).ConfigureAwait(false);

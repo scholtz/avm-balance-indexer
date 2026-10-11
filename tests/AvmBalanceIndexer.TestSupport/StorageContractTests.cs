@@ -1101,5 +1101,30 @@ public abstract class StorageContractTests
         Assert.Equal(1UL, (ulong)(await storage.GetBalanceAtRoundAsync(Bob, TokenKey.Asa(asset), 2, CancellationToken.None)).Value);
         Assert.True((await storage.GetBalanceAtRoundAsync(Alice, TokenKey.Asa(asset), 4, CancellationToken.None)).IsZero);
     }
-}
 
+    [Fact]
+    public async Task A_Batch_Can_Cross_A_Round_Bucket_Boundary()
+    {
+        var storage = await CreateStorageAsync();
+        var genesis = Round(0, (Alice, 100, 100));
+        await storage.WriteRoundAsync(genesis.Status, genesis.Effects, CancellationToken.None);
+        var last = RoundBuckets.Size + 2;
+        var rounds = Enumerable.Range(1, (int)last)
+            .Select(i => (ulong)i)
+            .Select(round => round switch
+            {
+                RoundBuckets.Size - 1 => Round(round, (Alice, -10, 90), (Bob, 10, 10)),
+                RoundBuckets.Size + 1 => Round(round, (Bob, -4, 6), (Carol, 4, 4)),
+                _ => Round(round),
+            })
+            .ToArray();
+
+        await storage.WriteRoundsAsync(rounds, CancellationToken.None);
+
+        Assert.Equal(last, (await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!.IndexedRound);
+        Assert.Equal(6UL, (ulong)(await storage.GetBalanceAtRoundAsync(Bob, Native, last, CancellationToken.None)).Value);
+        Assert.Equal(10UL, (ulong)(await storage.GetBalanceAtRoundAsync(Bob, Native, RoundBuckets.Size, CancellationToken.None)).Value);
+        Assert.Equal(2, (await storage.GetEffectsAsync(Bob, Native, null, null, null, 10, CancellationToken.None)).Items.Count);
+        Assert.Equal(3, (await storage.GetHoldersAtRoundAsync(Native, last, false, null, 10, CancellationToken.None)).Items.Count);
+    }
+}

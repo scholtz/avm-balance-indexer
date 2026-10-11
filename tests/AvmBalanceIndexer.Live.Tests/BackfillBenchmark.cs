@@ -20,15 +20,9 @@ public class BackfillBenchmark(PostgresFixture postgres, ITestOutputHelper outpu
 {
     private const int Blocks = 1500;
 
-    [Fact]
+    [BenchmarkFact]
     public async Task Where_Does_The_Time_Go()
     {
-        if (Environment.GetEnvironmentVariable("AVM_BENCH") != "1")
-        {
-            output.WriteLine("Skipped: set AVM_BENCH=1 to run the backfill benchmark.");
-            return;
-        }
-
         var http = AlgorandChainFactory.CreateBlockHttpClient();
         var options = new AlgorandChainOptions { Chain = ChainId.AlgorandMainnet, MaxAttempts = 30, BaseRetryDelay = TimeSpan.FromMilliseconds(200), MaxRetryDelay = TimeSpan.FromSeconds(3) };
         var inner = AlgorandChainFactory.Create(options, http, NullLoggerFactory.Instance);

@@ -132,7 +132,7 @@ public sealed class BalanceTracker(IBalanceReadStore store, int maxCacheEntries)
             return;
         }
 
-        Commit(new RoundEffects([], new Dictionary<HoldingKey, Amount>(_staged)));
+        CommitBalances(_staged);
         _staged.Clear();
     }
 
@@ -140,11 +140,17 @@ public sealed class BalanceTracker(IBalanceReadStore store, int maxCacheEntries)
     public void Commit(RoundEffects round)
     {
         ArgumentNullException.ThrowIfNull(round);
+        CommitBalances(round.FinalBalances);
+    }
 
-        if (round.FinalBalances.Count >= _generationSize)
+    private void CommitBalances(IReadOnlyDictionary<HoldingKey, Amount> balances) => CommitBalances(balances, balances.Count);
+
+    private void CommitBalances(IEnumerable<KeyValuePair<HoldingKey, Amount>> balances, int count)
+    {
+        if (count >= _generationSize)
         {
             // A round this large would not fit a generation. Forget what it changed instead of caching it; storage has it.
-            foreach (var key in round.FinalBalances.Keys)
+            foreach (var (key, _) in balances)
             {
                 _young.Remove(key);
                 _old.Remove(key);
@@ -153,7 +159,7 @@ public sealed class BalanceTracker(IBalanceReadStore store, int maxCacheEntries)
             return;
         }
 
-        foreach (var (key, amount) in round.FinalBalances)
+        foreach (var (key, amount) in balances)
         {
             _young[key] = amount;
             _old.Remove(key);

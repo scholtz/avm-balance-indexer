@@ -72,6 +72,43 @@ public class BatchedIndexingTests
     }
 
     [Fact]
+    public async Task A_Failing_Fetch_Does_Not_Throw_Away_The_Rounds_Computed_Before_It()
+    {
+        var storage = new RecordingStorage(new ChainContext(ChainId.AlgorandTestnet));
+        var flaky = new FailingAdapter(Adapter(), failingRound: 4);
+        var options = new IndexerOptions { FetchConcurrency = 1, CommitBatchRounds = 10, FollowingThresholdRounds = 0 };
+
+        await Assert.ThrowsAsync<TimeoutException>(() => Indexer(storage, flaky, options).RunAsync(LastRound, CancellationToken.None));
+
+        Assert.Equal(3UL, (await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!.IndexedRound);
+        Assert.Equal([1, 3], storage.BatchSizes);
+    }
+
+    [Fact]
+    public async Task A_Failing_Write_Is_Not_Written_Again_While_Failing()
+    {
+        var storage = new RecordingStorage(new ChainContext(ChainId.AlgorandTestnet)) { FailBatchesOver = 1 };
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => Indexer(storage, Adapter()).RunAsync(LastRound, CancellationToken.None));
+
+        Assert.Equal(1, storage.FailedAttempts); // one refused batch, no second attempt from the failure handler
+    }
+
+    private sealed class FailingAdapter(Adapters.IChainAdapter inner, ulong failingRound) : Adapters.IChainAdapter
+    {
+        public Adapters.ChainProfile Profile => inner.Profile;
+
+        public ReadOnlyMemory<byte> GenesisHash => inner.GenesisHash;
+
+        public Task<ulong> GetLatestRoundAsync(CancellationToken cancellationToken) => inner.GetLatestRoundAsync(cancellationToken);
+
+        public Task<Adapters.GenesisDocument> GetGenesisAsync(CancellationToken cancellationToken) => inner.GetGenesisAsync(cancellationToken);
+
+        public Task<Adapters.BlockData> FetchBlockAsync(ulong round, CancellationToken cancellationToken) =>
+            round == failingRound ? Task.FromException<Adapters.BlockData>(new TimeoutException("host timed out")) : inner.FetchBlockAsync(round, cancellationToken);
+    }
+
+    [Fact]
     public async Task Staged_Balances_Are_Seen_By_The_Next_Round_And_Cached_Only_After_The_Commit()
     {
         var storage = new InMemoryChainStorage(new ChainContext(ChainId.AlgorandTestnet));
@@ -98,10 +135,13 @@ public class BatchedIndexingTests
 
         public int? FailBatchesOver { get; init; }
 
+        public int FailedAttempts { get; private set; }
+
         public override Task<bool> WriteRoundsAsync(IReadOnlyList<RoundWrite> rounds, CancellationToken cancellationToken)
         {
             if (FailBatchesOver is { } limit && rounds.Count > limit)
             {
+                FailedAttempts++;
                 throw new InvalidOperationException("disk full");
             }
 

@@ -29,7 +29,9 @@ public sealed partial class RoundIndexer(
     private readonly IndexerOptions _options = options.Value;
     private readonly HashSet<ulong> _knownArc200 = [];
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
+    private static readonly TimeSpan FlushGracePeriod = TimeSpan.FromSeconds(30);
     private long _roundsCommitted;
+    private bool _writeFailed;
 
     /// <summary>Total rounds this instance has committed; lets a supervisor tell progress from a stall without reading storage.</summary>
     public long RoundsCommitted => Interlocked.Read(ref _roundsCommitted);
@@ -125,6 +127,13 @@ public sealed partial class RoundIndexer(
                         LogProgress(logger, chain, block.Round, target);
                     }
                 }
+            }
+            catch (Exception ex) when (pending.Count > 0 && ex is not (BlockNotAvailableException or ChainDivergenceException) && !_writeFailed)
+            {
+                // A failing fetch, a bad block or a shutdown must not throw away the rounds already computed: with batches of
+                // 25, a flaky host would otherwise keep a backfill from ever completing one. Best effort within a grace period.
+                await TryFlushAsync(tracker, pending).ConfigureAwait(false);
+                ExceptionDispatchInfo.Capture(ex).Throw();
             }
             catch (BlockNotAvailableException ex) when (stopAfterRound is null)
             {
@@ -280,6 +289,20 @@ public sealed partial class RoundIndexer(
         return new RoundWrite(status, round.Effects);
     }
 
+    private async Task TryFlushAsync(BalanceTracker tracker, List<RoundWrite> pending)
+    {
+        using var grace = new CancellationTokenSource(FlushGracePeriod);
+        try
+        {
+            await FlushAsync(tracker, pending, grace.Token).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // The original failure is what the caller reports; the rounds are simply computed again after a restart.
+            LogFlushFailed(logger, ex, pending.Count);
+        }
+    }
+
     /// <summary>Writes the staged rounds as one unit and lets the tracker cache their balances.</summary>
     private async Task FlushAsync(BalanceTracker tracker, List<RoundWrite> pending, CancellationToken cancellationToken)
     {
@@ -288,7 +311,18 @@ public sealed partial class RoundIndexer(
             return;
         }
 
-        if (!await storage.WriteRoundsAsync(pending, cancellationToken).ConfigureAwait(false))
+        bool applied;
+        try
+        {
+            applied = await storage.WriteRoundsAsync(pending, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            _writeFailed = true;
+            throw;
+        }
+
+        if (!applied)
         {
             // This indexer only ever writes the next rounds, so finding the first one published means a second writer is active;
             // its balances may differ from the ones computed here, which must not be cached.
@@ -338,6 +372,9 @@ public sealed partial class RoundIndexer(
 
         return new AssetDirectory(records);
     }
+
+    [LoggerMessage(EventId = 1203, Level = LogLevel.Warning, Message = "Could not write {Rounds} computed rounds while stopping; they are indexed again on restart")]
+    private static partial void LogFlushFailed(ILogger logger, Exception exception, int rounds);
 
     [LoggerMessage(EventId = 1200, Level = LogLevel.Information, Message = "{Chain}: indexed round {Round} of {Target}")]
     private static partial void LogProgress(ILogger logger, string chain, ulong round, ulong target);
