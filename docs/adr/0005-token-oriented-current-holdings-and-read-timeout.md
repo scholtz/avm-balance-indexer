@@ -28,7 +28,8 @@ Separately, a slow scan could hold a snapshot and a connection for minutes.
   before the round). PostgreSQL adds the column with migration `0003`, which fills it from `holdings_by_account`, and holds the single
   backfill; Cassandra adds it with `0002_*.cql` (`ADD IF NOT EXISTS`), which the schema manager applies when the column is missing, and
   rows without the flag are resolved from the effect history. The upgrade rule above applies to this migration too: no writer of the
-  previous version may run while it is applied.
+  previous version may run while it is applied, and the API must not be upgraded before a new worker has applied the schema (the
+  latest-holders query selects the new column).
 - Reads have a timeout: PostgreSQL `SET LOCAL statement_timeout` per read snapshot (the connection's command timeout is raised above it), Cassandra a
   deadline over the whole read plus the driver request timeout.
   Both surface as `StorageTimeoutException` and HTTP 503, so one request cannot hold a snapshot for minutes.
