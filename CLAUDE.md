@@ -38,7 +38,7 @@ dotnet test AvmBalanceIndexer.slnx   # fast loop with AVM_SKIP_LIVE_TESTS=1; sta
 dotnet test tests/AvmBalanceIndexer.Indexing.Tests --filter "FullyQualifiedName~Name"   # single test while doing TDD
 dotnet test tests/AvmBalanceIndexer.Live.Tests                    # needed when balance logic changes
 ```
-Set the variable per shell: bash `export AVM_SKIP_LIVE_TESTS=1`, PowerShell `$env:AVM_SKIP_LIVE_TESTS=1`.
+Set the variable only for the one command (bash `AVM_SKIP_LIVE_TESTS=1 dotnet test ...`; PowerShell `$env:AVM_SKIP_LIVE_TESTS=1; dotnet test ...; Remove-Item Env:AVM_SKIP_LIVE_TESTS`). If it stays set, Live.Tests are silently skipped.
 Docker must be running for PostgreSQL-backed tests unless `AVM_TEST_POSTGRES` is set. CI = build+unit+contract,
 live-network, docker builds, helm lint; all must be green to merge.
 
@@ -64,9 +64,9 @@ PR comments when #18 (normalizer) needs storage contract members that #14/#22 ch
 
 ## The loop (repeat until told to stop)
 
-0. **Sync**: `git fetch origin` (and `git checkout main && git pull --ff-only` in a normal clone). Do this at the start of every iteration
+0. **Sync**: `git fetch origin` (branches are always based on `origin/main`, never on a local `main`). Do this at the start of every iteration
    and again before opening a PR, before every review round, and before merging.
-1. **Open PRs of your team first**: `gh pr list --label team:<t> --state open`. For each: rebase on `origin/main`,
+1. **Open PRs of your team first**: `gh pr list --label team:<t> --state open`. For each: rebase on `origin/main` (not `dependabot/*` PRs: comment `@dependabot rebase`),
    check CI (`gh pr checks <n>`), fix failures, address review comments, finish the review/merge steps below. Only when
    none are left, continue.
 2. **Pick an issue**: `gh issue list --label team:<t> --state open`. Take the first one that is not blocked (use the order in "Team assignments", else lowest number).
@@ -80,9 +80,9 @@ PR comments when #18 (normalizer) needs storage contract members that #14/#22 ch
 3. **If no issue exists**: create one (see "Creating issues"), label it with your team, then take it.
 4. **Implement with TDD**: write a failing test first (smallest scope that proves the behaviour), see it fail for the
    right reason, make it pass, refactor. Every behaviour change needs tests: unit, shared contract test for storage,
-   live test when balance logic, hashing, adapters or normalization change, Helm lint for chart changes. No untested code paths in the PR.
+   live test when balance logic, hashing, adapters or normalization change, Helm lint for chart changes. No untested code paths in the PR (docs-only, CI, Helm and dependency PRs are exempt from TDD but still need an issue, except Dependabot's).
 5. **Before the PR**: `git fetch && git rebase origin/main`, full build + tests (`AVM_SKIP_LIVE_TESTS=1` unless balance
-   logic, hashing, adapters or normalization changed; CI runs the live job regardless), update docs/ADR if a decision changed. Push (after any rebase: `git push --force-with-lease`), open the PR with `Closes #<n>`, the team label, and the
+   logic, hashing, adapters or normalization changed; CI runs the live job regardless), update docs/ADR if a decision changed. Re-read the issue labels once more before opening the PR (a lower team letter may have claimed it meanwhile). Push (after any rebase: `git push --force-with-lease`), open the PR with `Closes #<n>`, the team label, and the
    repo PR template.
 6. **Code review loop**: run the `code-review` skill on the PR (use `high` or higher). Fix every real finding (with a
    test where the finding is a bug), push, rebase if main moved, review again. Repeat until a round returns nothing to
