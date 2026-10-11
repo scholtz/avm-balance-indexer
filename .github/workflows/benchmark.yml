@@ -80,7 +80,7 @@ jobs:
           --postgres "Host=localhost;Port=5432;Username=avm;Password=avm;Database=postgres"
       # A flaky Voi node must not cost the night's MainNet result.
       - name: Voi
-        continue-on-error: true
+        continue-on-error: ${{ github.event_name != 'pull_request' }}
         run: >
           dotnet $BENCH run --provider postgres --chain voi --rounds "$VOI_ROUNDS" --last-round "${{ needs.range.outputs.voi }}"
           --commit "$GITHUB_SHA" --out results --api-dll $API
@@ -124,7 +124,7 @@ jobs:
           --commit "$GITHUB_SHA" --out results --api-dll $API
           --cassandra localhost:9042 --dc dc1 --cassandra-container "$(docker ps -q --filter ancestor=cassandra:5.0 | head -1)"
       - name: Voi
-        continue-on-error: true
+        continue-on-error: ${{ github.event_name != 'pull_request' }}
         run: >
           dotnet $BENCH run --provider cassandra --chain voi --rounds "$VOI_ROUNDS" --last-round "${{ needs.range.outputs.voi }}"
           --commit "$GITHUB_SHA" --out results --api-dll $API
@@ -190,6 +190,10 @@ jobs:
             done
           done
           rm -f ../out/latest-postgres.json ../out/latest-cassandra.json
+          # A chain without a result tonight must not keep an old file that looks current.
+          for chain in algorand-mainnet voi; do
+            [ -f "results/bench-cassandra/bench-$chain-cassandra.json" ] && [ -f "results/bench-postgres/bench-$chain-postgres.json" ] || rm -f ../out/latest-$chain-*.json
+          done
           printf '# Latest nightly benchmark\n\nPostgreSQL against Cassandra on the newest MainNet and Voi rounds. Updated every night by the workflow `Nightly benchmark`; older results are in `history/`. How it is measured: docs/benchmarks.md on the main branch.\n\n' | cat - comparison.md > ../out/latest.md
           cd ../out
           git add -A

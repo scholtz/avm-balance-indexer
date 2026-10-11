@@ -86,6 +86,29 @@ public class ReplayTests
     }
 
     [Fact]
+    public async Task The_Asset_Statistics_Count_Tokens_And_Holders_Of_The_Replayed_Range()
+    {
+        var set = MidChainRange();
+        var storage = new InMemoryChainStorage(new ChainContext(ChainId.AlgorandTestnet));
+        var normalizer = new LenientNormalizer(new AlgoEffectNormalizer(), set.RewardsBeforeFirstRound);
+        var seeder = new Seeder();
+        seeder.DryRun(set, normalizer);
+        await seeder.WriteGenesisAsync(storage, set, CancellationToken.None);
+        await new RoundIndexer(set, normalizer, storage, Options.Create(new IndexerOptions()), NullLogger<RoundIndexer>.Instance)
+            .RunAsync((ulong)set.Rounds, CancellationToken.None);
+
+        var statistics = await Runner.CollectAssetsAsync(storage, seeder, set.Rounds, CancellationToken.None);
+
+        Assert.Equal(1, statistics.TokensByKind["algo"]);
+        Assert.Equal(1, statistics.TokensByKind["asa"]);
+        var asa = Assert.Single(statistics.Top, static t => t.Token.StartsWith("asa:", StringComparison.Ordinal));
+        // Asset 77: Bob holds 3 units at the end, Alice opted in and holds none.
+        Assert.Equal(1, asa.Holders);
+        Assert.Equal(2, asa.OptedIn);
+        Assert.True(statistics.Top[0].Effects >= statistics.Top[^1].Effects);
+    }
+
+    [Fact]
     public void The_Report_Lists_The_Token_Counts_And_The_Holders_Of_The_Top_Tokens()
     {
         var assets = new AssetStatistics(

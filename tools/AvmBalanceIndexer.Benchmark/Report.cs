@@ -46,7 +46,7 @@ public static class Report
         }
 
         text.AppendLine();
-        AppendAssets(text, ordered[0]);
+        AppendAssets(text, ordered.FirstOrDefault(static r => r.Assets is not null) ?? ordered[0]);
         text.AppendLine("### API latency");
         text.AppendLine();
         text.AppendLine("One request at a time (p50 / p95 / p99), then 16 requests at a time (throughput and p95). The API runs as its own process on the same machine, so network time is not included.");
@@ -92,7 +92,7 @@ public static class Report
     private static string Cell(string? text) =>
         string.IsNullOrEmpty(text) ? string.Empty : string.Concat(text.Select(static c => c switch
         {
-            '|' or '[' or ']' or '<' or '>' or '`' or '*' or '_' or '\\' => "\\" + c,
+            '|' or '[' or ']' or '<' or '>' or '`' or '*' or '_' or '&' or '!' or '#' or '~' or '\\' => "\\" + c,
             '\r' or '\n' => " ",
             _ => c.ToString(),
         }));

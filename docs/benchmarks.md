@@ -33,7 +33,7 @@ the many near-empty rounds a backfill is made of).
 | Raw numbers of every night | the same branch, `history/YYYY-MM-DD-<chain>-<provider>.json`, and the run artifacts `bench-postgres` / `bench-cassandra` (`bench-<chain>-<provider>.json`) |
 | Snapshot in the README | [PostgreSQL or Cassandra?](../README.md#postgresql-or-cassandra) (updated by hand from `latest.md` when something changes) |
 
-The workflow runs at 02:17 UTC and on demand (Actions, Run workflow, optionally with another number of rounds). PostgreSQL and Cassandra each run
+The workflow runs at 02:17 UTC and on demand (Actions, Run workflow, optionally with another number of MainNet or Voi rounds). PostgreSQL and Cassandra each run
 on their own runner with only that database next to the API, so one does not disturb the other. A failed night is visible as a red run.
 
 ## Run it yourself
@@ -50,7 +50,7 @@ docker run -d --name bench-cass -e CASSANDRA_DC=dc1 -e CASSANDRA_ENDPOINT_SNITCH
 dotnet tools/AvmBalanceIndexer.Benchmark/bin/Release/net10.0/AvmBalanceIndexer.Benchmark.dll run --provider cassandra   --cassandra localhost:9042 --cassandra-container bench-cass   --api-dll src/AvmBalanceIndexer.Api/bin/Release/net10.0/AvmBalanceIndexer.Api.dll --out results
 
 # the comparison table
-dotnet tools/AvmBalanceIndexer.Benchmark/bin/Release/net10.0/AvmBalanceIndexer.Benchmark.dll report results/bench-cassandra.json results/bench-postgres.json
+dotnet tools/AvmBalanceIndexer.Benchmark/bin/Release/net10.0/AvmBalanceIndexer.Benchmark.dll report results/bench-algorand-mainnet-cassandra.json results/bench-algorand-mainnet-postgres.json
 ```
 
 `--chain voi` and `--rounds 100000` measure Voi, `--rounds` changes the size of the range (default 10000), `--last-round` pins its end, `AVM_BENCH_KEEP=1` keeps the database or keyspace afterwards.
