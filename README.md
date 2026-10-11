@@ -84,6 +84,7 @@ curl http://localhost:5000/v1/algorand-testnet/status
 | `Storage:PostgreSql:ConnectionString` | Required for PostgreSQL. Keep it in a secret. |
 | `Storage:PostgreSql:AccountHashPartitions` | Hash partitions of the account effect table, 1 to 1024. Fixed per database. |
 | `Storage:PostgreSql:ReadTimeoutSeconds` / `Storage:Cassandra:ReadTimeoutSeconds` | Default 30. PostgreSQL: `statement_timeout` of each read query. Cassandra: deadline of a whole read and driver timeout of every request (at least 5). A slower read fails with HTTP 503 instead of holding a snapshot. |
+| `Storage:Cassandra:WriteConcurrency` | Requests the round writer keeps in flight (256). |
 | `Storage:Cassandra:LeaseTtlSeconds` / `Storage:PostgreSql:LeaseHeartbeatSeconds` | Writer lease tuning (default 30 / 5): the Cassandra lease row TTL bounds failover time; the PostgreSQL heartbeat detects a dead lease session. |
 | `Storage:Cassandra:ContactPoints` / `Port` | Required for Cassandra: hosts and native-protocol port (default 9042). |
 | `Storage:Cassandra:Keyspace` / `LocalDatacenter` | One keyspace per chain deployment; the datacenter the driver routes to. Reads and writes use `LOCAL_QUORUM`. |
@@ -147,8 +148,9 @@ another chain, 503 while nothing is indexed yet. A walk over the holders of the 
 - Backfill speed is limited by downloading blocks from gossip hosts (about 100 ms per block and host, 25 to 60 rounds/s on
   busy MainNet blocks with 32 to 192 in flight; empty early blocks are much faster). The database is no longer the limit:
   committing 25 rounds per transaction raised the PostgreSQL write path from about 330 to about 3,900 rounds/s in the benchmark (`BackfillBenchmark`, `AVM_BENCH=1`). Cassandra saves one compare-and-set per batch
-  instead of per round: on one local node 364 rounds/s with one round per commit, 1,900 with 25 and 2,500 with 100 for early TestNet rounds, and about 12,000
-  effects per second for synthetic busy rounds (`CassandraBackfillBenchmark`); busy MainNet rounds are therefore limited by the database as well as by the download. Running several chains or your own archival nodes is the way to go faster.
+  instead of per round: on one local node (Docker, replication factor 1, no network latency between worker and database) 364 rounds/s with one round per commit,
+  1,900 with 25 and 2,500 with 100 for early TestNet rounds, and about 12,000 effects per second for synthetic busy rounds with 256 requests in flight
+  (`CassandraBackfillBenchmark`, `Storage:Cassandra:WriteConcurrency`; 64 gave about 8,000). A replicated cluster over a real network will differ: measure with your hardware. Running several chains or your own archival nodes is the way to go faster.
 - Several workers may run per chain: one holds the writer lease (PostgreSQL advisory lock on a dedicated session, Cassandra TTL row) and indexes, the others stand by. Failover takes up to the lease TTL (30 s) on Cassandra and about 30 s (TCP keepalives of the lease session) on PostgreSQL. Worker metrics are published on the `AvmBalanceIndexer.Worker` meter and exported over OTLP when an endpoint is configured.
 - Block headers are hash-checked against their certificate digest and transactions against the header commitments, but
   certificate signatures are not verified (ADR 0004). A host serving a whole fabricated chain is not detected: run your

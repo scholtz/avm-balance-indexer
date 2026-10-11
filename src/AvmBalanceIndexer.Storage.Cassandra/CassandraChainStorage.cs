@@ -22,7 +22,7 @@ public sealed partial class CassandraChainStorage : IChainStorage
     private const int MaxPageSize = 1000;
 
     /// <summary>Requests in flight per operation; keeps a genesis round with many thousand accounts from flooding the driver queue.</summary>
-    private const int MaxInFlight = 256;
+    private const int MaxInFlight = 64;
 
     private readonly CassandraSessionSource _source;
     private readonly string _chain;
@@ -32,6 +32,7 @@ public sealed partial class CassandraChainStorage : IChainStorage
     private readonly bool _createKeyspace;
     private readonly TimeSpan _readDeadline;
     private readonly TimeSpan _leaseTtl;
+    private readonly int _writeConcurrency;
     private readonly ConcurrentDictionary<string, Task<PreparedStatement>> _prepared = new();
     private readonly object _cursorLock = new();
     private (ulong Round, byte[] Hash)? _lastPublished;
@@ -63,6 +64,9 @@ public sealed partial class CassandraChainStorage : IChainStorage
             ? options.ReplicationFactor
             : throw new ArgumentOutOfRangeException(nameof(options), "ReplicationFactor must be between 1 and 9.");
         _createKeyspace = options.CreateKeyspace;
+        _writeConcurrency = options.WriteConcurrency is >= 1 and <= 4096
+            ? options.WriteConcurrency
+            : throw new ArgumentOutOfRangeException(nameof(options), "WriteConcurrency must be between 1 and 4096.");
     }
 
     /// <summary>Statement text for a table of this chain's keyspace (the keyspace name is validated, never caller supplied).</summary>
@@ -106,7 +110,8 @@ public sealed partial class CassandraChainStorage : IChainStorage
         IReadOnlyCollection<TItem> items,
         Func<TItem, Task<TResult>> work,
         CancellationToken cancellationToken,
-        SemaphoreSlim? gate = null)
+        SemaphoreSlim? gate = null,
+        int maxInFlight = MaxInFlight)
     {
         var results = new TResult[items.Count];
         if (items.Count == 0)
@@ -114,7 +119,7 @@ public sealed partial class CassandraChainStorage : IChainStorage
             return results;
         }
 
-        var ownGate = gate is null ? new SemaphoreSlim(MaxInFlight) : null;
+        var ownGate = gate is null ? new SemaphoreSlim(maxInFlight) : null;
         var limit = gate ?? ownGate!;
         Exception? failure = null;
         var index = 0;
@@ -164,8 +169,8 @@ public sealed partial class CassandraChainStorage : IChainStorage
         }
     }
 
-    private static async Task RunBoundedAsync<TItem>(IReadOnlyCollection<TItem> items, Func<TItem, Task> work, CancellationToken cancellationToken) =>
-        await RunBoundedAsync<TItem, bool>(items, async item => { await work(item).ConfigureAwait(false); return true; }, cancellationToken).ConfigureAwait(false);
+    private static async Task RunBoundedAsync<TItem>(IReadOnlyCollection<TItem> items, Func<TItem, Task> work, CancellationToken cancellationToken, int maxInFlight = MaxInFlight) =>
+        await RunBoundedAsync<TItem, bool>(items, async item => { await work(item).ConfigureAwait(false); return true; }, cancellationToken, maxInFlight: maxInFlight).ConfigureAwait(false);
 
     /// <summary>
     /// True for the errors Cassandra raises while the keyspace or its tables do not exist yet. Other invalid-query errors

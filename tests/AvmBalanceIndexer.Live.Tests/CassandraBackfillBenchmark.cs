@@ -26,7 +26,7 @@ public class CassandraBackfillBenchmark(CassandraFixture cassandra, ITestOutputH
     [BenchmarkFact]
     public async Task Where_Does_The_Write_Time_Go()
     {
-        var http = AlgorandChainFactory.CreateBlockHttpClient();
+        using var http = AlgorandChainFactory.CreateBlockHttpClient();
         var testnet = AlgorandChainFactory.Create(
             new AlgorandChainOptions { Chain = ChainId.AlgorandTestnet, MaxAttempts = 30, BaseRetryDelay = TimeSpan.FromMilliseconds(200), MaxRetryDelay = TimeSpan.FromSeconds(3) },
             http,
@@ -58,9 +58,9 @@ public class CassandraBackfillBenchmark(CassandraFixture cassandra, ITestOutputH
     [BenchmarkFact]
     public async Task How_Many_Effects_Per_Second_Can_Cassandra_Take()
     {
-        foreach (var batch in new[] { 1, 25 })
+        foreach (var (batch, concurrency) in new[] { (1, 64), (1, 256), (25, 64), (25, 256), (25, 1024) })
         {
-            var storage = await cassandra.CreateStorageAsync(ChainId.AlgorandTestnet);
+            var storage = await cassandra.CreateStorageAsync(ChainId.AlgorandTestnet, writeConcurrency: concurrency);
             const int accounts = 2000;
             const int rounds = 100;
             const int paymentsPerRound = 400;
@@ -103,7 +103,7 @@ public class CassandraBackfillBenchmark(CassandraFixture cassandra, ITestOutputH
                 await storage.WriteRoundsAsync(chunk, CancellationToken.None);
             }
 
-            output.WriteLine($"synthetic busy rounds, {batch} rounds per commit: {rounds / clock.Elapsed.TotalSeconds:F1} rounds/s, {rounds * paymentsPerRound * 2 / clock.Elapsed.TotalSeconds:F0} effects/s");
+            output.WriteLine($"synthetic busy rounds, {batch} rounds per commit, {concurrency} requests in flight: {rounds / clock.Elapsed.TotalSeconds:F1} rounds/s, {rounds * paymentsPerRound * 2 / clock.Elapsed.TotalSeconds:F0} effects/s");
         }
     }
 }

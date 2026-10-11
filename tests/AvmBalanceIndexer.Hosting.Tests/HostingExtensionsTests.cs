@@ -98,6 +98,8 @@ public class HostingExtensionsTests
     [InlineData("LocalDatacenter", "dc'1")]
     [InlineData("ReplicationFactor", "0")]
     [InlineData("Port", "70000")]
+    [InlineData("WriteConcurrency", "0")]
+    [InlineData("WriteConcurrency", "5000")]
     public void Cassandra_Settings_That_End_Up_In_Statements_Are_Validated(string key, string value)
     {
         using var provider = Build(Config(

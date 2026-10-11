@@ -68,6 +68,11 @@ internal sealed partial class CassandraOptionsValidator : IValidateOptions<Stora
             errors.Add("Storage:Cassandra:LeaseTtlSeconds must be between 3 and 3600.");
         }
 
+        if (settings.WriteConcurrency is < 1 or > 4096)
+        {
+            errors.Add("Storage:Cassandra:WriteConcurrency must be between 1 and 4096.");
+        }
+
         if (settings.Port is < 1 or > 65535)
         {
             errors.Add("Storage:Cassandra:Port must be between 1 and 65535.");
