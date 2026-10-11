@@ -22,8 +22,11 @@ public static class CassandraStorageExtensions
         services.AddSingleton(static provider => new CassandraChainStorage(
             provider.GetRequiredService<CassandraSessionSource>(),
             provider.GetRequiredService<ChainContext>(),
-            provider.GetRequiredService<IOptions<StorageOptions>>().Value.Cassandra));
+            provider.GetRequiredService<IOptions<StorageOptions>>().Value.Cassandra,
+            leaseTtl: TimeSpan.FromSeconds(provider.GetRequiredService<IOptions<StorageOptions>>().Value.Cassandra.LeaseTtlSeconds)));
         services.AddSingleton<IChainStorage>(static provider => provider.GetRequiredService<CassandraChainStorage>());
+        services.AddSingleton<IStorageFailureClassifier, CassandraErrors>();
+        services.AddSingleton<IWriterLeaseProvider>(static provider => provider.GetRequiredService<CassandraChainStorage>());
         return services;
     }
 }
@@ -57,6 +60,11 @@ internal sealed partial class CassandraOptionsValidator : IValidateOptions<Stora
         if (settings.ReadTimeoutSeconds is < 5 or > 600)
         {
             errors.Add("Storage:Cassandra:ReadTimeoutSeconds must be between 5 and 600 (it also bounds writes and schema changes).");
+        }
+
+        if (settings.LeaseTtlSeconds is < 3 or > 3600)
+        {
+            errors.Add("Storage:Cassandra:LeaseTtlSeconds must be between 3 and 3600.");
         }
 
         if (settings.Port is < 1 or > 65535)

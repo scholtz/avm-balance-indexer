@@ -11,7 +11,7 @@ namespace AvmBalanceIndexer.TestSupport;
 /// Reference implementation of the storage contract backed by plain collections. It defines the expected behaviour
 /// that every real provider is compared against in the contract suite, and keeps indexer tests hermetic.
 /// </summary>
-public class InMemoryChainStorage(ChainContext context) : IChainStorage
+public partial class InMemoryChainStorage(ChainContext context) : IChainStorage
 {
     private readonly object _gate = new();
     private readonly Dictionary<HoldingKey, List<TokenEffect>> _effects = [];

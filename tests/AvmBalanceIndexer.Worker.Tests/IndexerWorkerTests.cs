@@ -1,4 +1,5 @@
 using AvmBalanceIndexer.Domain.Chains;
+using AvmBalanceIndexer.Domain.Storage;
 using AvmBalanceIndexer.Indexing.Adapters;
 using AvmBalanceIndexer.Indexing.Ingestion;
 using AvmBalanceIndexer.Indexing.Normalization;
@@ -208,9 +209,157 @@ public class IndexerWorkerTests : IDisposable
         Assert.Equal(1, Environment.ExitCode);
     }
 
+    [Fact]
+    public async Task A_Standby_Replica_Writes_Nothing_While_Another_Holds_The_Lease_And_Takes_Over_When_It_Is_Released()
+    {
+        var storage = NewStorage();
+        var leader = await storage.TryAcquireAsync(CancellationToken.None);
+        Assert.NotNull(leader);
+
+        var (worker, lifetime) = Create(storage, Scenario.Adapter(), maxFailures: 10);
+        await worker.StartAsync(CancellationToken.None);
+        await Task.Delay(150);
+        Assert.Null(await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None));
+
+        await leader.DisposeAsync();
+        await WaitForRoundAsync(storage, Scenario.LastRound);
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.False(lifetime.StopRequested);
+        Assert.Equal(2, storage.LeasesGranted);
+    }
+
+    [Fact]
+    public async Task Losing_The_Lease_Stops_Indexing_And_The_Replica_Resumes_When_It_Gets_The_Lease_Again()
+    {
+        var storage = NewStorage();
+        var chain = new TestChain();
+        var blocks = Scenario.Blocks(chain).ToList();
+        var next = chain.Block(6, rewards: Scenario.RewardsAt(6));
+        var adapter = Scenario.Adapter(blocks);
+        var health = new WorkerHealth();
+        var (worker, lifetime) = Create(storage, adapter, maxFailures: 10, health);
+
+        await worker.StartAsync(CancellationToken.None);
+        await WaitForRoundAsync(storage, Scenario.LastRound);
+        storage.RevokeLease();
+        await WaitUntilAsync(() => health.LeasesLost == 1 && health.State == WorkerState.Leader && storage.LeasesGranted == 2);
+        adapter.Latest = 6;
+        adapter.Add(next);
+        await WaitForRoundAsync(storage, 6);
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.False(lifetime.StopRequested);
+        Assert.Equal(2, health.LeasesAcquired);
+    }
+
+    [Fact]
+    public async Task Losing_The_Lease_During_A_Retry_Backoff_Is_A_Failover_Not_A_Crash()
+    {
+        var storage = NewStorage();
+        var health = new WorkerHealth();
+        var adapter = new FlakyAdapter(Scenario.Adapter(), failuresBeforeSuccess: 1);
+        var options = Options.Create(new IndexerOptions
+        {
+            FetchConcurrency = 1,
+            FollowPollInterval = TimeSpan.FromMilliseconds(5),
+            RetryInitialBackoff = TimeSpan.FromSeconds(30),
+            RetryMaxBackoff = TimeSpan.FromSeconds(30),
+            MaxConsecutiveFailures = 10,
+            LeaseRetryInterval = TimeSpan.FromMilliseconds(5),
+        });
+        var indexer = new RoundIndexer(adapter, new AlgoEffectNormalizer(), storage, options, NullLogger<RoundIndexer>.Instance);
+        var lifetime = new FakeLifetime();
+        var worker = new IndexerWorker(indexer, storage, new ChainContext(ChainId.AlgorandTestnet), options, lifetime, storage, storage, health, NullLogger<IndexerWorker>.Instance);
+
+        await worker.StartAsync(CancellationToken.None);
+        await WaitUntilAsync(() => adapter.Failures == 1 && health.State == WorkerState.Leader);
+        await Task.Delay(50);
+        storage.RevokeLease();
+        await WaitUntilAsync(() => health.LeasesLost == 1 && storage.LeasesGranted == 2);
+        await WaitForRoundAsync(storage, Scenario.LastRound);
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.False(lifetime.StopRequested);
+        Assert.Equal(0, Environment.ExitCode);
+    }
+
+    [Fact]
+    public async Task A_Commit_That_Fails_Against_The_New_Writer_After_The_Lease_Was_Lost_Is_Not_Fatal()
+    {
+        var storage = NewStorage();
+        var health = new WorkerHealth();
+        var errors = new Queue<Exception>([new ChainDivergenceException("another writer moved the cursor")]);
+        var adapter = new FlakyAdapter(Scenario.Adapter(), failuresBeforeSuccess: 1, errors: errors, onFailure: storage.RevokeLease);
+
+        var (worker, lifetime) = Create(storage, adapter, maxFailures: 10, health);
+        await worker.StartAsync(CancellationToken.None);
+        await WaitUntilAsync(() => health.LeasesLost == 1 && storage.LeasesGranted == 2);
+        await WaitForRoundAsync(storage, Scenario.LastRound);
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.False(lifetime.StopRequested);
+        Assert.Equal(0, Environment.ExitCode);
+    }
+
+    [Fact]
+    public async Task A_Divergence_Without_A_Lost_Lease_Still_Stops_The_Application()
+    {
+        var storage = NewStorage();
+        var errors = new Queue<Exception>([new ChainDivergenceException("real divergence")]);
+        var adapter = new FlakyAdapter(Scenario.Adapter(), failuresBeforeSuccess: 1, errors: errors);
+
+        var (worker, lifetime) = Create(storage, adapter, maxFailures: 10);
+        await worker.StartAsync(CancellationToken.None);
+        await lifetime.WaitForStopAsync();
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.Equal(1, Environment.ExitCode);
+    }
+
+    [Fact]
+    public async Task A_Lease_That_Cannot_Be_Requested_Because_The_Database_Is_Down_Is_Waited_For()
+    {
+        var storage = new LeaseFlakyStorage(failures: 3);
+
+        var (worker, lifetime) = Create(storage, Scenario.Adapter(), maxFailures: 10);
+        await worker.StartAsync(CancellationToken.None);
+        await WaitForRoundAsync(storage, Scenario.LastRound);
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.False(lifetime.StopRequested);
+    }
+
+    [Fact]
+    public async Task The_Health_State_Follows_The_Role_Of_The_Replica()
+    {
+        var storage = NewStorage();
+        var other = await storage.TryAcquireAsync(CancellationToken.None);
+        var health = new WorkerHealth();
+        Assert.False(health.Ready);
+
+        var (worker, _) = Create(storage, Scenario.Adapter(), maxFailures: 10, health);
+        await worker.StartAsync(CancellationToken.None);
+        await WaitUntilAsync(() => health.State == WorkerState.Standby);
+        Assert.True(health.Ready);
+
+        await other!.DisposeAsync();
+        await WaitUntilAsync(() => health.State == WorkerState.Leader);
+        await worker.StopAsync(CancellationToken.None);
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        while (!condition())
+        {
+            await Task.Delay(5, timeout.Token);
+        }
+    }
+
     private static InMemoryChainStorage NewStorage() => new(new ChainContext(ChainId.AlgorandTestnet));
 
-    private static (IndexerWorker Worker, FakeLifetime Lifetime) Create(InMemoryChainStorage storage, IChainAdapter adapter, int maxFailures)
+    private static (IndexerWorker Worker, FakeLifetime Lifetime) Create(InMemoryChainStorage storage, IChainAdapter adapter, int maxFailures, WorkerHealth? health = null)
     {
         var options = Options.Create(new IndexerOptions
         {
@@ -219,10 +368,11 @@ public class IndexerWorkerTests : IDisposable
             RetryInitialBackoff = TimeSpan.FromMilliseconds(1),
             RetryMaxBackoff = TimeSpan.FromMilliseconds(5),
             MaxConsecutiveFailures = maxFailures,
+            LeaseRetryInterval = TimeSpan.FromMilliseconds(5),
         });
         var indexer = new RoundIndexer(adapter, new AlgoEffectNormalizer(), storage, options, NullLogger<RoundIndexer>.Instance);
         var lifetime = new FakeLifetime();
-        return (new IndexerWorker(indexer, storage, new ChainContext(ChainId.AlgorandTestnet), options, lifetime, NullLogger<IndexerWorker>.Instance), lifetime);
+        return (new IndexerWorker(indexer, storage, new ChainContext(ChainId.AlgorandTestnet), options, lifetime, storage, storage, health ?? new WorkerHealth(), NullLogger<IndexerWorker>.Instance), lifetime);
     }
 
     private static async Task WaitForRoundAsync(InMemoryChainStorage storage, ulong round)
@@ -241,7 +391,7 @@ public class IndexerWorkerTests : IDisposable
     }
 
     /// <summary>Fails a number of block fetches (or every n-th fetch) with a transient error before delegating.</summary>
-    private sealed class FlakyAdapter(FakeChainAdapter inner, int failuresBeforeSuccess, int failEvery = 0, Queue<Exception>? errors = null) : IChainAdapter
+    private sealed class FlakyAdapter(FakeChainAdapter inner, int failuresBeforeSuccess, int failEvery = 0, Queue<Exception>? errors = null, Action? onFailure = null) : IChainAdapter
     {
         private int _calls;
         private int _failures;
@@ -263,12 +413,23 @@ public class IndexerWorkerTests : IDisposable
             if (fail)
             {
                 Interlocked.Increment(ref _failures);
+                onFailure?.Invoke();
                 var error = errors is { Count: > 0 } ? errors.Dequeue() : new BlockFetchException("simulated outage", round);
                 return Task.FromException<BlockData>(error);
             }
 
             return inner.FetchBlockAsync(round, cancellationToken);
         }
+    }
+
+    private sealed class LeaseFlakyStorage(int failures) : InMemoryChainStorage(new ChainContext(ChainId.AlgorandTestnet))
+    {
+        private int _attempts;
+
+        public override Task<IWriterLease?> TryAcquireAsync(CancellationToken cancellationToken) =>
+            Interlocked.Increment(ref _attempts) <= failures
+                ? Task.FromException<IWriterLease?>(new IOException("database is starting"))
+                : base.TryAcquireAsync(cancellationToken);
     }
 
     private sealed class SchemaFlakyStorage(int failures) : InMemoryChainStorage(new ChainContext(ChainId.AlgorandTestnet))

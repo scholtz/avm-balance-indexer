@@ -9,6 +9,13 @@ public sealed partial class CassandraChainStorage
     {
         var session = await _source.GetSessionAsync(cancellationToken).ConfigureAwait(false);
 
+        // Concurrent DDL from several replicas can leave Cassandra with disagreeing schema versions, so in the steady state (several
+        // replicas start together, the schema exists) nothing is sent at all.
+        if (await SchemaExistsAsync(session, cancellationToken).ConfigureAwait(false))
+        {
+            return;
+        }
+
         if (_createKeyspace)
         {
             // Name and datacenter are validated identifiers; the replication factor is a number.
@@ -23,6 +30,18 @@ public sealed partial class CassandraChainStorage
         {
             await session.ExecuteAsync(new SimpleStatement(QualifyTables(statement))).WaitAsync(cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    private async Task<bool> SchemaExistsAsync(ISession session, CancellationToken cancellationToken)
+    {
+        var rows = await session.ExecuteAsync(new SimpleStatement("SELECT table_name FROM system_schema.tables WHERE keyspace_name = ?", _keyspace))
+            .WaitAsync(cancellationToken).ConfigureAwait(false);
+        var existing = rows.Select(static row => row.GetValue<string>("table_name")).ToHashSet(StringComparer.Ordinal);
+        var expected = ReadEmbeddedStatements()
+            .Select(static statement => System.Text.RegularExpressions.Regex.Match(statement, @"^CREATE TABLE IF NOT EXISTS (\w+)"))
+            .Where(static match => match.Success)
+            .Select(static match => match.Groups[1].Value);
+        return expected.All(existing.Contains);
     }
 
     /// <summary>Puts the keyspace in front of every created table so the DDL does not depend on the session's current keyspace.</summary>

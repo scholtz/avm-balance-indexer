@@ -45,6 +45,12 @@ CREATE TABLE IF NOT EXISTS holdings_by_account (
   PRIMARY KEY ((account), token_kind, token_id)
 );
 
+-- The ordered writer lease: one row per chain with a TTL, renewed by its owner with a conditional update.
+CREATE TABLE IF NOT EXISTS writer_lease (
+  chain text PRIMARY KEY,
+  owner text
+);
+
 -- Current holdings by token, sharded by account like the other token oriented tables. Also written with USING TIMESTAMP = round.
 CREATE TABLE IF NOT EXISTS holdings_by_token (
   token_kind text,

@@ -31,6 +31,7 @@ public sealed partial class CassandraChainStorage : IChainStorage
     private readonly int _replicationFactor;
     private readonly bool _createKeyspace;
     private readonly TimeSpan _readDeadline;
+    private readonly TimeSpan _leaseTtl;
     private readonly ConcurrentDictionary<string, Task<PreparedStatement>> _prepared = new();
     private readonly object _cursorLock = new();
     private (ulong Round, byte[] Hash)? _lastPublished;
@@ -41,9 +42,12 @@ public sealed partial class CassandraChainStorage : IChainStorage
         set { lock (_cursorLock) { _lastPublished = value; } }
     }
 
-    public CassandraChainStorage(CassandraSessionSource source, ChainContext chain, CassandraOptions options, TimeSpan? readDeadline = null)
+    public CassandraChainStorage(CassandraSessionSource source, ChainContext chain, CassandraOptions options, TimeSpan? readDeadline = null, TimeSpan? leaseTtl = null)
     {
         ArgumentNullException.ThrowIfNull(options);
+        _leaseTtl = (leaseTtl ?? TimeSpan.FromSeconds(30)) is { } ttl && ttl >= TimeSpan.FromSeconds(3) && ttl.TotalSeconds <= 3600
+            ? TimeSpan.FromSeconds(Math.Floor(ttl.TotalSeconds))
+            : throw new ArgumentOutOfRangeException(nameof(leaseTtl), "The lease TTL must be between 3 seconds and an hour.");
         _readDeadline = (readDeadline ?? TimeSpan.FromSeconds(options.ReadTimeoutSeconds)) is { } deadline && deadline >= TimeSpan.Zero
             ? deadline
             : throw new ArgumentOutOfRangeException(nameof(readDeadline), "The read deadline must not be negative.");

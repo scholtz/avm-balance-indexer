@@ -40,6 +40,10 @@ public sealed class IndexerOptions : IValidatableObject
     [Range(typeof(TimeSpan), "00:00:00", "01:00:00")]
     public TimeSpan RetryMaxBackoff { get; set; } = TimeSpan.FromMinutes(1);
 
+    /// <summary>How often a standby replica asks again for the writer lease.</summary>
+    [Range(typeof(TimeSpan), "00:00:00.001", "00:10:00")]
+    public TimeSpan LeaseRetryInterval { get; set; } = TimeSpan.FromSeconds(5);
+
     /// <summary>A round within this distance of the target counts as following the tip rather than backfilling.</summary>
     [Range(0, 10_000)]
     public int FollowingThresholdRounds { get; set; } = 50;

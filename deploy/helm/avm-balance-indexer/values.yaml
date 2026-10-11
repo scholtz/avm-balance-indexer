@@ -11,6 +11,8 @@ storage:
   provider: PostgreSql
   postgreSql:
     accountHashPartitions: 64
+    # Writer lease session check; a dead leader is replaced after about this plus the server keepalive (~30 s).
+    leaseHeartbeatSeconds: 5
     # Longest a read may run; longer holder scans fail with 503 instead of holding a snapshot.
     readTimeoutSeconds: 30
     # Secret with key "connectionString"
@@ -18,6 +20,8 @@ storage:
   cassandra:
     contactPoints: []
     port: 9042
+    # Writer lease row TTL: the longest failover time after a leader dies.
+    leaseTtlSeconds: 30
     readTimeoutSeconds: 30
     keyspace: avm_indexer
     localDatacenter: dc1
@@ -41,8 +45,10 @@ api:
     minAvailable: 1
 
 worker:
-  # Single active ordered writer per chain. Keep at 1: leader election for failover is not implemented yet.
-  replicaCount: 1
+  # One replica indexes (it holds the writer lease), the others stand by and take over within seconds.
+  replicaCount: 2
+  # Port of /healthz/live and /healthz/ready.
+  healthPort: 8081
   resources:
     requests: { cpu: 500m, memory: 512Mi }
     limits: { cpu: "2", memory: 2Gi }
