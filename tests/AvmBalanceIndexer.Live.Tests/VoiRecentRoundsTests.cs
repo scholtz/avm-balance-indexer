@@ -30,7 +30,10 @@ public class VoiRecentRoundsTests(ITestOutputHelper output)
         var options = new AlgorandChainOptions { Chain = ChainId.Voi, MaxAttempts = 40, BaseRetryDelay = TimeSpan.FromMilliseconds(200), MaxRetryDelay = TimeSpan.FromSeconds(3) };
         var adapter = AlgorandChainFactory.Create(options, http, NullLoggerFactory.Instance);
 
-        var first = await adapter.GetLatestRoundAsync(CancellationToken.None) - BehindTip;
+        // Voi is quiet: centre the window on a payment from the last few days instead of assuming one in the newest rounds.
+        var tip = await adapter.GetLatestRoundAsync(CancellationToken.None);
+        var payment = await reference.AnyPaymentRoundAsync(tip - 100_000, tip - BehindTip) ?? throw new InvalidOperationException("Voi has no payment in the last 100,000 rounds.");
+        var first = Math.Min(payment - (Window / 2), tip - BehindTip - Window);
         var last = first + Window - 1;
         var normalizer = new AlgoEffectNormalizer();
         using var gate = new SemaphoreSlim(16);

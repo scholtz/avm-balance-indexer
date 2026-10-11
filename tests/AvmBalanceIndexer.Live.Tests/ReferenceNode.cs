@@ -178,6 +178,14 @@ public sealed class ReferenceNode : IDisposable
         }
     }
 
+    /// <summary>The round of some payment the public indexer lists between the two rounds, or null when it lists none.</summary>
+    public async Task<ulong?> AnyPaymentRoundAsync(ulong minRound, ulong maxRound)
+    {
+        using var json = await GetJsonAsync($"{_indexer}/v2/transactions?tx-type=pay&min-round={minRound}&max-round={maxRound}&limit=1").ConfigureAwait(false);
+        var transactions = json.RootElement.GetProperty("transactions");
+        return transactions.GetArrayLength() == 0 ? null : transactions[0].GetProperty("confirmed-round").GetUInt64();
+    }
+
     /// <summary>Assets the public indexer lists for a unit name, with their creation round and clawback address.</summary>
     public async Task<IReadOnlyList<(ulong AssetId, ulong CreatedAtRound, bool DefaultFrozen, string Clawback)>> AssetsByUnitAsync(string unit, int limit)
     {
