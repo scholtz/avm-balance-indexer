@@ -2,7 +2,7 @@ using AvmBalanceIndexer.Domain.Storage;
 
 namespace AvmBalanceIndexer.TestSupport;
 
-public partial class InMemoryChainStorage : IWriterLeaseProvider, IAsyncDisposable
+public partial class InMemoryChainStorage : IWriterLeaseProvider, IStorageFailureClassifier, IAsyncDisposable
 {
     private readonly object _leaseGate = new();
     private InMemoryLease? _lease;
@@ -36,6 +36,9 @@ public partial class InMemoryChainStorage : IWriterLeaseProvider, IAsyncDisposab
 
         lease?.MarkLost();
     }
+
+    /// <summary>The reference storage has no failures of its own.</summary>
+    public bool IsTransient(Exception exception) => false;
 
     public ValueTask DisposeAsync()
     {

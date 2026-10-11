@@ -23,6 +23,7 @@ public sealed partial class IndexerWorker(
     IOptions<IndexerOptions> options,
     IHostApplicationLifetime lifetime,
     IWriterLeaseProvider leases,
+    IStorageFailureClassifier failures,
     WorkerHealth health,
     ILogger<IndexerWorker> logger) : BackgroundService
 {
@@ -48,11 +49,21 @@ public sealed partial class IndexerWorker(
     private async Task LeadWhenPossibleAsync(CancellationToken stoppingToken)
     {
         var settings = options.Value;
+        var schemaReady = false;
         while (!stoppingToken.IsCancellationRequested)
         {
             IWriterLease? lease;
             try
             {
+                if (!schemaReady)
+                {
+                    // Every replica prepares the schema (idempotent), because asking for the lease already needs its tables.
+                    // Inside the retry handling: a database that is still starting or failing over is a wait, not a crash.
+                    await storage.EnsureSchemaAsync(stoppingToken).ConfigureAwait(false);
+                    schemaReady = true;
+                    LogStarted(logger, chain.Chain);
+                }
+
                 lease = await leases.TryAcquireAsync(stoppingToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -86,7 +97,16 @@ public sealed partial class IndexerWorker(
                 health.BecameLeader();
                 LogLeading(logger, chain.Chain);
                 using var term = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, lease.Lost);
-                await FollowAsync(term.Token).ConfigureAwait(false);
+                try
+                {
+                    await FollowAsync(term.Token).ConfigureAwait(false);
+                }
+                catch (Exception) when (lease.Lost.IsCancellationRequested && !stoppingToken.IsCancellationRequested)
+                {
+                    // A commit of a writer that has just lost the lease fails against the new writer's cursor (divergence): that
+                    // is the safety net working, not a data problem.
+                }
+
                 if (lease.Lost.IsCancellationRequested && !stoppingToken.IsCancellationRequested)
                 {
                     health.LostLease();
@@ -109,20 +129,11 @@ public sealed partial class IndexerWorker(
         var backoff = settings.RetryInitialBackoff;
         var failures = 0;
         var committedAtLastFailure = indexer.RoundsCommitted;
-        var schemaReady = false;
 
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                if (!schemaReady)
-                {
-                    // Inside the retry loop: a database that is still starting or failing over is a wait, not a crash.
-                    await storage.EnsureSchemaAsync(stoppingToken).ConfigureAwait(false);
-                    schemaReady = true;
-                    LogStarted(logger, chain.Chain);
-                }
-
                 await indexer.RunAsync(null, stoppingToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -167,13 +178,13 @@ public sealed partial class IndexerWorker(
     /// Network, node and database trouble that a later attempt can overcome: archival fetch failures, algod errors and
     /// timeouts (a timed-out request throws a cancellation that did not come from shutdown), and transient database errors.
     /// </summary>
-    private static bool IsTransient(Exception exception, CancellationToken stoppingToken) =>
+    private bool IsTransient(Exception exception, CancellationToken stoppingToken) =>
         exception is BlockFetchException or HttpRequestException or TimeoutException or IOException
         || exception is Algorand.ApiException { StatusCode: >= 500 or 408 or 429 }
         || (exception is TaskCanceledException && !stoppingToken.IsCancellationRequested)
         || exception is DbException { IsTransient: true }
         || exception is StorageTimeoutException
-        || AvmBalanceIndexer.Storage.Cassandra.CassandraErrors.IsTransient(exception);
+        || failures.IsTransient(exception);
 
     [LoggerMessage(EventId = 1300, Level = LogLevel.Information, Message = "Indexer worker started for {Chain}")]
     private static partial void LogStarted(ILogger logger, string chain);

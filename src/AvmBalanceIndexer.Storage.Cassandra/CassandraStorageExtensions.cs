@@ -24,6 +24,7 @@ public static class CassandraStorageExtensions
             provider.GetRequiredService<ChainContext>(),
             provider.GetRequiredService<IOptions<StorageOptions>>().Value.Cassandra));
         services.AddSingleton<IChainStorage>(static provider => provider.GetRequiredService<CassandraChainStorage>());
+        services.AddSingleton<IStorageFailureClassifier, CassandraErrors>();
         services.AddSingleton<IWriterLeaseProvider>(static provider => provider.GetRequiredService<CassandraChainStorage>());
         return services;
     }

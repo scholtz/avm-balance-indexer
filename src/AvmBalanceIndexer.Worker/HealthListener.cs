@@ -58,6 +58,7 @@ public sealed partial class HealthListener(IOptions<WorkerOptions> options, Work
                 }
 
                 // A single aborted accept must not switch the probes off for the rest of the process lifetime.
+                await Task.Delay(100, stoppingToken).ConfigureAwait(false);
                 continue;
             }
 

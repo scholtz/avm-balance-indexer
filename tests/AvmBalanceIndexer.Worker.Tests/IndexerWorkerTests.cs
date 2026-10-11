@@ -270,7 +270,7 @@ public class IndexerWorkerTests : IDisposable
         });
         var indexer = new RoundIndexer(adapter, new AlgoEffectNormalizer(), storage, options, NullLogger<RoundIndexer>.Instance);
         var lifetime = new FakeLifetime();
-        var worker = new IndexerWorker(indexer, storage, new ChainContext(ChainId.AlgorandTestnet), options, lifetime, storage, health, NullLogger<IndexerWorker>.Instance);
+        var worker = new IndexerWorker(indexer, storage, new ChainContext(ChainId.AlgorandTestnet), options, lifetime, storage, storage, health, NullLogger<IndexerWorker>.Instance);
 
         await worker.StartAsync(CancellationToken.None);
         await WaitUntilAsync(() => adapter.Failures == 1 && health.State == WorkerState.Leader);
@@ -282,6 +282,39 @@ public class IndexerWorkerTests : IDisposable
 
         Assert.False(lifetime.StopRequested);
         Assert.Equal(0, Environment.ExitCode);
+    }
+
+    [Fact]
+    public async Task A_Commit_That_Fails_Against_The_New_Writer_After_The_Lease_Was_Lost_Is_Not_Fatal()
+    {
+        var storage = NewStorage();
+        var health = new WorkerHealth();
+        var errors = new Queue<Exception>([new ChainDivergenceException("another writer moved the cursor")]);
+        var adapter = new FlakyAdapter(Scenario.Adapter(), failuresBeforeSuccess: 1, errors: errors, onFailure: storage.RevokeLease);
+
+        var (worker, lifetime) = Create(storage, adapter, maxFailures: 10, health);
+        await worker.StartAsync(CancellationToken.None);
+        await WaitUntilAsync(() => health.LeasesLost == 1 && storage.LeasesGranted == 2);
+        await WaitForRoundAsync(storage, Scenario.LastRound);
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.False(lifetime.StopRequested);
+        Assert.Equal(0, Environment.ExitCode);
+    }
+
+    [Fact]
+    public async Task A_Divergence_Without_A_Lost_Lease_Still_Stops_The_Application()
+    {
+        var storage = NewStorage();
+        var errors = new Queue<Exception>([new ChainDivergenceException("real divergence")]);
+        var adapter = new FlakyAdapter(Scenario.Adapter(), failuresBeforeSuccess: 1, errors: errors);
+
+        var (worker, lifetime) = Create(storage, adapter, maxFailures: 10);
+        await worker.StartAsync(CancellationToken.None);
+        await lifetime.WaitForStopAsync();
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.Equal(1, Environment.ExitCode);
     }
 
     [Fact]
@@ -339,7 +372,7 @@ public class IndexerWorkerTests : IDisposable
         });
         var indexer = new RoundIndexer(adapter, new AlgoEffectNormalizer(), storage, options, NullLogger<RoundIndexer>.Instance);
         var lifetime = new FakeLifetime();
-        return (new IndexerWorker(indexer, storage, new ChainContext(ChainId.AlgorandTestnet), options, lifetime, storage, health ?? new WorkerHealth(), NullLogger<IndexerWorker>.Instance), lifetime);
+        return (new IndexerWorker(indexer, storage, new ChainContext(ChainId.AlgorandTestnet), options, lifetime, storage, storage, health ?? new WorkerHealth(), NullLogger<IndexerWorker>.Instance), lifetime);
     }
 
     private static async Task WaitForRoundAsync(InMemoryChainStorage storage, ulong round)
@@ -358,7 +391,7 @@ public class IndexerWorkerTests : IDisposable
     }
 
     /// <summary>Fails a number of block fetches (or every n-th fetch) with a transient error before delegating.</summary>
-    private sealed class FlakyAdapter(FakeChainAdapter inner, int failuresBeforeSuccess, int failEvery = 0, Queue<Exception>? errors = null) : IChainAdapter
+    private sealed class FlakyAdapter(FakeChainAdapter inner, int failuresBeforeSuccess, int failEvery = 0, Queue<Exception>? errors = null, Action? onFailure = null) : IChainAdapter
     {
         private int _calls;
         private int _failures;
@@ -380,6 +413,7 @@ public class IndexerWorkerTests : IDisposable
             if (fail)
             {
                 Interlocked.Increment(ref _failures);
+                onFailure?.Invoke();
                 var error = errors is { Count: > 0 } ? errors.Dequeue() : new BlockFetchException("simulated outage", round);
                 return Task.FromException<BlockData>(error);
             }

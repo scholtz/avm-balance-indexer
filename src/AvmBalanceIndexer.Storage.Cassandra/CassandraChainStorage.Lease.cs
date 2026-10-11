@@ -13,6 +13,9 @@ public sealed partial class CassandraChainStorage : IWriterLeaseProvider
     public async Task<IWriterLease?> TryAcquireAsync(CancellationToken cancellationToken)
     {
         var owner = Guid.NewGuid().ToString("N");
+
+        // The TTL of the row starts with this request, so every validity estimate is measured from before it is sent.
+        var requested = System.Diagnostics.Stopwatch.GetTimestamp();
         var statement = await BindAsync(
             $"INSERT INTO {Table("writer_lease")} (chain, owner) VALUES (?, ?) IF NOT EXISTS USING TTL ?",
             cancellationToken,
@@ -22,7 +25,7 @@ public sealed partial class CassandraChainStorage : IWriterLeaseProvider
         // SERIAL, not LOCAL_SERIAL: with several datacenters the lease must be exclusive across all of them.
         statement.SetSerialConsistencyLevel(ConsistencyLevel.Serial);
         var result = await ExecuteAsync(statement, cancellationToken).ConfigureAwait(false);
-        return result.First().GetValue<bool>("[applied]") ? new Lease(this, owner) : null;
+        return result.First().GetValue<bool>("[applied]") ? new Lease(this, owner, requested) : null;
     }
 
     private sealed class Lease : IWriterLease
@@ -31,14 +34,25 @@ public sealed partial class CassandraChainStorage : IWriterLeaseProvider
         private readonly string _owner;
         private readonly CancellationTokenSource _lost = new();
         private readonly CancellationTokenSource _stop = new();
+        private readonly CancellationTokenSource _expiry = new();
+        private readonly CancellationTokenRegistration _expiryRegistration;
         private readonly Task _renewal;
+        private readonly TimeSpan _safe;
 
-        public Lease(CassandraChainStorage storage, string owner)
+        public Lease(CassandraChainStorage storage, string owner, long acquireRequested)
         {
             _storage = storage;
             _owner = owner;
-            _renewal = RenewAsync();
+            _safe = storage._leaseTtl * 0.8;
+
+            // The lease is reported lost when 80% of the TTL passed without a confirmed renewal, whatever the renewal task is doing
+            // (hung, failing, slow): a timer that is pushed back by every successful renewal.
+            _expiryRegistration = _expiry.Token.Register(() => _lost.Cancel());
+            _expiry.CancelAfter(Remaining(acquireRequested));
+            _renewal = RenewAsync(acquireRequested);
         }
+
+        private TimeSpan Remaining(long sentAt) => _safe - System.Diagnostics.Stopwatch.GetElapsedTime(sentAt);
 
         public CancellationToken Lost => _lost.Token;
 
@@ -46,6 +60,7 @@ public sealed partial class CassandraChainStorage : IWriterLeaseProvider
         {
             await _stop.CancelAsync().ConfigureAwait(false);
             await _renewal.ConfigureAwait(false);
+            await _expiryRegistration.DisposeAsync().ConfigureAwait(false);
 
             if (!_lost.IsCancellationRequested)
             {
@@ -65,28 +80,23 @@ public sealed partial class CassandraChainStorage : IWriterLeaseProvider
                 }
             }
 
+            _expiry.Dispose();
             _lost.Dispose();
             _stop.Dispose();
         }
 
-        private async Task RenewAsync()
+        private async Task RenewAsync(long lastRenewalSent)
         {
             var ttl = _storage._leaseTtl;
-            var safe = ttl * 0.8;
-
-            // The TTL runs from the moment a renewal is applied on the server, which is at the latest when the request was sent
-            // back; measuring from the send time never overestimates how long the lease is still valid.
-            var lastRenewalSent = System.Diagnostics.Stopwatch.GetTimestamp();
             try
             {
                 using var timer = new PeriodicTimer(ttl / 3);
                 while (await timer.WaitForNextTickAsync(_stop.Token).ConfigureAwait(false))
                 {
                     var sent = System.Diagnostics.Stopwatch.GetTimestamp();
-                    var remaining = safe - System.Diagnostics.Stopwatch.GetElapsedTime(lastRenewalSent);
+                    var remaining = Remaining(lastRenewalSent);
                     if (remaining <= TimeSpan.Zero)
                     {
-                        await _lost.CancelAsync().ConfigureAwait(false);
                         return;
                     }
 
@@ -111,6 +121,7 @@ public sealed partial class CassandraChainStorage : IWriterLeaseProvider
                         }
 
                         lastRenewalSent = sent;
+                        _expiry.CancelAfter(Remaining(sent));
                     }
                     catch (Exception) when (!_stop.IsCancellationRequested)
                     {
@@ -119,9 +130,9 @@ public sealed partial class CassandraChainStorage : IWriterLeaseProvider
                     }
                 }
             }
-            catch (OperationCanceledException) when (_stop.IsCancellationRequested)
+            catch (Exception) when (_stop.IsCancellationRequested)
             {
-                // Disposed.
+                // Disposed (a driver error that surfaces while stopping is not interesting).
             }
         }
     }
