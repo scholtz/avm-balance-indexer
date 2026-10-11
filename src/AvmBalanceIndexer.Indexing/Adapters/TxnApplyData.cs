@@ -9,6 +9,7 @@ namespace AvmBalanceIndexer.Indexing.Adapters;
 /// <param name="CloseRewards">Rewards realized on the close-remainder-to account (<c>rc</c>).</param>
 /// <param name="ClosingAmount">Balance moved by close-remainder-to (<c>ca</c>).</param>
 /// <param name="AssetClosingAmount">Asset balance moved by an asset close-to (<c>aca</c>).</param>
+/// <param name="CreatedAssetId">Id of the asset created by this asset configuration transaction (<c>caid</c>), else zero.</param>
 /// <param name="HasGenesisHash">The genesis hash was stripped from the stored transaction (<c>hgh</c>).</param>
 /// <param name="HasGenesisId">The genesis id was stripped from the stored transaction (<c>hgi</c>).</param>
 /// <param name="InnerTxns">Apply data of inner transactions in execution order.</param>
@@ -19,6 +20,7 @@ public sealed record TxnApplyData(
     ulong CloseRewards,
     ulong ClosingAmount,
     ulong AssetClosingAmount,
+    ulong CreatedAssetId,
     bool HasGenesisHash,
     bool HasGenesisId,
     IReadOnlyList<TxnApplyData> InnerTxns);

@@ -20,7 +20,53 @@ public sealed record TestPayment(
     ulong SenderRewards = 0,
     ulong ReceiverRewards = 0,
     ulong CloseRewards = 0,
-    IReadOnlyList<TestPayment>? Inner = null);
+    IReadOnlyList<TestPayment>? Inner = null,
+    TestAsset? Asset = null);
+
+/// <summary>
+/// An asset transaction placed in a synthetic block in the place of a payment: the payment's sender, receiver (the asset
+/// receiver) and fee are used, the fields here describe the asset part.
+/// </summary>
+/// <param name="Type"><c>axfer</c> (transfer, opt-in, close, clawback) or <c>acfg</c> (create, destroy).</param>
+/// <param name="AssetId">Asset moved (<c>axfer</c>) or destroyed (<c>acfg</c>, with <paramref name="Create"/> false).</param>
+/// <param name="Amount">Units moved.</param>
+/// <param name="AssetSender">Clawback source.</param>
+/// <param name="AssetCloseTo">Close-out destination.</param>
+/// <param name="AssetClosingAmount">Units moved by the close-out (apply data).</param>
+/// <param name="Create">True for an asset creation; <paramref name="CreatedAssetId"/> is its id in the apply data.</param>
+/// <param name="CreatedAssetId">Id the ledger assigned to a created asset (<c>caid</c> in the apply data).</param>
+/// <param name="Total">Total supply of a created asset.</param>
+/// <param name="Decimals">Decimals of a created asset.</param>
+/// <param name="UnitName">Unit name of a created asset.</param>
+/// <param name="Name">Name of a created asset.</param>
+public sealed record TestAsset(
+    string Type,
+    ulong AssetId = 0,
+    ulong Amount = 0,
+    Address? AssetSender = null,
+    Address? AssetCloseTo = null,
+    ulong AssetClosingAmount = 0,
+    bool Create = false,
+    ulong CreatedAssetId = 0,
+    ulong Total = 0,
+    uint Decimals = 0,
+    string? UnitName = null,
+    string? Name = null)
+{
+    public static TestAsset Transfer(ulong assetId, ulong amount) => new("axfer", assetId, amount);
+
+    public static TestAsset OptIn(ulong assetId) => new("axfer", assetId);
+
+    public static TestAsset Clawback(ulong assetId, ulong amount, Address from) => new("axfer", assetId, amount, AssetSender: from);
+
+    public static TestAsset CloseOut(ulong assetId, Address closeTo, ulong closingAmount, ulong amount = 0) =>
+        new("axfer", assetId, amount, AssetCloseTo: closeTo, AssetClosingAmount: closingAmount);
+
+    public static TestAsset Creation(ulong createdId, ulong total, uint decimals = 0, string? unit = null, string? name = null) =>
+        new("acfg", Create: true, CreatedAssetId: createdId, Total: total, Decimals: decimals, UnitName: unit, Name: name);
+
+    public static TestAsset Destroy(ulong assetId) => new("acfg", assetId);
+}
 
 /// <summary>
 /// A synthetic chain that mirrors the wire format of real gossip blocks. Blocks are encoded as msgpack and decoded by
@@ -192,14 +238,28 @@ public sealed class TestChain
         entries += payment.ReceiverRewards > 0 ? 1 : 0;
         entries += payment.CloseRewards > 0 ? 1 : 0;
         entries += payment.ClosingAmount > 0 ? 1 : 0;
+        entries += payment.Asset is { AssetClosingAmount: > 0 } ? 1 : 0;
+        entries += payment.Asset is { CreatedAssetId: > 0 } ? 1 : 0;
         entries += topLevel ? 2 : 0;
         entries += payment.Inner is { Count: > 0 } ? 1 : 0;
         writer.WriteMapHeader(entries);
+
+        if (payment.Asset is { AssetClosingAmount: > 0 } asset)
+        {
+            writer.Write("aca");
+            writer.Write(asset.AssetClosingAmount);
+        }
 
         if (payment.ClosingAmount > 0)
         {
             writer.Write("ca");
             writer.Write(payment.ClosingAmount);
+        }
+
+        if (payment.Asset is { CreatedAssetId: > 0 } created)
+        {
+            writer.Write("caid");
+            writer.Write(created.CreatedAssetId);
         }
 
         if (payment.Inner is { Count: > 0 } inner)
@@ -244,8 +304,89 @@ public sealed class TestChain
         WritePaymentBody(ref writer, payment);
     }
 
+    private delegate void WriteValue(ref MessagePackWriter writer);
+
+    private static void WriteAssetBody(ref MessagePackWriter writer, TestPayment payment, TestAsset asset)
+    {
+        var entries = new List<(string Key, WriteValue Write)>
+        {
+            ("fv", static (ref MessagePackWriter w) => w.Write(1UL)),
+            ("lv", static (ref MessagePackWriter w) => w.Write(1001UL)),
+            ("snd", (ref MessagePackWriter w) => w.Write(payment.Sender.ToArray())),
+            ("type", (ref MessagePackWriter w) => w.Write(asset.Type)),
+        };
+        if (payment.Fee > 0)
+        {
+            entries.Add(("fee", (ref MessagePackWriter w) => w.Write(payment.Fee)));
+        }
+
+        if (asset.Type == "axfer")
+        {
+            entries.Add(("xaid", (ref MessagePackWriter w) => w.Write(asset.AssetId)));
+            entries.Add(("arcv", (ref MessagePackWriter w) => w.Write(payment.Receiver.ToArray())));
+            if (asset.Amount > 0)
+            {
+                entries.Add(("aamt", (ref MessagePackWriter w) => w.Write(asset.Amount)));
+            }
+
+            if (asset.AssetSender is { } from)
+            {
+                entries.Add(("asnd", (ref MessagePackWriter w) => w.Write(from.ToArray())));
+            }
+
+            if (asset.AssetCloseTo is { } closeTo)
+            {
+                entries.Add(("aclose", (ref MessagePackWriter w) => w.Write(closeTo.ToArray())));
+            }
+        }
+        else if (asset.Create)
+        {
+            entries.Add(("apar", (ref MessagePackWriter w) =>
+            {
+                var fields = 1 + (asset.Decimals > 0 ? 1 : 0) + (asset.UnitName is not null ? 1 : 0) + (asset.Name is not null ? 1 : 0);
+                w.WriteMapHeader(fields);
+                if (asset.Name is not null)
+                {
+                    w.Write("an");
+                    w.Write(asset.Name);
+                }
+
+                if (asset.Decimals > 0)
+                {
+                    w.Write("dc");
+                    w.Write(asset.Decimals);
+                }
+
+                w.Write("t");
+                w.Write(asset.Total);
+                if (asset.UnitName is not null)
+                {
+                    w.Write("un");
+                    w.Write(asset.UnitName);
+                }
+            }));
+        }
+        else
+        {
+            entries.Add(("caid", (ref MessagePackWriter w) => w.Write(asset.AssetId)));
+        }
+
+        writer.WriteMapHeader(entries.Count);
+        foreach (var (key, write) in entries.OrderBy(static e => e.Key, StringComparer.Ordinal))
+        {
+            writer.Write(key);
+            write(ref writer);
+        }
+    }
+
     private static void WritePaymentBody(ref MessagePackWriter writer, TestPayment payment)
     {
+        if (payment.Asset is { } asset)
+        {
+            WriteAssetBody(ref writer, payment, asset);
+            return;
+        }
+
         var omitReceiver = payment.Receiver.Bytes.ToArray().All(static b => b == 0);
         var entries = omitReceiver ? 4 : 5;
         entries += payment.Amount > 0 ? 1 : 0;

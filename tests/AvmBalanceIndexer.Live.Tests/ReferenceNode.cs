@@ -104,6 +104,46 @@ public sealed class ReferenceNode : IDisposable
         return result;
     }
 
+    /// <summary>
+    /// The asset holdings the ledger itself holds after <paramref name="round"/> for every (account, asset) that round changed.
+    /// A removed holding (opt-out, destroy) is reported as zero.
+    /// </summary>
+    public async Task<IReadOnlyDictionary<(Address Account, ulong AssetId), ulong>> LedgerAssetHoldingsAfterAsync(ulong round)
+    {
+        var text = await GetTextAsync($"{_algod}/v2/deltas/{round}").ConfigureAwait(false);
+        using var json = JsonDocument.Parse(LeadingAccts(text));
+        var result = new Dictionary<(Address, ulong), ulong>();
+        if (!json.RootElement.GetProperty("Accts").TryGetProperty("AssetResources", out var resources) || resources.ValueKind != JsonValueKind.Array)
+        {
+            return result;
+        }
+
+        foreach (var resource in resources.EnumerateArray())
+        {
+            var holding = resource.GetProperty("Holding");
+            var deleted = holding.GetProperty("Deleted").GetBoolean();
+            var data = holding.TryGetProperty("Holding", out var inner) ? inner : default;
+            if (!deleted && data.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            var address = new Address(Convert.FromBase64String(resource.GetProperty("Addr").GetString()!));
+            var amount = !deleted && data.TryGetProperty("a", out var a) ? a.GetUInt64() : 0UL;
+            result[(address, resource.GetProperty("Aidx").GetUInt64())] = amount;
+        }
+
+        return result;
+    }
+
+    /// <summary>Creator and creation round of an asset as the public indexer reports them, including destroyed assets (whose total it reports as zero).</summary>
+    public async Task<(Address Creator, ulong CreatedAtRound)> AssetAsync(ulong assetId)
+    {
+        using var json = await GetJsonAsync($"{_indexer}/v2/assets/{assetId}?include-all=true").ConfigureAwait(false);
+        var asset = json.RootElement.GetProperty("asset");
+        return (new Address(new Algorand.Address(asset.GetProperty("params").GetProperty("creator").GetString()!).Bytes), asset.GetProperty("created-at-round").GetUInt64());
+    }
+
     public void Dispose() => _http.Dispose();
 
     /// <summary>The <c>"Accts": { ... }</c> object of a delta document wrapped as a standalone JSON object.</summary>

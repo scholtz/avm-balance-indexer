@@ -26,9 +26,13 @@ namespace AvmBalanceIndexer.Indexing.Normalization;
 /// </summary>
 public sealed class AlgoEffectNormalizer : IEffectNormalizer
 {
-    public IReadOnlyList<BalanceDelta> Normalize(BlockData block, RewardsState previousRewards)
+    public IReadOnlyList<BalanceDelta> Normalize(BlockData block, RewardsState previousRewards) =>
+        NormalizeBlock(block, previousRewards, AssetDirectory.Empty).Deltas;
+
+    public NormalizedBlock NormalizeBlock(BlockData block, RewardsState previousRewards, IAssetDirectory assets)
     {
         ArgumentNullException.ThrowIfNull(block);
+        ArgumentNullException.ThrowIfNull(assets);
 
         var header = block.Block;
         var feeSink = header.FeeSink is { } sink
@@ -36,7 +40,7 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
             : throw new InvalidDataException($"Round {block.Round}: block header has no fee sink.");
 
         var transactions = (header.Transactions ?? []).ToArray();
-        var round = new RoundBuilder(block.Round, feeSink);
+        var round = new RoundBuilder(block.Round, feeSink, assets);
 
         round.BeginTransaction(0, string.Empty);
         ApplyStartOfBlock(round, block, previousRewards);
@@ -60,7 +64,7 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
             round.Add(proposerAddress, payout, EffectType.ProposerPayout, feeSink, []);
         }
 
-        return round.Deltas;
+        return new NormalizedBlock(round.Deltas, round.TokenChanges);
     }
 
     private static void ApplyStartOfBlock(RoundBuilder round, BlockData block, RewardsState previousRewards)
@@ -126,10 +130,84 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
             }
         }
 
+        if (!apply.RawTxn.IsEmpty)
+        {
+            ApplyAsset(round, sender, apply, path);
+        }
+
         var inner = (signed.Detail?.InnerTxns ?? []).ToArray();
         for (var i = 0; i < inner.Length; i++)
         {
             ApplyTransaction(round, inner[i], apply.InnerTxns[i], [.. path, i]);
+        }
+    }
+
+    private static void ApplyAsset(RoundBuilder round, DomainAddress sender, TxnApplyData apply, int[] path)
+    {
+        var raw = RawTransaction.Read(apply.RawTxn);
+        switch (raw.Type)
+        {
+            case "axfer":
+                ApplyAssetTransfer(round, sender, raw, apply, path);
+                break;
+            case "acfg":
+                ApplyAssetConfiguration(round, sender, raw, apply, path);
+                break;
+        }
+    }
+
+    private static void ApplyAssetTransfer(RoundBuilder round, DomainAddress sender, RawTransaction raw, TxnApplyData apply, int[] path)
+    {
+        var token = TokenKey.Asa(raw.TransferAssetId);
+        var source = raw.AssetSender is { } clawback ? new DomainAddress(clawback) : sender;
+        var receiver = raw.AssetReceiver is { } to ? new DomainAddress(to) : ZeroAddress;
+        var closeTo = raw.AssetCloseTo is { } close && !close.All(static b => b == 0) ? new DomainAddress(close) : (DomainAddress?)null;
+        var amount = new BigInteger(raw.TransferAmount);
+
+        // An asset transfer of zero units from an account to itself is how an account opts in.
+        if (raw.AssetSender is null && amount.IsZero && receiver == sender && closeTo is null)
+        {
+            round.Add(sender, BigInteger.Zero, token, EffectType.AssetOptIn, null, path, keepZero: true);
+            return;
+        }
+
+        if (!amount.IsZero)
+        {
+            var type = raw.AssetSender is null ? EffectType.AssetTransfer : EffectType.AssetClawback;
+            round.Add(source, -amount, token, type, receiver, path);
+            round.Add(receiver, amount, token, type, source, path);
+        }
+
+        if (closeTo is { } destination)
+        {
+            // Closing out sends the sender's remaining units to the destination and removes the holding.
+            var closing = new BigInteger(apply.AssetClosingAmount);
+            round.Add(sender, -closing, token, EffectType.AssetOptOut, destination, path, keepZero: true);
+            round.Add(destination, closing, token, EffectType.AssetTransfer, sender, path);
+        }
+    }
+
+    private static void ApplyAssetConfiguration(RoundBuilder round, DomainAddress sender, RawTransaction raw, TxnApplyData apply, int[] path)
+    {
+        if (raw.ConfigAssetId == 0 && raw.Params is { } parameters)
+        {
+            var assetId = apply.CreatedAssetId != 0
+                ? apply.CreatedAssetId
+                : throw new InvalidDataException($"Round {round.Round}: an asset creation has no created asset id in its apply data.");
+            round.Created(AssetRecords.Created(assetId, sender, parameters, round.Round));
+            round.Add(sender, new BigInteger(parameters.Total), TokenKey.Asa(assetId), EffectType.AssetCreate, null, path, keepZero: true);
+        }
+        else if (raw.ConfigAssetId != 0 && raw.Params is null)
+        {
+            var info = round.FindAsset(raw.ConfigAssetId)
+                ?? throw new InvalidDataException($"Round {round.Round}: asset {raw.ConfigAssetId} is destroyed but was never seen created.");
+            var creator = info.Creator ?? throw new InvalidDataException($"Asset {raw.ConfigAssetId} has no creator.");
+            var token = TokenKey.Asa(raw.ConfigAssetId);
+
+            // The ledger only destroys an asset whose whole supply is held by the creator, and removes that holding.
+            round.Add(creator, -new BigInteger(AssetRecords.Total(info)), token, EffectType.AssetDestroy, null, path, keepZero: true);
+            round.Add(creator, BigInteger.Zero, token, EffectType.AssetOptOut, null, path, keepZero: true);
+            round.Destroyed(info with { DeletedRound = round.Round });
         }
     }
 
@@ -140,15 +218,21 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
 
     private static bool IsZero(Algorand.Address address) => address.Bytes.All(static b => b == 0);
 
-    private sealed class RoundBuilder(ulong round, DomainAddress feeSink)
+    private sealed class RoundBuilder(ulong round, DomainAddress feeSink, IAssetDirectory assets)
     {
         private readonly List<BalanceDelta> _deltas = [];
+        private readonly List<TokenInfo> _tokenChanges = [];
+        private readonly Dictionary<ulong, TokenInfo> _assets = [];
         private int _transactionIndex;
         private string _transactionId = string.Empty;
+
+        public ulong Round { get; } = round;
 
         public DomainAddress FeeSink { get; } = feeSink;
 
         public IReadOnlyList<BalanceDelta> Deltas => _deltas;
+
+        public IReadOnlyList<TokenInfo> TokenChanges => _tokenChanges;
 
         public void BeginTransaction(int index, string transactionId)
         {
@@ -156,18 +240,36 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
             _transactionId = transactionId;
         }
 
-        public void Add(DomainAddress account, ulong amount, EffectType type, DomainAddress? counterparty, int[] path) =>
-            Add(account, new BigInteger(amount), type, counterparty, path);
+        public TokenInfo? FindAsset(ulong assetId) => _assets.TryGetValue(assetId, out var info) ? info : assets.Find(assetId);
 
-        public void Add(DomainAddress account, BigInteger delta, EffectType type, DomainAddress? counterparty, int[] path)
+        public void Created(TokenInfo info)
         {
-            if (delta.IsZero)
+            _assets[info.Key.TokenId] = info;
+            _tokenChanges.Add(info);
+        }
+
+        public void Destroyed(TokenInfo info)
+        {
+            _assets[info.Key.TokenId] = info;
+            _tokenChanges.Add(info);
+        }
+
+        public void Add(DomainAddress account, ulong amount, EffectType type, DomainAddress? counterparty, int[] path) =>
+            Add(account, new BigInteger(amount), TokenKey.Native, type, counterparty, path);
+
+        public void Add(DomainAddress account, BigInteger delta, EffectType type, DomainAddress? counterparty, int[] path) =>
+            Add(account, delta, TokenKey.Native, type, counterparty, path);
+
+        // keepZero records the effect although it changes no balance (opt-in, opt-out, creation).
+        public void Add(DomainAddress account, BigInteger delta, TokenKey token, EffectType type, DomainAddress? counterparty, int[] path, bool keepZero = false)
+        {
+            if (delta.IsZero && !keepZero)
             {
                 return;
             }
 
-            var id = new EffectId(round, _transactionIndex, _transactionId, path, _deltas.Count);
-            _deltas.Add(new BalanceDelta(id, account, TokenKey.Native, type, delta, counterparty));
+            var id = new EffectId(Round, _transactionIndex, _transactionId, path, _deltas.Count);
+            _deltas.Add(new BalanceDelta(id, account, token, type, delta, counterparty));
         }
     }
 }

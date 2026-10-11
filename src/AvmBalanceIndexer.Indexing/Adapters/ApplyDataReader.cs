@@ -70,7 +70,7 @@ public static class ApplyDataReader
     private static TxnApplyData ReadTransaction(ref MessagePackReader reader)
     {
         ReadOnlyMemory<byte> rawTxn = default;
-        ulong rs = 0, rr = 0, rc = 0, ca = 0, aca = 0;
+        ulong rs = 0, rr = 0, rc = 0, ca = 0, aca = 0, caid = 0;
         bool hgh = false, hgi = false;
         IReadOnlyList<TxnApplyData> inner = [];
 
@@ -99,6 +99,9 @@ public static class ApplyDataReader
                 case "aca":
                     aca = reader.ReadUInt64();
                     break;
+                case "caid":
+                    caid = reader.ReadUInt64();
+                    break;
                 case "hgh":
                     hgh = reader.ReadBoolean();
                     break;
@@ -114,7 +117,7 @@ public static class ApplyDataReader
             }
         }
 
-        return new TxnApplyData(rawTxn, rs, rr, rc, ca, aca, hgh, hgi, inner);
+        return new TxnApplyData(rawTxn, rs, rr, rc, ca, aca, caid, hgh, hgi, inner);
     }
 
     private static IReadOnlyList<TxnApplyData> ReadDetail(ref MessagePackReader reader)
