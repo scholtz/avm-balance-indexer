@@ -266,6 +266,26 @@ public class PostgreSqlSpecificTests(PostgresFixture postgres)
     }
 
     [Fact]
+    public async Task A_Token_Index_Without_The_Opt_In_Column_Is_Migrated_And_Filled_From_The_Holdings()
+    {
+        var storage = await postgres.CreateStorageAsync();
+        var account = TestChain.Account(1);
+        await storage.WriteRoundAsync(
+            new ChainStatus(ChainId.AlgorandTestnet, 0, TestChain.FakeHash(0), null, IngestionState.Bootstrapping, DateTimeOffset.UnixEpoch),
+            [new TokenEffect(new EffectId(0, 0, "a", [], 0), account, TokenKey.Asa(9), EffectType.AssetOptOut, 0, Amount.Zero, null)],
+            CancellationToken.None);
+        await using (var drop = postgres.DataSourceOf(storage).CreateCommand("ALTER TABLE holdings_by_token DROP COLUMN opted_in"))
+        {
+            await drop.ExecuteNonQueryAsync();
+        }
+
+        await storage.EnsureSchemaAsync(CancellationToken.None);
+
+        var holders = await storage.GetHoldersAtRoundAsync(TokenKey.Asa(9), 0, true, null, 10, CancellationToken.None);
+        Assert.False(Assert.Single(holders.Items).OptedIn);
+    }
+
+    [Fact]
     public async Task A_Read_That_Exceeds_The_Timeout_Is_A_Storage_Timeout_Not_A_Hang()
     {
         var storage = await postgres.CreateStorageAsync(readTimeout: TimeSpan.FromMilliseconds(300));

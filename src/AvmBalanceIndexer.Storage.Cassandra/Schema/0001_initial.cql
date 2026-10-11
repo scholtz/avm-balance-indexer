@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS holdings_by_token (
   shard smallint,
   account blob,
   amount text,
+  opted_in boolean,
   last_changed_round bigint,
   PRIMARY KEY ((token_kind, token_id, shard), account)
 );

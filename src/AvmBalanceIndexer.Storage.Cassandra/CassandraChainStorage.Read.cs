@@ -309,7 +309,7 @@ public sealed partial class CassandraChainStorage
         while (true)
         {
             var rows = (await ExecuteAsync(
-                $"SELECT account, amount, last_changed_round FROM {Table("holdings_by_token")} WHERE token_kind = ? AND token_id = ? AND shard = ? AND account > ? LIMIT ?",
+                $"SELECT account, amount, opted_in, last_changed_round FROM {Table("holdings_by_token")} WHERE token_kind = ? AND token_id = ? AND shard = ? AND account > ? LIMIT ?",
                 cancellationToken,
                 token.Kind.ToStorageName(),
                 StorageId(token.TokenId),
@@ -330,12 +330,12 @@ public sealed partial class CassandraChainStorage
                     var last = (ulong)row.GetValue<long>("last_changed_round");
                     if (last <= indexed)
                     {
-                        return new Holding(account, token, Amount.Parse(row.GetValue<string>("amount")), true, last);
+                        return new Holding(account, token, Amount.Parse(row.GetValue<string>("amount")), row.IsNull("opted_in") || row.GetValue<bool>("opted_in"), last);
                     }
 
                     // Written by a round that is not published (crashed or losing writer): the effect history decides.
                     return await LatestEffectAtOrBeforeAsync(account, token, indexed, cancellationToken).ConfigureAwait(false) is { } latest
-                        ? new Holding(account, token, latest.Balance, true, latest.Round)
+                        ? new Holding(account, token, latest.Balance, latest.Type != EffectType.AssetOptOut, latest.Round)
                         : null;
                 },
                 cancellationToken,
@@ -396,7 +396,7 @@ public sealed partial class CassandraChainStorage
                 var balance = latest[i]?.Balance ?? Amount.Zero;
                 if (includeZero || !balance.IsZero)
                 {
-                    yield return new Holding(candidates[i].Account, token, balance, true, latest[i]?.Round ?? candidates[i].FirstRound);
+                    yield return new Holding(candidates[i].Account, token, balance, latest[i]?.Type != EffectType.AssetOptOut, latest[i]?.Round ?? candidates[i].FirstRound);
                 }
             }
 

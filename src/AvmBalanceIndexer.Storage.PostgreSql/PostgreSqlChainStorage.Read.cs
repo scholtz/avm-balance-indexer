@@ -255,10 +255,10 @@ public sealed partial class PostgreSqlChainStorage
         // page, which is the page size plus any zero-balance accounts skipped when zero balances are excluded.
         await using var command = new NpgsqlCommand(
             """
-            SELECT t.account, COALESCE(b.balance_after, 0), COALESCE(b.round, t.first_round)
+            SELECT t.account, COALESCE(b.balance_after, 0), COALESCE(b.round, t.first_round), COALESCE(b.effect_type <> 'AssetOptOut', true)
             FROM accounts_touched_by_token t
             LEFT JOIN LATERAL (
-                SELECT e.balance_after, e.round
+                SELECT e.balance_after, e.round, e.effect_type
                 FROM effects_by_account_token e
                 WHERE e.account = t.account AND e.token_kind = t.token_kind AND e.token_id = t.token_id AND e.round <= @round
                 ORDER BY e.round DESC, e.intra_round_order DESC, e.ordinal DESC
@@ -283,7 +283,7 @@ public sealed partial class PostgreSqlChainStorage
         {
             while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             {
-                items.Add(new Holding(new Address((byte[])reader[0]), token, ToAmount(reader.GetFieldValue<BigInteger>(1)), true, (ulong)reader.GetInt64(2)));
+                items.Add(new Holding(new Address((byte[])reader[0]), token, ToAmount(reader.GetFieldValue<BigInteger>(1)), reader.GetBoolean(3), (ulong)reader.GetInt64(2)));
             }
         }
 
@@ -363,7 +363,7 @@ public sealed partial class PostgreSqlChainStorage
     {
         await using var command = new NpgsqlCommand(
             """
-            SELECT account, amount, last_changed_round
+            SELECT account, amount, last_changed_round, opted_in
             FROM holdings_by_token
             WHERE token_kind = @kind AND token_id = @id AND account > @after AND (@includeZero OR amount > 0)
             ORDER BY account
@@ -381,7 +381,7 @@ public sealed partial class PostgreSqlChainStorage
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
-            items.Add(new Holding(new Address((byte[])reader[0]), token, ToAmount(reader.GetFieldValue<BigInteger>(1)), true, (ulong)reader.GetInt64(2)));
+            items.Add(new Holding(new Address((byte[])reader[0]), token, ToAmount(reader.GetFieldValue<BigInteger>(1)), reader.GetBoolean(3), (ulong)reader.GetInt64(2)));
         }
 
         return ToPage(items, pageSize, indexed, static h => Convert.ToHexString(h.Account.Bytes));
