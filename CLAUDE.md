@@ -14,10 +14,11 @@ Read first (in this order, skip what you already know): this file, `CONTRIBUTING
 | Project | Contains |
 |---|---|
 | `src/...Domain` | Provider-neutral contracts: `Storage/` (IChainStorage, IRoundWriter, stores), `Tokens/` (`Amount` is BigInteger-backed), `Effects/`, `Chains/` |
-| `src/...Indexing` | `Adapters/` (Algorand block fetch via gossip, decode, hash/genesis verification), `Ingestion/` (RoundIndexer, BalanceTracker, OrderedPrefetch) |
+| `src/...Indexing` | `Adapters/` (Algorand block fetch via gossip, decode, hash/genesis verification), `Normalization/` (block -> token effects), `Ingestion/` (RoundIndexer, BalanceTracker, OrderedPrefetch) |
 | `src/...Storage.*` | Providers (PostgreSQL done, Cassandra = issue #14). Provider-specific SQL/CQL stays here |
 | `src/...Hosting`, `...Api`, `...Worker` | DI wiring, HTTP API, background indexer |
 | `tests/...TestSupport` | `StorageContractTests` (shared suite every provider derives from), fakes, `InMemoryChainStorage`, `PostgresFixture` |
+| `tests/...Storage.ContractTests` | One thin class per provider deriving from `StorageContractTests` (`InMemory...`, `PostgreSql...`); a new provider adds its class here and a CI service |
 | `tests/...Live.Tests` | Network tests: first 1000 rounds of TestNet+MainNet vs. ledger deltas |
 | `deploy/`, `docker/` | Helm chart + per-chain values, Dockerfiles (CI lints/builds them) |
 
@@ -26,25 +27,27 @@ Rules that are easy to break (details in CONTRIBUTING.md):
 - No SQL/CQL concepts in Domain. A storage behaviour change needs a test in `StorageContractTests.cs` (covers all providers).
 - Network access in tests only in `Live.Tests` (`AVM_SKIP_LIVE_TESTS=1` skips it).
 - New architectural decision -> new numbered ADR in `docs/adr/`.
-- Ledger facts and oracles (rewards pool, genesis/block hashing, `/v2/deltas/{round}` oracle) are in the memory file
-  `avm-indexer-ledger-facts`; read it before touching normalization, hashing or live tests.
+- Ledger facts and oracles (rewards pool, genesis/block hashing, `/v2/deltas/{round}` oracle) are in
+  [docs/ledger-facts.md](docs/ledger-facts.md); read it before touching normalization, hashing or live tests.
 
 ## Commands
 
 ```sh
 dotnet build AvmBalanceIndexer.slnx
-AVM_SKIP_LIVE_TESTS=1 dotnet test AvmBalanceIndexer.slnx          # fast loop; starts its own PostgreSQL container
+dotnet test AvmBalanceIndexer.slnx   # fast loop with AVM_SKIP_LIVE_TESTS=1; starts its own PostgreSQL container
 dotnet test tests/AvmBalanceIndexer.Indexing.Tests --filter "FullyQualifiedName~Name"   # single test while doing TDD
 dotnet test tests/AvmBalanceIndexer.Live.Tests                    # needed when balance logic changes
 ```
+Set the variable per shell: bash `export AVM_SKIP_LIVE_TESTS=1`, PowerShell `$env:AVM_SKIP_LIVE_TESTS=1`.
 Docker must be running for PostgreSQL-backed tests unless `AVM_TEST_POSTGRES` is set. CI = build+unit+contract,
 live-network, docker builds, helm lint; all must be green to merge.
 
 ## Team isolation
 
-- Work in your **own clone or `git worktree`** per team (e.g. `../avm-team-b`); never share a working directory.
+- Work in your **own clone** per team (e.g. `../avm-team-b`); never share a working directory. If you use
+  `git worktree` instead, `main` is checked out elsewhere: use `git switch -c <branch> origin/main` and skip local-main steps.
 - Labels: `team:a`, `team:b`, ... mark ownership. Create the label if missing:
-  `gh label create team:b --color 5319e7 2>$null`. Put your team label on every issue and PR you create or claim.
+  `gh label create team:b --color 5319e7 --force` (labels `team:a`..`team:d` already exist). Put your team label on every issue and PR you create or claim.
 - Branch names: `feature/<issue>-<slug>` or `fix/<issue>-<slug>` (the issue number keeps branches unique across teams).
 - **Never commit or push to `main` directly**; every change, including docs and instruction files, goes through an
   issue -> branch -> PR -> review -> squash-merge.
@@ -52,37 +55,38 @@ live-network, docker builds, helm lint; all must be green to merge.
   body has `Closes #<n>`. Create an issue first even for small chores.
 - Commit trailer and PR footer follow the attribution lines given by the harness.
 
-## Current team assignments (labels are the source of truth: `gh issue list --label team:<t>`)
+## Team assignments
 
-- **Team A** (indexing / chain correctness): #20 payouts, #23 payset+certificate, #16 Voi genesis, #18 ASA/ARC-20/ARC-200, #15 throughput.
-- **Team B** (storage / serving): #14 Cassandra, #19 read API, #22 historical holders, #17 leader election.
-- Both teams touch `Indexing`/`Domain` rarely at once; coordinate via PR comments if #18 (normalizer) needs new storage
-  contract members that #14/#22 are changing.
+Labels are the source of truth: `gh issue list --label team:<t>`. Initial split (2026-10-11): Team A = indexing / chain
+correctness (#20, #23, #16, #18, #15); Team B = storage / serving (#14, #19, #22, #17). Teams C+ take unlabelled issues.
+Within your list the order is the one given above (it follows dependencies), not simply the lowest number. Coordinate via
+PR comments when #18 (normalizer) needs storage contract members that #14/#22 change.
 
 ## The loop (repeat until told to stop)
 
-0. **Sync**: `git fetch origin && git checkout main && git pull --ff-only`. Do this at the start of every iteration
+0. **Sync**: `git fetch origin` (and `git checkout main && git pull --ff-only` in a normal clone). Do this at the start of every iteration
    and again before opening a PR, before every review round, and before merging.
 1. **Open PRs of your team first**: `gh pr list --label team:<t> --state open`. For each: rebase on `origin/main`,
    check CI (`gh pr checks <n>`), fix failures, address review comments, finish the review/merge steps below. Only when
    none are left, continue.
-2. **Pick an issue**: `gh issue list --label team:<t> --state open`. Take the lowest number that is not blocked.
+2. **Pick an issue**: `gh issue list --label team:<t> --state open`. Take the first one that is not blocked (use the order in "Team assignments", else lowest number).
    If none is assigned to your team, look for an **unclaimed** open issue (no `team:*` label), preferring those on the
-   critical path of `PRODUCT-DESCRIPTION.md` (open now: #14 Cassandra, #15 throughput, #16 Voi genesis, #17 leader
-   election, #18 ASA/ARC-20/ARC-200, #19 read API, #20 payouts, #22 historical holders, #23 payset/certificate).
+   critical path of `PRODUCT-DESCRIPTION.md`.
    **Claim it immediately** by adding your label, then re-read the issue labels; if another team's label is also there,
-   the lower letter keeps it and the other team picks something else. Dependabot PRs without a team label can be taken
-   the same way, but only when no feature issue is available.
+   the earlier label (see the issue timeline) keeps it; the other team **removes its own label** and picks another
+   issue. Dependabot PRs without a team label can be taken the same way, only when no feature issue is available; they
+   are exempt from the issue-id/TDD rules (a version bump needs only green CI; keep the Dependabot title).
 3. **If no issue exists**: create one (see "Creating issues"), label it with your team, then take it.
 4. **Implement with TDD**: write a failing test first (smallest scope that proves the behaviour), see it fail for the
    right reason, make it pass, refactor. Every behaviour change needs tests: unit, shared contract test for storage,
    live test when balance logic changes, Helm lint for chart changes. No untested code paths in the PR.
 5. **Before the PR**: `git fetch && git rebase origin/main`, full build + tests (`AVM_SKIP_LIVE_TESTS=1` unless balance
-   logic changed), update docs/ADR if a decision changed. Push, open the PR with `Closes #<n>`, the team label, and the
+   logic changed), update docs/ADR if a decision changed. Push (after any rebase: `git push --force-with-lease`), open the PR with `Closes #<n>`, the team label, and the
    repo PR template.
-6. **Code review loop**: run the `code-review` skill on the PR (use `high` or higher). Fix **every** finding (with a
+6. **Code review loop**: run the `code-review` skill on the PR (use `high` or higher). Fix every real finding (with a
    test where the finding is a bug), push, rebase if main moved, review again. Repeat until a round returns nothing to
-   change. Do not argue findings away; if one is truly wrong, add a short PR comment explaining why.
+   change. A finding you reject gets a short PR comment explaining why and counts as resolved. If round 4 still
+   produces only speculative or style findings, stop and note it in the PR; real bugs are never skipped.
 7. **Merge**: rebase on latest main, wait for green CI (`gh pr checks <n> --watch`), then
    `gh pr merge <n> --squash --delete-branch`. Confirm the issue is closed (`gh issue view <n>`); if not, close it with
    a comment linking the PR.
