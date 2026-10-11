@@ -134,5 +134,7 @@ prove it), size it to one PR, and add `enhancement` plus your team label. Cite s
 - A `MeterListener` sees every meter of that name in the process, and xUnit runs test classes in parallel -> give the object
   under test a unique meter name in tests (see `WorkerHealth`).
 - Each replica must apply the schema before asking for anything that needs a table (the writer lease needs `writer_lease`).
+- Cassandra: never mix lightweight-transaction writes and plain writes on one row. Paxos uses server timestamps, plain writes client
+  ones, and a skewed clock (Docker VM) makes the plain write silently win or lose -> make every write to such a row conditional.
 - Review loops keep finding real issues in lease, timeout and migration code until round 3 -> budget for three rounds there and
   write the failure-path test (lost lease, timeout, missing column) together with the code.

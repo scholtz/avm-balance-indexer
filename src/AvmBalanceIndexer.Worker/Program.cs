@@ -1,3 +1,4 @@
+using AvmBalanceIndexer.Domain.Storage;
 using AvmBalanceIndexer.Hosting;
 using AvmBalanceIndexer.Worker;
 
@@ -9,6 +10,9 @@ builder.Services.AddSingleton<WorkerHealth>();
 builder.Services.AddHostedService<StatusSampler>();
 builder.Services.AddAvmTelemetry(builder.Configuration, "avm-worker", [WorkerHealth.MeterName]);
 builder.Services.AddHostedService<HealthListener>();
+builder.Services.AddOptions<ScanOptions>().Bind(builder.Configuration.GetSection(ScanOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddHostedService<ScanExecutor>();
 builder.Services.AddHostedService<IndexerWorker>();
 
 builder.Build().Run();

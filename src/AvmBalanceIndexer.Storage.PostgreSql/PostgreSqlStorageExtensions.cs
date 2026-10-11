@@ -40,6 +40,7 @@ public static class PostgreSqlStorageExtensions
             TimeSpan.FromSeconds(provider.GetRequiredService<IOptions<StorageOptions>>().Value.PostgreSql.LeaseHeartbeatSeconds)));
         services.AddSingleton<IChainStorage>(static provider => provider.GetRequiredService<PostgreSqlChainStorage>());
         services.AddSingleton<IStorageFailureClassifier, PostgreSqlFailureClassifier>();
+        services.AddSingleton<IScanJobStore>(static provider => provider.GetRequiredService<PostgreSqlChainStorage>());
         services.AddSingleton<IWriterLeaseProvider>(static provider => provider.GetRequiredService<PostgreSqlChainStorage>());
         return services;
     }

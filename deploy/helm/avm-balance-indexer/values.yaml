@@ -53,6 +53,13 @@ worker:
     requests: { cpu: 500m, memory: 512Mi }
     limits: { cpu: "2", memory: 2Gi }
 
+scans:
+  # Asynchronous holder scans (see the README): admission limit and retention of results.
+  maxActive: 20
+  retention: "24:00:00"
+  # A running scan whose owner is silent for this long is taken over by another worker replica.
+  staleAfter: "00:02:00"
+
 telemetry:
   # OTLP endpoint of an OpenTelemetry collector, for example http://otel-collector:4317. Empty turns metrics export off.
   otlpEndpoint: ""
