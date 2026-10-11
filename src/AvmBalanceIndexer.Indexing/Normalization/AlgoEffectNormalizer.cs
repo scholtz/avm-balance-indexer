@@ -50,7 +50,9 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
             var apply = block.ApplyData[index];
             var transactionId = TransactionIdCalculator.Compute(apply, block.GenesisHash, block.GenesisId);
             round.BeginTransaction(index + 1, transactionId);
-            ApplyTransaction(round, transactions[index], apply, []);
+            // Blocks of the early protocols do not record the id of a created asset; it is the transaction counter at the transaction.
+            var legacyCreatedId = header.TxnCounter is { } counter ? counter - (ulong)transactions.Length + (ulong)index + 1 : 0UL;
+            ApplyTransaction(round, transactions[index], apply, [], 0, legacyCreatedId);
         }
 
         if (header.ProposerPayout is > 0)
@@ -91,7 +93,7 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
         round.Add(pool, -withdrawal, EffectType.RewardsWithdrawal, null, []);
     }
 
-    private static void ApplyTransaction(RoundBuilder round, SignedTransaction signed, TxnApplyData apply, int[] path)
+    private static void ApplyTransaction(RoundBuilder round, SignedTransaction signed, TxnApplyData apply, int[] path, ulong issuedBy, ulong legacyCreatedId = 0)
     {
         var transaction = signed.Tx ?? throw new InvalidDataException("Block transaction without a txn body.");
         var sender = ToDomain(transaction.Sender, "sender");
@@ -130,19 +132,17 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
             }
         }
 
-        if (!apply.RawTxn.IsEmpty)
-        {
-            ApplyAsset(round, sender, apply, path);
-        }
+        var executing = apply.RawTxn.IsEmpty ? 0UL : ApplyAsset(round, sender, apply, path, issuedBy, legacyCreatedId);
 
         var inner = (signed.Detail?.InnerTxns ?? []).ToArray();
         for (var i = 0; i < inner.Length; i++)
         {
-            ApplyTransaction(round, inner[i], apply.InnerTxns[i], [.. path, i]);
+            ApplyTransaction(round, inner[i], apply.InnerTxns[i], [.. path, i], executing);
         }
     }
 
-    private static void ApplyAsset(RoundBuilder round, DomainAddress sender, TxnApplyData apply, int[] path)
+    /// <returns>The application this transaction runs, which issues its inner transactions; zero for other types.</returns>
+    private static ulong ApplyAsset(RoundBuilder round, DomainAddress sender, TxnApplyData apply, int[] path, ulong issuedBy, ulong legacyCreatedId)
     {
         var raw = RawTransaction.Read(apply.RawTxn);
         switch (raw.Type)
@@ -151,12 +151,14 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
                 ApplyAssetTransfer(round, sender, raw, apply, path);
                 break;
             case "acfg":
-                ApplyAssetConfiguration(round, sender, raw, apply, path);
+                ApplyAssetConfiguration(round, sender, raw, apply, path, issuedBy, legacyCreatedId);
                 break;
             case "appl":
                 ApplyApplicationLogs(round, raw, apply, path);
-                break;
+                return raw.ApplicationId != 0 ? raw.ApplicationId : apply.CreatedApplicationId;
         }
+
+        return 0;
     }
 
     private static void ApplyApplicationLogs(RoundBuilder round, RawTransaction raw, TxnApplyData apply, int[] path)
@@ -234,7 +236,7 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
         }
     }
 
-    private static void ApplyAssetConfiguration(RoundBuilder round, DomainAddress sender, RawTransaction raw, TxnApplyData apply, int[] path)
+    private static void ApplyAssetConfiguration(RoundBuilder round, DomainAddress sender, RawTransaction raw, TxnApplyData apply, int[] path, ulong issuedBy, ulong legacyCreatedId)
     {
         if (raw.ConfigAssetId == 0)
         {
@@ -242,8 +244,10 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
             var parameters = raw.Params ?? new RawAssetParams(0, 0, null, null, null);
             var assetId = apply.CreatedAssetId != 0
                 ? apply.CreatedAssetId
-                : throw new InvalidDataException($"Round {round.Round}: an asset creation has no created asset id in its apply data.");
-            round.Record(AssetRecords.Created(assetId, sender, parameters, round.Round));
+                : legacyCreatedId != 0 && path.Length == 0
+                    ? legacyCreatedId
+                    : throw new InvalidDataException($"Round {round.Round}: an asset creation has no created asset id in its apply data.");
+            round.Record(AssetRecords.Created(assetId, sender, parameters, round.Round, issuedBy));
             round.Add(sender, new BigInteger(parameters.Total), TokenKey.Asa(assetId), EffectType.AssetCreate, null, path, keepZero: true);
         }
         else if (raw.Params is null)
@@ -259,7 +263,11 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
             round.Record(info with { DeletedRound = round.Round });
         }
 
-        // Reconfiguring an existing asset (caid with apar) moves no units; its effect on the token record is #34.
+        else if (raw.Params is { } changed && round.FindAsset(raw.ConfigAssetId) is { } existing)
+        {
+            // Reconfiguring moves no units; it can change the management addresses and with them the ARC-20 classification.
+            round.Record(AssetRecords.Reconfigured(existing, changed));
+        }
     }
 
     private static readonly DomainAddress ZeroAddress = new(new byte[DomainAddress.Length]);

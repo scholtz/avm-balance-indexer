@@ -730,5 +730,36 @@ public abstract class StorageContractTests
         Assert.NotNull(token);
         Assert.Equal((TokenStandard.Arc200, false, 1UL), (token.Standard, token.StandardVerified, token.CreatedRound));
     }
+
+    [Fact]
+    public async Task A_Smart_Asa_Is_Classified_And_Reclassified_By_A_Later_Reconfiguration()
+    {
+        const ulong asset = 300;
+        const ulong application = 88;
+        var key = TokenKey.Asa(asset);
+        var chain = new TestChain();
+        var storage = await CreateStorageAsync();
+        var appAccount = ApplicationAddresses.Of(application);
+        var creation = TestAsset.Creation(asset, 500, unit: "S-ASA", name: "SMART-ASA") with { DefaultFrozen = true, ClawbackAddress = appAccount, Manager = appAccount };
+        var blocks = new[]
+        {
+            chain.Block(1, [new TestPayment(Alice, Bob, 0, Application: new TestApplication(application), Inner: [new TestPayment(appAccount, appAccount, 0, Fee: 0, Asset: creation)])], rewards: RewardsAt(1)),
+            chain.Block(2, [new TestPayment(Alice, Alice, 0, Asset: TestAsset.Reconfiguration(asset, Alice, null))], rewards: RewardsAt(2)),
+        };
+        var indexer = CreateIndexer(storage, Adapter(blocks));
+
+        await indexer.RunAsync(1, CancellationToken.None);
+        var smart = await storage.GetAsync(key, CancellationToken.None);
+
+        Assert.NotNull(smart);
+        Assert.Equal((TokenStandard.Arc20, true, (ulong?)application, appAccount), (smart.Standard, smart.StandardVerified, smart.ControllingAppId, smart.Creator));
+        Assert.Equal(500UL, (ulong)(await storage.GetBalanceAtRoundAsync(appAccount, key, 1, CancellationToken.None)).Value);
+
+        await indexer.RunAsync(2, CancellationToken.None);
+        var plain = await storage.GetAsync(key, CancellationToken.None);
+
+        Assert.NotNull(plain);
+        Assert.Equal((TokenStandard.Asa, (ulong?)null, appAccount), (plain.Standard, plain.ControllingAppId, plain.Creator));
+    }
 }
 

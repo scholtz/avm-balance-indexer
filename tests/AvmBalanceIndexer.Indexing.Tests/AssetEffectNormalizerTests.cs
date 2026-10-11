@@ -187,5 +187,25 @@ public class AssetEffectNormalizerTests
         Assert.Equal(("AB", "Name"), (token.Symbol, token.Name));
         Assert.DoesNotContain('\0', token.MetadataJson!);
     }
+
+    [Fact]
+    public void Blocks_Of_The_Early_Protocols_Identify_A_Created_Asset_By_The_Transaction_Counter()
+    {
+        // Counter 1,000 before the block, three transactions: the creation is the second one, so it gets 1,000 + 2.
+        var chain = new TestChain { TxnCounterBefore = 1_000 };
+        var block = Normalizer.NormalizeBlock(
+            chain.Block(
+                5,
+                [
+                    new TestPayment(Alice, Bob, 1),
+                    new TestPayment(Alice, Alice, 0, Asset: TestAsset.Creation(0, 10)),
+                    new TestPayment(Alice, Bob, 1),
+                ]),
+            default,
+            AssetDirectory.Empty);
+
+        Assert.Equal(TokenKey.Asa(1_002), Assert.Single(block.TokenChanges).Key);
+        Assert.Single(block.Deltas, static d => d.Token == TokenKey.Asa(1_002));
+    }
 }
 

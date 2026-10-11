@@ -47,6 +47,10 @@ public sealed record TestApplication(ulong ApplicationId, IReadOnlyList<byte[]>?
 /// <param name="Decimals">Decimals of a created asset.</param>
 /// <param name="UnitName">Unit name of a created asset.</param>
 /// <param name="Name">Name of a created asset.</param>
+/// <param name="DefaultFrozen">Holdings of a created asset start frozen.</param>
+/// <param name="Manager">Manager address of a created or reconfigured asset.</param>
+/// <param name="ClawbackAddress">Clawback address of a created or reconfigured asset.</param>
+/// <param name="Reconfigure">True for a reconfiguration of <paramref name="AssetId"/> (manager and clawback only).</param>
 public sealed record TestAsset(
     string Type,
     ulong AssetId = 0,
@@ -59,8 +63,16 @@ public sealed record TestAsset(
     ulong Total = 0,
     uint Decimals = 0,
     string? UnitName = null,
-    string? Name = null)
+    string? Name = null,
+    bool DefaultFrozen = false,
+    Address? Manager = null,
+    Address? ClawbackAddress = null,
+    bool Reconfigure = false)
 {
+    /// <summary>Changes the manager and clawback of an existing asset.</summary>
+    public static TestAsset Reconfiguration(ulong assetId, Address? manager, Address? clawback) =>
+        new("acfg", assetId, Reconfigure: true, Manager: manager, ClawbackAddress: clawback);
+
     public static TestAsset Transfer(ulong assetId, ulong amount) => new("axfer", assetId, amount);
 
     public static TestAsset OptIn(ulong assetId) => new("axfer", assetId);
@@ -108,6 +120,12 @@ public sealed class TestChain
 
     /// <summary>When false, blocks omit the proposer from the header even when they pay a proposer payout.</summary>
     public bool IncludeProposer { get; init; } = true;
+
+    /// <summary>
+    /// When set, blocks carry the transaction counter <c>tc</c> (this value plus the block's transactions), which is how early
+    /// protocols identify created assets.
+    /// </summary>
+    public ulong? TxnCounterBefore { get; init; }
 
     /// <summary>Deterministic account used throughout tests; distinct per index.</summary>
     public static Address Account(int index)
@@ -175,7 +193,7 @@ public sealed class TestChain
         writer.WriteMapHeader(2);
 
         writer.Write("block");
-        writer.WriteMapHeader(9 + (IncludeRewardsPool ? 1 : 0) + (proposerPayout > 0 ? 1 + (IncludeProposer ? 1 : 0) : 0) + (rewards is not null ? 3 : 0));
+        writer.WriteMapHeader(9 + (TxnCounterBefore is not null ? 1 : 0) + (IncludeRewardsPool ? 1 : 0) + (proposerPayout > 0 ? 1 + (IncludeProposer ? 1 : 0) : 0) + (rewards is not null ? 3 : 0));
         writer.Write("fees");
         writer.Write(FeeSink.ToArray());
         writer.Write("gen");
@@ -192,6 +210,12 @@ public sealed class TestChain
         {
             writer.Write("rwd");
             writer.Write(Pool.ToArray());
+        }
+
+        if (TxnCounterBefore is { } before)
+        {
+            writer.Write("tc");
+            writer.Write(before + (ulong)payments.Count);
         }
 
         writer.Write("ts");
@@ -368,40 +392,20 @@ public sealed class TestChain
                 entries.Add(("aclose", (ref MessagePackWriter w) => w.Write(closeTo.ToArray())));
             }
         }
-        else if (asset.Create)
-        {
-            // A real transaction omits apar when every parameter is zero.
-            if (asset.Total > 0 || asset.Decimals > 0 || asset.UnitName is not null || asset.Name is not null)
-            {
-            entries.Add(("apar", (ref MessagePackWriter w) =>
-            {
-                var fields = 1 + (asset.Decimals > 0 ? 1 : 0) + (asset.UnitName is not null ? 1 : 0) + (asset.Name is not null ? 1 : 0);
-                w.WriteMapHeader(fields);
-                if (asset.Name is not null)
-                {
-                    w.Write("an");
-                    w.Write(asset.Name);
-                }
-
-                if (asset.Decimals > 0)
-                {
-                    w.Write("dc");
-                    w.Write(asset.Decimals);
-                }
-
-                w.Write("t");
-                w.Write(asset.Total);
-                if (asset.UnitName is not null)
-                {
-                    w.Write("un");
-                    w.Write(asset.UnitName);
-                }
-            }));
-            }
-        }
         else
         {
-            entries.Add(("caid", (ref MessagePackWriter w) => w.Write(asset.AssetId)));
+            if (!asset.Create)
+            {
+                entries.Add(("caid", (ref MessagePackWriter w) => w.Write(asset.AssetId)));
+            }
+
+            // A real transaction omits apar when every parameter is zero, and for a destroy.
+            var hasParameters = asset.Reconfigure
+                || (asset.Create && (asset.Total > 0 || asset.Decimals > 0 || asset.UnitName is not null || asset.Name is not null || asset.DefaultFrozen || asset.Manager is not null || asset.ClawbackAddress is not null));
+            if (hasParameters)
+            {
+                entries.Add(("apar", (ref MessagePackWriter w) => WriteAssetParameters(ref w, asset)));
+            }
         }
 
         writer.WriteMapHeader(entries.Count);
@@ -409,6 +413,51 @@ public sealed class TestChain
         {
             writer.Write(key);
             write(ref writer);
+        }
+    }
+
+    private static void WriteAssetParameters(ref MessagePackWriter w, TestAsset asset)
+    {
+        var fields = new List<(string Key, WriteValue Write)>();
+        if (asset.Create)
+        {
+            fields.Add(("t", (ref MessagePackWriter x) => x.Write(asset.Total)));
+            if (asset.Decimals > 0)
+            {
+                fields.Add(("dc", (ref MessagePackWriter x) => x.Write(asset.Decimals)));
+            }
+
+            if (asset.UnitName is not null)
+            {
+                fields.Add(("un", (ref MessagePackWriter x) => x.Write(asset.UnitName)));
+            }
+
+            if (asset.Name is not null)
+            {
+                fields.Add(("an", (ref MessagePackWriter x) => x.Write(asset.Name)));
+            }
+
+            if (asset.DefaultFrozen)
+            {
+                fields.Add(("df", (ref MessagePackWriter x) => x.Write(true)));
+            }
+        }
+
+        if (asset.Manager is { } manager)
+        {
+            fields.Add(("m", (ref MessagePackWriter x) => x.Write(manager.ToArray())));
+        }
+
+        if (asset.ClawbackAddress is { } clawback)
+        {
+            fields.Add(("c", (ref MessagePackWriter x) => x.Write(clawback.ToArray())));
+        }
+
+        w.WriteMapHeader(fields.Count);
+        foreach (var (key, write) in fields.OrderBy(static f => f.Key, StringComparer.Ordinal))
+        {
+            w.Write(key);
+            write(ref w);
         }
     }
 

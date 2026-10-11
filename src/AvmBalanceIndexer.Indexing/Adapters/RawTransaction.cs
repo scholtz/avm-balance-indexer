@@ -10,7 +10,22 @@ namespace AvmBalanceIndexer.Indexing.Adapters;
 /// <param name="UnitName">Unit name (<c>un</c>).</param>
 /// <param name="Name">Asset name (<c>an</c>).</param>
 /// <param name="Url">Asset url (<c>au</c>).</param>
-public sealed record RawAssetParams(ulong Total, uint Decimals, string? UnitName, string? Name, string? Url);
+/// <param name="DefaultFrozen">Holdings start frozen (<c>df</c>).</param>
+/// <param name="Manager">Manager address (<c>m</c>), null when absent.</param>
+/// <param name="Reserve">Reserve address (<c>r</c>), null when absent.</param>
+/// <param name="Freeze">Freeze address (<c>f</c>), null when absent.</param>
+/// <param name="Clawback">Clawback address (<c>c</c>), null when absent.</param>
+public sealed record RawAssetParams(
+    ulong Total,
+    uint Decimals,
+    string? UnitName,
+    string? Name,
+    string? Url,
+    bool DefaultFrozen = false,
+    byte[]? Manager = null,
+    byte[]? Reserve = null,
+    byte[]? Freeze = null,
+    byte[]? Clawback = null);
 
 /// <summary>
 /// The asset related fields of a stored transaction, read from its canonical msgpack map. The Algorand5 model picks a
@@ -106,6 +121,8 @@ public sealed record RawTransaction(
         ulong total = 0;
         uint decimals = 0;
         string? unit = null, name = null, url = null;
+        var defaultFrozen = false;
+        byte[]? manager = null, reserve = null, freeze = null, clawback = null;
         var entries = reader.ReadMapHeader();
         for (var i = 0; i < entries; i++)
         {
@@ -126,13 +143,28 @@ public sealed record RawTransaction(
                 case "au":
                     url = ReadText(ref reader);
                     break;
+                case "df":
+                    defaultFrozen = reader.ReadBoolean();
+                    break;
+                case "m":
+                    manager = ReadAddress(ref reader);
+                    break;
+                case "r":
+                    reserve = ReadAddress(ref reader);
+                    break;
+                case "f":
+                    freeze = ReadAddress(ref reader);
+                    break;
+                case "c":
+                    clawback = ReadAddress(ref reader);
+                    break;
                 default:
                     reader.Skip();
                     break;
             }
         }
 
-        return new RawAssetParams(total, decimals, unit, name, url);
+        return new RawAssetParams(total, decimals, unit, name, url, defaultFrozen, manager, reserve, freeze, clawback);
     }
 
     private static string? ReadText(ref MessagePackReader reader)
