@@ -75,7 +75,7 @@ public sealed class ApiHardeningTests : IDisposable
     }
 
     [Fact]
-    public async Task The_Retry_After_Header_Tells_The_Real_Wait()
+    public async Task The_Retry_After_Header_Is_A_Wait_Within_The_Window()
     {
         using var client = Create(settings: ("Api:RateLimitPerMinute", "1"));
         (await client.GetAsync(Status)).Dispose();

@@ -13,7 +13,6 @@ using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddOptions<ApiOptions>().Bind(builder.Configuration.GetSection(ApiOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
 var api = builder.Configuration.GetSection(ApiOptions.SectionName).Get<ApiOptions>() ?? new ApiOptions();
 Validator.ValidateObject(api, new ValidationContext(api), validateAllProperties: true);
 builder.Services.AddOpenApi();
@@ -114,19 +113,18 @@ v1.MapGet(
     {
         var status = await storage.GetAsync(chain.Chain, cancellationToken);
         return status is null
-            ? Results.Ok(new { chain = chain.Chain, provider = options.Value.Provider.ToString(), state = "NotStarted", indexedRound = (ulong?)null })
-            : Results.Ok(new
-            {
-                chain = chain.Chain,
-                provider = options.Value.Provider.ToString(),
-                state = status.State.ToString(),
-                indexedRound = (ulong?)status.IndexedRound,
-                targetRound = status.TargetRound,
-                lag = status.Lag,
-                updatedAt = status.UpdatedAt,
-            });
+            ? Results.Ok(new StatusResponse(chain.Chain, options.Value.Provider.ToString(), "NotStarted", null, null, null, null))
+            : Results.Ok(new StatusResponse(
+                chain.Chain,
+                options.Value.Provider.ToString(),
+                status.State.ToString(),
+                status.IndexedRound,
+                status.TargetRound,
+                status.Lag,
+                status.UpdatedAt));
     })
     .WithName("GetChainStatus")
+    .Produces<StatusResponse>()
     .WithTags("Status")
     .WithSummary("Indexed round, target round, lag and ingestion state")
     .WithErrors(StatusCodes.Status404NotFound)
