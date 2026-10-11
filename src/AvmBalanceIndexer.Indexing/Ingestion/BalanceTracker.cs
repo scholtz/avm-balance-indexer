@@ -18,6 +18,8 @@ public sealed record RoundEffects(IReadOnlyList<TokenEffect> Effects, IReadOnlyD
 public sealed class BalanceTracker(IBalanceReadStore store, int maxCacheEntries)
 {
     private readonly int _generationSize = Math.Max(1, maxCacheEntries / 2);
+    private static readonly BigInteger Uint256Max = (BigInteger.One << 256) - 1;
+
     private Dictionary<HoldingKey, Amount> _young = [];
     private Dictionary<HoldingKey, Amount> _old = [];
 
@@ -75,6 +77,12 @@ public sealed class BalanceTracker(IBalanceReadStore store, int maxCacheEntries)
                 {
                     creditLimit = balance.Value;
                 }
+            }
+
+            if (delta.Token.Kind == TokenKind.Arc200 && balance.Value + applied.Delta > Uint256Max)
+            {
+                // A balance never exceeds uint256, which is also what the database columns can hold.
+                applied = applied with { Delta = Uint256Max - balance.Value };
             }
 
             if (applied.Delta.IsZero && applied != delta)

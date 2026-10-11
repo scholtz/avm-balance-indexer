@@ -155,5 +155,19 @@ public class BalanceTrackerTests
 
         Assert.Empty(round.Effects);
     }
+
+    [Fact]
+    public async Task An_Arc200_Balance_Is_Capped_At_Uint256_So_The_Database_Can_Always_Hold_It()
+    {
+        var tracker = new BalanceTracker(await SeededAsync(), 1000);
+        var max = (BigInteger.One << 256) - 1;
+        BalanceDelta Mint(int ordinal, BigInteger amount) =>
+            new(new EffectId(1, 0, "tx", [], ordinal), Alice, TokenKey.Arc200(9), EffectType.Arc200Mint, amount, null);
+
+        var round = await tracker.ApplyAsync([Mint(0, max), Mint(1, max), Mint(2, 5)], CancellationToken.None);
+
+        var effect = Assert.Single(round.Effects);
+        Assert.Equal(max, effect.BalanceAfter.Value);
+    }
 }
 
