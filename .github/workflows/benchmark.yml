@@ -1,0 +1,139 @@
+name: Nightly benchmark
+
+# Indexes the 10,000 newest Algorand MainNet rounds into PostgreSQL and into Cassandra (each on its own runner, alone with its
+# database), measures the stored size and the API latency, and publishes the comparison:
+#   - the run's summary page (Actions -> Nightly benchmark -> latest run),
+#   - the artifacts bench-postgres / bench-cassandra (raw JSON),
+#   - the branch `benchmark-results`: latest.md, latest-*.json and history/ (one JSON file per night and provider).
+# See docs/benchmarks.md.
+
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+    inputs:
+      rounds:
+        description: Number of newest rounds to index
+        default: "10000"
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  ROUNDS: ${{ inputs.rounds || '10000' }}
+
+jobs:
+  postgres:
+    name: PostgreSQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: postgres
+          POSTGRES_USER: avm
+          POSTGRES_PASSWORD: avm
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U avm -d postgres"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+      - run: dotnet build src/AvmBalanceIndexer.Api -c Release && dotnet build tools/AvmBalanceIndexer.Benchmark -c Release
+      - name: Benchmark
+        run: >
+          dotnet tools/AvmBalanceIndexer.Benchmark/bin/Release/net10.0/AvmBalanceIndexer.Benchmark.dll run
+          --provider postgres --rounds "$ROUNDS" --commit "$GITHUB_SHA" --out results
+          --postgres "Host=localhost;Port=5432;Username=avm;Password=avm;Database=postgres"
+          --api-dll src/AvmBalanceIndexer.Api/bin/Release/net10.0/AvmBalanceIndexer.Api.dll
+      - run: dotnet tools/AvmBalanceIndexer.Benchmark/bin/Release/net10.0/AvmBalanceIndexer.Benchmark.dll report results/bench-postgres.json --out results/summary.md >/dev/null && cat results/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: bench-postgres
+          path: results
+
+  cassandra:
+    name: Cassandra
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    services:
+      cassandra:
+        image: cassandra:5.0
+        env:
+          CASSANDRA_CLUSTER_NAME: avm-bench
+          CASSANDRA_DC: dc1
+          CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
+          MAX_HEAP_SIZE: 2G
+          HEAP_NEWSIZE: 400M
+        ports: ["9042:9042"]
+        options: >-
+          --health-cmd "cqlsh -e 'describe cluster' localhost 9042"
+          --health-interval 15s --health-timeout 10s --health-retries 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+      - run: dotnet build src/AvmBalanceIndexer.Api -c Release && dotnet build tools/AvmBalanceIndexer.Benchmark -c Release
+      - name: Benchmark
+        run: >
+          dotnet tools/AvmBalanceIndexer.Benchmark/bin/Release/net10.0/AvmBalanceIndexer.Benchmark.dll run
+          --provider cassandra --rounds "$ROUNDS" --commit "$GITHUB_SHA" --out results
+          --cassandra localhost:9042 --dc dc1 --cassandra-container "$(docker ps -q --filter ancestor=cassandra:5.0 | head -1)"
+          --api-dll src/AvmBalanceIndexer.Api/bin/Release/net10.0/AvmBalanceIndexer.Api.dll
+      - run: dotnet tools/AvmBalanceIndexer.Benchmark/bin/Release/net10.0/AvmBalanceIndexer.Benchmark.dll report results/bench-cassandra.json --out results/summary.md >/dev/null && cat results/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: bench-cassandra
+          path: results
+
+  publish:
+    name: Publish comparison
+    runs-on: ubuntu-latest
+    needs: [postgres, cassandra]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+      - uses: actions/download-artifact@v8
+        with:
+          path: results
+      - run: dotnet build tools/AvmBalanceIndexer.Benchmark -c Release
+      - name: Render the comparison
+        run: |
+          dotnet tools/AvmBalanceIndexer.Benchmark/bin/Release/net10.0/AvmBalanceIndexer.Benchmark.dll report \
+            results/bench-cassandra/bench-cassandra.json results/bench-postgres/bench-postgres.json --out comparison.md > /dev/null
+          cat comparison.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Commit to the benchmark-results branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code --heads origin benchmark-results >/dev/null; then
+            git fetch origin benchmark-results
+            git worktree add ../out benchmark-results
+          else
+            git worktree add --orphan -b benchmark-results ../out
+          fi
+          day="$(date -u +%F)"
+          mkdir -p ../out/history
+          cp comparison.md ../out/latest.md
+          for provider in postgres cassandra; do
+            cp "results/bench-$provider/bench-$provider.json" "../out/latest-$provider.json"
+            cp "results/bench-$provider/bench-$provider.json" "../out/history/$day-$provider.json"
+          done
+          printf '# Latest nightly benchmark\n\nPostgreSQL against Cassandra on the newest MainNet rounds. Updated every night by the workflow `Nightly benchmark`; older results are in `history/`. How it is measured: docs/benchmarks.md on the main branch.\n\n' | cat - comparison.md > ../out/latest.md
+          cd ../out
+          git add -A
+          git commit -m "Nightly benchmark $day" || exit 0
+          git push origin benchmark-results

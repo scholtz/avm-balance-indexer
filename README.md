@@ -140,6 +140,62 @@ Errors: 400 for invalid input or cursor, 404 for an unknown token, a round beyon
 another chain, 503 while nothing is indexed yet. A walk over the holders of the latest round should pass the
 `round` it received, so that all pages come from one round.
 
+## PostgreSQL or Cassandra?
+
+Both providers pass the same contract suite and produce identical data, so the choice is about cost and read patterns. The numbers below come
+from `tools/AvmBalanceIndexer.Benchmark` and are **re-measured every night** by the workflow
+[Nightly benchmark](https://github.com/scholtz/avm-balance-indexer/actions/workflows/benchmark.yml)
+([![Nightly benchmark](https://github.com/scholtz/avm-balance-indexer/actions/workflows/benchmark.yml/badge.svg)](https://github.com/scholtz/avm-balance-indexer/actions/workflows/benchmark.yml)).
+**Latest results:** the [`benchmark-results` branch](https://github.com/scholtz/avm-balance-indexer/tree/benchmark-results)
+([latest.md](https://github.com/scholtz/avm-balance-indexer/blob/benchmark-results/latest.md), one JSON file per night in `history/`) and
+the summary page of each workflow run. Method, caveats and how to run it yourself: [docs/benchmarks.md](docs/benchmarks.md).
+
+The table is a snapshot from the day the benchmark was added.
+
+Measured on 2026-10-11 at commit `b04d86ad`: the 10,000 newest rounds of algorand-mainnet (chain rounds 65,877,351 to 65,887,350) were downloaded once, then indexed from an empty database by the production indexer. Each database ran alone on Microsoft Windows 10.0.26200, 24 cores, 64 GiB.
+
+#### Indexing and storage
+
+| | Cassandra 5.0.9 | PostgreSQL 17.11 |
+|---|---:|---:|
+| Indexing speed | 80 rounds/s | 90 rounds/s |
+| Effects written | 961,257 (7,689/s) | 958,598 (8,612/s) |
+| Time for the range | 125.0 s | 111.3 s |
+| Stored size | 159.0 MiB | 627.0 MiB |
+| Per round | 16.3 KiB | 64.2 KiB |
+| Per effect | 171 bytes | 674 bytes |
+| Full MainNet estimate (66 M rounds) | 1.0 TiB | 3.9 TiB |
+
+Block download is the same for both and not part of the table: 60 rounds/s from the public archival nodes (258,242 transactions).
+
+#### Largest tables
+
+- Cassandra 5.0.9: effects_by_account_token_bucket 80.0 MiB, effects_by_token_bucket 63.0 MiB, effect_buckets_by_account_token 5.0 MiB, accounts_touched_by_token 3.0 MiB, holdings_by_account 3.0 MiB
+- PostgreSQL 17.11: effects_by_account_token 342.0 MiB, effects_by_token_bucket 256.7 MiB, accounts_touched_by_token 9.3 MiB, holdings_by_token 9.3 MiB, holdings_by_account 8.3 MiB
+
+#### API latency
+
+One request at a time (p50 / p95 / p99), then 16 requests at a time (throughput and p95). The API runs as its own process on the same machine, so network time is not included.
+
+| Request | cassandra | postgres |
+|---|---:|---:|
+| status | 1.1 / 2.0 / 2.3 ms; 7,519 req/s, p95 3 ms | 0.6 / 0.7 / 1.0 ms; 9,283 req/s, p95 3 ms |
+| account holdings | 2.2 / 3.8 / 4.6 ms; 3,204 req/s, p95 13 ms | 2.1 / 2.4 / 3.3 ms; 3,749 req/s, p95 6 ms |
+| balance, latest | 3.4 / 4.6 / 5.6 ms; 1,719 req/s, p95 27 ms | 2.8 / 3.2 / 3.4 ms; 2,727 req/s, p95 8 ms |
+| balance, past round | 2.7 / 3.2 / 3.6 ms; 2,465 req/s, p95 20 ms | 2.3 / 2.9 / 3.1 ms; 3,001 req/s, p95 7 ms |
+| history, busiest account | 3.1 / 3.9 / 4.8 ms; 1,780 req/s, p95 16 ms | 2.8 / 3.3 / 4.1 ms; 2,056 req/s, p95 11 ms |
+| history, typical account | 1.8 / 2.1 / 2.4 ms; 2,974 req/s, p95 21 ms | 2.0 / 2.5 / 3.0 ms; 3,720 req/s, p95 6 ms |
+| holders, native, latest | 14.5 / 16.4 / 17.9 ms; 298 req/s, p95 87 ms | 2.8 / 3.3 / 3.8 ms; 2,348 req/s, p95 8 ms |
+| holders, native, past round | 53.2 / 84.8 / 97.6 ms; 89 req/s, p95 239 ms | 6.3 / 6.8 / 7.4 ms; 903 req/s, p95 23 ms |
+| holders, busiest ASA, latest | 17.0 / 19.2 / 21.3 ms; 285 req/s, p95 90 ms | 2.7 / 3.3 / 3.8 ms; 2,333 req/s, p95 8 ms |
+| token info | 0.7 / 0.9 / 0.9 ms; 8,898 req/s, p95 2 ms | 0.7 / 0.8 / 0.9 ms; 11,326 req/s, p95 2 ms |
+
+What it says, in short: PostgreSQL answers the holder queries (a page of the biggest token's holders, at the latest or at a past round) 5 to 10 times faster
+and indexes slightly faster on one node; Cassandra stores the same data in about a quarter of the space (compression, no secondary
+indexes) and is the one to pick when you need to scale writes and storage across nodes. Account queries (holdings, balances, history) are within
+a few milliseconds of each other. Caveats: both databases ran as one local node (Cassandra with replication factor 1: a real cluster stores
+three copies and pays quorum latency); the full-chain size is the 10,000-round figure scaled up, an upper bound because older rounds carry less activity.
+
 ## Known limitations
 
 - Holders at the latest round are one ordered index scan. Holders at an older round read each holder's latest balance from its

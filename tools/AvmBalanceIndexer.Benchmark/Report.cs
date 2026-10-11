@@ -1,0 +1,63 @@
+using System.Globalization;
+using System.Text;
+
+namespace AvmBalanceIndexer.Benchmark;
+
+/// <summary>Renders benchmark results as the markdown tables of the README and the nightly summary.</summary>
+public static class Report
+{
+    public static string Render(IReadOnlyList<BenchmarkResult> results)
+    {
+        ArgumentNullException.ThrowIfNull(results);
+        var ordered = results.OrderBy(static r => r.Provider, StringComparer.Ordinal).ToArray();
+        var first = ordered[0];
+        var text = new StringBuilder();
+        text.AppendLine(CultureInfo.InvariantCulture, $"Measured on {first.Date} at commit `{Short(first.Commit)}`: the {first.Rounds:N0} newest rounds of {first.Chain} (chain rounds {first.FirstChainRound:N0} to {first.LastChainRound:N0}) were downloaded once, then indexed from an empty database by the production indexer. Each database ran alone on {first.Machine}.");
+        text.AppendLine();
+
+        text.AppendLine("### Indexing and storage");
+        text.AppendLine();
+        text.AppendLine($"| | {string.Join(" | ", ordered.Select(static r => r.ProviderVersion))} |");
+        text.AppendLine($"|---|{string.Concat(ordered.Select(static _ => "---:|"))}");
+        Row(text, "Indexing speed", ordered, static r => $"{r.Indexing.RoundsPerSecond:N0} rounds/s");
+        Row(text, "Effects written", ordered, static r => $"{r.Indexing.Effects:N0} ({r.Indexing.EffectsPerSecond:N0}/s)");
+        Row(text, "Time for the range", ordered, static r => $"{r.Indexing.Seconds:N1} s");
+        Row(text, "Stored size", ordered, static r => $"{r.Storage.TotalBytes / 1048576.0:N1} MiB{(r.Storage.IncludesUnflushedData ? " (sstables only)" : string.Empty)}");
+        Row(text, "Per round", ordered, static r => $"{r.Storage.KilobytesPerRound:N1} KiB");
+        Row(text, "Per effect", ordered, static r => $"{r.Storage.BytesPerEffect:N0} bytes");
+        Row(text, "Full MainNet estimate (66 M rounds)", ordered, static r => $"{r.Storage.KilobytesPerRound * 66_000_000 / 1024.0 / 1024 / 1024:N1} TiB");
+        text.AppendLine();
+        text.AppendLine(CultureInfo.InvariantCulture, $"Block download is the same for both and not part of the table: {first.Download.RoundsPerSecond:N0} rounds/s from the public archival nodes ({first.Download.Transactions:N0} transactions).");
+        text.AppendLine();
+
+        text.AppendLine("### Largest tables");
+        text.AppendLine();
+        foreach (var result in ordered)
+        {
+            text.AppendLine(CultureInfo.InvariantCulture, $"- {result.ProviderVersion}: {string.Join(", ", result.Storage.Tables.Take(5).Select(static t => $"{t.Name} {t.Bytes / 1048576.0:N1} MiB"))}");
+        }
+
+        text.AppendLine();
+        text.AppendLine("### API latency");
+        text.AppendLine();
+        text.AppendLine("One request at a time (p50 / p95 / p99), then 16 requests at a time (throughput and p95). The API runs as its own process on the same machine, so network time is not included.");
+        text.AppendLine();
+        var names = ordered.SelectMany(static r => r.Api).Select(static a => a.Name).Distinct().ToArray();
+        text.AppendLine($"| Request | {string.Join(" | ", ordered.Select(static r => r.Provider))} |");
+        text.AppendLine($"|---|{string.Concat(ordered.Select(static _ => "---:|"))}");
+        foreach (var name in names)
+        {
+            var cells = ordered.Select(r => r.Api.FirstOrDefault(a => a.Name == name) is { } a
+                ? $"{a.P50Ms:N1} / {a.P95Ms:N1} / {a.P99Ms:N1} ms; {a.RequestsPerSecond:N0} req/s, p95 {a.ConcurrentP95Ms:N0} ms{(a.Errors > 0 ? $", **{a.Errors} errors**" : string.Empty)}"
+                : "n/a");
+            text.AppendLine($"| {name} | {string.Join(" | ", cells)} |");
+        }
+
+        return text.ToString();
+    }
+
+    private static void Row(StringBuilder text, string label, BenchmarkResult[] results, Func<BenchmarkResult, string> value) =>
+        text.AppendLine($"| {label} | {string.Join(" | ", results.Select(value))} |");
+
+    private static string Short(string commit) => commit.Length > 8 ? commit[..8] : commit;
+}
