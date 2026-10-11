@@ -15,7 +15,7 @@ hashing or the live tests.
   Voi, which prunes). Indexer `round=` rewind is disabled on free endpoints.
 - MainNet's first 1000 rounds have no transactions (only pool movement); TestNet has 28; Voi only zero-impact ones.
 - Proposer payout realizes pending rewards invisibly (Move with nil pointers). `PayoutEraRoundsTests` checks 100 rounds
-  ~5000 behind the tip of MainNet (~90% of blocks pay a proposer) and TestNet against `/v2/deltas`: no discrepancy, no other
+  ~5000 behind the tip of MainNet (172 of 200 blocks paid a proposer) and TestNet against `/v2/deltas`: no discrepancy, no other
   implicit movement (suspension, bonus) found. The theoretical gap (an old online proposer with unrealized rewards) is untested.
 - Recent `/v2/deltas` documents contain integer map keys (invalid JSON) after the leading `Accts` object; parse only that part. Payset commitment
   and certificate are unverified (issue #23).
