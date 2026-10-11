@@ -1,6 +1,13 @@
--- Cassandra schema for one chain keyspace. Applied idempotently by CassandraSchemaManager.
+-- Cassandra schema for one chain keyspace. Applied idempotently by CassandraChainStorage.EnsureSchemaAsync, one
+-- statement per semicolon. Keep comments on their own lines and never put a semicolon inside a statement or comment.
 -- Amounts are canonical decimal text, computed with checked BigInteger arithmetic in .NET.
--- Keyspace creation (replication) is deployment-specific and handled by the operator / Helm.
+-- The keyspace itself is created by the schema manager when Storage:Cassandra:CreateKeyspace is true; production
+-- replication settings may instead be applied by the operator / Helm before the first start.
+--
+-- Deviations from the reference design in PRODUCT-DESCRIPTION.md (see docs/adr/0002):
+--   * effect keys end in (round, intra_round_order, ordinal) so several effects of one transaction on the same
+--     account cannot collide; transaction_id is a plain column.
+--   * holdings_by_account and accounts_touched_by_token carry no columns that nothing reads.
 
 CREATE TABLE IF NOT EXISTS chain_status (
   chain text PRIMARY KEY,
@@ -27,6 +34,7 @@ CREATE TABLE IF NOT EXISTS token_by_id (
   PRIMARY KEY ((token_kind, token_id))
 );
 
+-- Current holdings. Written with USING TIMESTAMP = round so a stale writer can never overwrite a newer round.
 CREATE TABLE IF NOT EXISTS holdings_by_account (
   account blob,
   token_kind text,
@@ -34,12 +42,10 @@ CREATE TABLE IF NOT EXISTS holdings_by_account (
   amount text,
   opted_in boolean,
   last_changed_round bigint,
-  symbol text,
-  decimals smallint,
-  standard text,
   PRIMARY KEY ((account), token_kind, token_id)
 );
 
+-- Account history and the source of "latest effect at or before round R". Newest first.
 CREATE TABLE IF NOT EXISTS effects_by_account_token_bucket (
   account blob,
   token_kind text,
@@ -47,25 +53,26 @@ CREATE TABLE IF NOT EXISTS effects_by_account_token_bucket (
   bucket int,
   round bigint,
   intra_round_order int,
+  ordinal int,
   transaction_id text,
   inner_path list<int>,
   effect_type text,
   delta text,
   balance_after text,
   counterparty blob,
-  PRIMARY KEY ((account, token_kind, token_id, bucket), round, intra_round_order, transaction_id)
-) WITH CLUSTERING ORDER BY (round DESC, intra_round_order DESC, transaction_id ASC);
+  PRIMARY KEY ((account, token_kind, token_id, bucket), round, intra_round_order, ordinal)
+) WITH CLUSTERING ORDER BY (round DESC, intra_round_order DESC, ordinal DESC);
 
+-- Which round buckets hold effects of an account/token, so a balance lookup skips empty buckets.
 CREATE TABLE IF NOT EXISTS effect_buckets_by_account_token (
   account blob,
   token_kind text,
   token_id bigint,
   bucket int,
-  first_round bigint,
-  last_round bigint,
   PRIMARY KEY ((account, token_kind, token_id), bucket)
 ) WITH CLUSTERING ORDER BY (bucket DESC);
 
+-- Token oriented duplicate of the effects, sharded by account so one token never concentrates in one partition.
 CREATE TABLE IF NOT EXISTS effects_by_token_bucket (
   token_kind text,
   token_id bigint,
@@ -73,19 +80,20 @@ CREATE TABLE IF NOT EXISTS effects_by_token_bucket (
   shard smallint,
   round bigint,
   intra_round_order int,
+  ordinal int,
   account blob,
   transaction_id text,
   effect_type text,
   delta text,
-  PRIMARY KEY ((token_kind, token_id, bucket, shard), round, intra_round_order, account, transaction_id)
-) WITH CLUSTERING ORDER BY (round DESC, intra_round_order DESC);
+  PRIMARY KEY ((token_kind, token_id, bucket, shard), round, intra_round_order, ordinal, account)
+) WITH CLUSTERING ORDER BY (round DESC, intra_round_order DESC, ordinal DESC, account ASC);
 
+-- Every account that ever changed a token, with the round of its first effect. Sharded by account.
 CREATE TABLE IF NOT EXISTS accounts_touched_by_token (
   token_kind text,
   token_id bigint,
   shard smallint,
   account blob,
   first_round bigint,
-  last_round bigint,
   PRIMARY KEY ((token_kind, token_id, shard), account)
 );

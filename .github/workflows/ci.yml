@@ -14,6 +14,8 @@ env:
   DOTNET_CLI_TELEMETRY_OPTOUT: true
   # Tests use this server instead of starting a container of their own.
   AVM_TEST_POSTGRES: Host=localhost;Port=5432;Database=avm_indexer;Username=avm;Password=avm
+  AVM_TEST_CASSANDRA: localhost:9042
+  AVM_TEST_CASSANDRA_DC: dc1
 
 jobs:
   build-test:
@@ -30,6 +32,18 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U avm -d avm_indexer"
           --health-interval 5s --health-timeout 3s --health-retries 20
+      cassandra:
+        image: cassandra:5.0
+        env:
+          CASSANDRA_CLUSTER_NAME: avm-ci
+          CASSANDRA_DC: dc1
+          CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
+          MAX_HEAP_SIZE: 1G
+          HEAP_NEWSIZE: 256M
+        ports: ["9042:9042"]
+        options: >-
+          --health-cmd "cqlsh -e 'describe cluster' localhost 9042"
+          --health-interval 15s --health-timeout 10s --health-retries 30
     env:
       # Network tests run in their own job.
       AVM_SKIP_LIVE_TESTS: "1"
