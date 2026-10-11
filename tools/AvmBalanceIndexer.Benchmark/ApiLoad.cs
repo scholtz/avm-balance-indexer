@@ -25,7 +25,14 @@ public sealed class ApiLoad : IAsyncDisposable
 
     public static async Task<ApiLoad> StartAsync(string apiDll, IReadOnlyDictionary<string, string> environment, int port, CancellationToken cancellationToken)
     {
-        var start = new ProcessStartInfo("dotnet", $"\"{apiDll}\"") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
+        apiDll = Path.GetFullPath(apiDll);
+        var start = new ProcessStartInfo("dotnet", $"\"{apiDll}\"")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            WorkingDirectory = Path.GetDirectoryName(apiDll)!,
+        };
         foreach (var (key, value) in environment)
         {
             start.Environment[key] = value;
@@ -35,38 +42,65 @@ public sealed class ApiLoad : IAsyncDisposable
         start.Environment["Api__RateLimitPerMinute"] = "0";
         start.Environment["Telemetry__Enabled"] = "false";
         var process = Process.Start(start) ?? throw new InvalidOperationException("The API process did not start.");
-        process.OutputDataReceived += static (_, _) => { };
+        var log = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        void Keep(object sender, DataReceivedEventArgs e)
+        {
+            if (e.Data is not null)
+            {
+                log.Enqueue(e.Data);
+                while (log.Count > 40)
+                {
+                    log.TryDequeue(out _);
+                }
+            }
+        }
+
+        process.OutputDataReceived += Keep;
         process.BeginOutputReadLine();
-        process.ErrorDataReceived += static (_, _) => { };
+        process.ErrorDataReceived += Keep;
         process.BeginErrorReadLine();
 
         var http = new HttpClient(new SocketsHttpHandler { MaxConnectionsPerServer = 64 }) { BaseAddress = new Uri($"http://127.0.0.1:{port}"), Timeout = TimeSpan.FromSeconds(60) };
-        var deadline = DateTime.UtcNow.AddSeconds(90);
-        while (DateTime.UtcNow < deadline)
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            try
+            var deadline = DateTime.UtcNow.AddSeconds(90);
+            while (DateTime.UtcNow < deadline)
             {
-                using var ready = await http.GetAsync(new Uri("/healthz/ready", UriKind.Relative), cancellationToken).ConfigureAwait(false);
-                if (ready.IsSuccessStatusCode)
+                cancellationToken.ThrowIfCancellationRequested();
+                try
                 {
-                    return new ApiLoad(process, http);
+                    using var ready = await http.GetAsync(new Uri("/healthz/ready", UriKind.Relative), cancellationToken).ConfigureAwait(false);
+                    if (ready.IsSuccessStatusCode)
+                    {
+                        return new ApiLoad(process, http);
+                    }
                 }
-            }
-            catch (HttpRequestException)
-            {
+                catch (HttpRequestException)
+                {
+                }
+
+                if (process.HasExited)
+                {
+                    throw new InvalidOperationException($"The API process exited with code {process.ExitCode}. Its last output:{Environment.NewLine}{string.Join(Environment.NewLine, log)}");
+                }
+
+                await Task.Delay(500, cancellationToken).ConfigureAwait(false);
             }
 
-            if (process.HasExited)
-            {
-                throw new InvalidOperationException($"The API process exited with code {process.ExitCode}.");
-            }
-
-            await Task.Delay(500, cancellationToken).ConfigureAwait(false);
+            throw new TimeoutException("The API did not become ready within 90 seconds.");
         }
+        catch
+        {
+            // Never leave a half started API behind: it would keep the port and its database connections.
+            http.Dispose();
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
 
-        process.Kill(entireProcessTree: true);
-        throw new TimeoutException("The API did not become ready within 90 seconds.");
+            process.Dispose();
+            throw;
+        }
     }
 
     public async Task<EndpointResult> MeasureAsync(LoadCase test, CancellationToken cancellationToken)
@@ -147,7 +181,7 @@ public sealed class ApiLoad : IAsyncDisposable
             _ = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
             return (response.StatusCode == HttpStatusCode.OK, Stopwatch.GetElapsedTime(started).TotalMilliseconds);
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        catch (Exception ex) when (ex is HttpRequestException || (ex is TaskCanceledException && !cancellationToken.IsCancellationRequested))
         {
             return (false, Stopwatch.GetElapsedTime(started).TotalMilliseconds);
         }

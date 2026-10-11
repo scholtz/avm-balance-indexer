@@ -5,14 +5,15 @@ much disk the data takes, and how fast the API answers on top of it.
 
 ## What is measured
 
-1. **Download.** The newest 10,000 rounds (200 rounds behind the tip) are fetched from the public archival nodes once. This is the same for
-   both providers and reported separately.
+1. **Download.** The newest 10,000 rounds (the workflow fixes the last round at 300 behind the tip so that both providers index exactly
+   the same blocks; the report says if they do not) are fetched from the public archival nodes. This is the same for both providers and
+   reported separately.
 2. **Indexing.** The rounds are replayed as rounds 1 to 10,000 of an empty database through the production `RoundIndexer` (normalizer,
    balance tracker, batched commits). A mid-chain range has no history, so a dry run first finds the balances every account must already hold
    (`Seeder`) and writes them as round 0, exactly like genesis balances; ids, accounts, amounts and transactions are the real ones.
    Reported: rounds, effects and effects per second.
 3. **Stored size.** PostgreSQL: `pg_total_relation_size` of every table including indexes, TOAST and partitions, after `VACUUM (ANALYZE)`.
-   Cassandra: `nodetool flush` and `system_views.disk_usage` (sstables, compressed, one replica, MiB resolution). The estimate for the whole chain
+   Cassandra: `nodetool flush` and `compact`, then the exact bytes of `nodetool tablestats` (sstables, compressed, one replica; without the container name the tool falls back to `system_views.disk_usage` at MiB resolution and says so). The estimate for the whole chain
    multiplies the per-round size by 66 million rounds, an upper bound since early rounds carry far less data.
 4. **API.** The real API runs as its own process (`dotnet AvmBalanceIndexer.Api.dll`, rate limit off) and ten request kinds are timed over
    loopback HTTP: 300 sequential requests (p50 / p95 / p99), then 2,000 with 16 in flight (throughput and p95). Accounts are chosen from the data:
@@ -47,7 +48,7 @@ dotnet tools/AvmBalanceIndexer.Benchmark/bin/Release/net10.0/AvmBalanceIndexer.B
 dotnet tools/AvmBalanceIndexer.Benchmark/bin/Release/net10.0/AvmBalanceIndexer.Benchmark.dll report results/bench-cassandra.json results/bench-postgres.json
 ```
 
-`--rounds` changes the size of the range (default 10000), `AVM_BENCH_KEEP=1` keeps the database or keyspace afterwards.
+`--rounds` changes the size of the range (default 10000), `--last-round` pins its end, `AVM_BENCH_KEEP=1` keeps the database or keyspace afterwards.
 
 ## Reading the numbers
 

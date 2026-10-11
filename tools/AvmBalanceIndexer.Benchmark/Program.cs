@@ -2,7 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using AvmBalanceIndexer.Benchmark;
 
-// benchmark run    --provider postgres|cassandra [--rounds 10000] [--chain algorand-mainnet] [--api-dll path]
+// benchmark run    --provider postgres|cassandra [--rounds 10000] [--last-round N] [--chain algorand-mainnet] [--api-dll path]
 //                  [--postgres connection] [--cassandra host:port] [--dc dc1] [--cassandra-container name] [--out dir] [--commit sha]
 // benchmark report <result.json>... [--out file.md]
 var arguments = args.ToList();
@@ -46,6 +46,7 @@ var options = new RunOptions(
     Option("chain", "algorand-mainnet")!,
     int.Parse(Option("rounds", "10000")!, CultureInfo.InvariantCulture),
     ulong.Parse(Option("margin", "200")!, CultureInfo.InvariantCulture),
+    Option("last-round") is { } lastRound ? ulong.Parse(lastRound, CultureInfo.InvariantCulture) : null,
     Option("postgres", Environment.GetEnvironmentVariable("AVM_BENCH_POSTGRES")),
     Option("cassandra", Environment.GetEnvironmentVariable("AVM_BENCH_CASSANDRA")),
     Option("dc", Environment.GetEnvironmentVariable("AVM_BENCH_CASSANDRA_DC") ?? "dc1")!,

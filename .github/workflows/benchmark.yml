@@ -30,8 +30,21 @@ env:
   ROUNDS: ${{ inputs.rounds || (github.event_name == 'pull_request' && '500') || '10000' }}
 
 jobs:
+  range:
+    name: Choose the rounds
+    runs-on: ubuntu-latest
+    outputs:
+      last: ${{ steps.tip.outputs.last }}
+    steps:
+      # Both databases index exactly the same blocks, whenever their runners start.
+      - id: tip
+        run: |
+          tip="$(curl -fsS https://mainnet-api.4160.nodely.dev/v2/status | python3 -c 'import sys,json;print(json.load(sys.stdin)["last-round"])')"
+          echo "last=$((tip - 300))" >> "$GITHUB_OUTPUT"
+
   postgres:
     name: PostgreSQL
+    needs: range
     runs-on: ubuntu-latest
     timeout-minutes: 90
     services:
@@ -54,7 +67,7 @@ jobs:
       - name: Benchmark
         run: >
           dotnet tools/AvmBalanceIndexer.Benchmark/bin/Release/net10.0/AvmBalanceIndexer.Benchmark.dll run
-          --provider postgres --rounds "$ROUNDS" --commit "$GITHUB_SHA" --out results
+          --provider postgres --rounds "$ROUNDS" --last-round "${{ needs.range.outputs.last }}" --commit "$GITHUB_SHA" --out results
           --postgres "Host=localhost;Port=5432;Username=avm;Password=avm;Database=postgres"
           --api-dll src/AvmBalanceIndexer.Api/bin/Release/net10.0/AvmBalanceIndexer.Api.dll
       - run: dotnet tools/AvmBalanceIndexer.Benchmark/bin/Release/net10.0/AvmBalanceIndexer.Benchmark.dll report results/bench-postgres.json --out results/summary.md >/dev/null && cat results/summary.md >> "$GITHUB_STEP_SUMMARY"
@@ -66,6 +79,7 @@ jobs:
 
   cassandra:
     name: Cassandra
+    needs: range
     runs-on: ubuntu-latest
     timeout-minutes: 90
     services:
@@ -90,7 +104,7 @@ jobs:
       - name: Benchmark
         run: >
           dotnet tools/AvmBalanceIndexer.Benchmark/bin/Release/net10.0/AvmBalanceIndexer.Benchmark.dll run
-          --provider cassandra --rounds "$ROUNDS" --commit "$GITHUB_SHA" --out results
+          --provider cassandra --rounds "$ROUNDS" --last-round "${{ needs.range.outputs.last }}" --commit "$GITHUB_SHA" --out results
           --cassandra localhost:9042 --dc dc1 --cassandra-container "$(docker ps -q --filter ancestor=cassandra:5.0 | head -1)"
           --api-dll src/AvmBalanceIndexer.Api/bin/Release/net10.0/AvmBalanceIndexer.Api.dll
       - run: dotnet tools/AvmBalanceIndexer.Benchmark/bin/Release/net10.0/AvmBalanceIndexer.Benchmark.dll report results/bench-cassandra.json --out results/summary.md >/dev/null && cat results/summary.md >> "$GITHUB_STEP_SUMMARY"
@@ -106,6 +120,8 @@ jobs:
     needs: [postgres, cassandra]
     permissions:
       contents: write
+    # Two overlapping runs (the schedule and a manual start) must not race for the branch.
+    concurrency: benchmark-publish
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v6
@@ -131,15 +147,16 @@ jobs:
           else
             git worktree add --orphan -b benchmark-results ../out
           fi
-          day="$(date -u +%F)"
           mkdir -p ../out/history
-          cp comparison.md ../out/latest.md
           for provider in postgres cassandra; do
-            cp "results/bench-$provider/bench-$provider.json" "../out/latest-$provider.json"
-            cp "results/bench-$provider/bench-$provider.json" "../out/history/$day-$provider.json"
+            file="results/bench-$provider/bench-$provider.json"
+            day="$(python3 -c 'import sys,json;print(json.load(open(sys.argv[1]))["date"])' "$file")"
+            cp "$file" "../out/latest-$provider.json"
+            cp "$file" "../out/history/$day-$provider.json"
           done
           printf '# Latest nightly benchmark\n\nPostgreSQL against Cassandra on the newest MainNet rounds. Updated every night by the workflow `Nightly benchmark`; older results are in `history/`. How it is measured: docs/benchmarks.md on the main branch.\n\n' | cat - comparison.md > ../out/latest.md
           cd ../out
           git add -A
-          git commit -m "Nightly benchmark $day" || exit 0
+          git commit -m "Nightly benchmark $(date -u +%F)" || exit 0
+          git pull --rebase origin benchmark-results || true
           git push origin benchmark-results

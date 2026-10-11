@@ -9,10 +9,15 @@ public static class Report
     public static string Render(IReadOnlyList<BenchmarkResult> results)
     {
         ArgumentNullException.ThrowIfNull(results);
+        if (results.Count == 0)
+        {
+            throw new ArgumentException("At least one result file is required.", nameof(results));
+        }
+
         var ordered = results.OrderBy(static r => r.Provider, StringComparer.Ordinal).ToArray();
         var first = ordered[0];
         var text = new StringBuilder();
-        text.AppendLine(CultureInfo.InvariantCulture, $"Measured on {first.Date} at commit `{Short(first.Commit)}`: the {first.Rounds:N0} newest rounds of {first.Chain} (chain rounds {first.FirstChainRound:N0} to {first.LastChainRound:N0}) were downloaded once, then indexed from an empty database by the production indexer. Each database ran alone on {first.Machine}.");
+        text.AppendLine(CultureInfo.InvariantCulture, $"Measured on {first.Date} at commit `{Short(first.Commit)}`: the {first.Rounds:N0} newest rounds of {first.Chain} (chain rounds {first.FirstChainRound:N0} to {first.LastChainRound:N0}) were indexed from an empty database by the production indexer. {(ordered.Select(static r => (r.FirstChainRound, r.LastChainRound)).Distinct().Count() == 1 ? "Both databases indexed exactly this range" : "**The ranges differ between the databases**")}, each running alone next to the API on {first.Machine}.");
         text.AppendLine();
 
         text.AppendLine("### Indexing and storage");
@@ -25,7 +30,10 @@ public static class Report
         Row(text, "Stored size", ordered, static r => $"{r.Storage.TotalBytes / 1048576.0:N1} MiB{(r.Storage.IncludesUnflushedData ? " (sstables only)" : string.Empty)}");
         Row(text, "Per round", ordered, static r => $"{r.Storage.KilobytesPerRound:N1} KiB");
         Row(text, "Per effect", ordered, static r => $"{r.Storage.BytesPerEffect:N0} bytes");
-        Row(text, "Full MainNet estimate (66 M rounds)", ordered, static r => $"{r.Storage.KilobytesPerRound * 66_000_000 / 1024.0 / 1024 / 1024:N1} TiB");
+        if (first.Chain == "algorand-mainnet")
+        {
+            Row(text, "If all 66 M MainNet rounds were like these", ordered, static r => $"{r.Storage.KilobytesPerRound * 66_000_000 / 1024.0 / 1024 / 1024:N1} TiB");
+        }
         text.AppendLine();
         text.AppendLine(CultureInfo.InvariantCulture, $"Block download is the same for both and not part of the table: {first.Download.RoundsPerSecond:N0} rounds/s from the public archival nodes ({first.Download.Transactions:N0} transactions).");
         text.AppendLine();

@@ -33,14 +33,14 @@ public sealed class BlockSet : IChainAdapter
 
     public long Transactions => Blocks.Sum(static b => (long)b.ApplyData.Count);
 
-    public static async Task<(BlockSet Set, DownloadResult Download)> DownloadAsync(string chain, int rounds, ulong marginBehindTip, CancellationToken cancellationToken)
+    public static async Task<(BlockSet Set, DownloadResult Download)> DownloadAsync(string chain, int rounds, ulong marginBehindTip, ulong? lastRound, CancellationToken cancellationToken)
     {
         var http = AlgorandChainFactory.CreateBlockHttpClient();
         var options = new AlgorandChainOptions { Chain = chain, MaxAttempts = 30, BaseRetryDelay = TimeSpan.FromMilliseconds(200), MaxRetryDelay = TimeSpan.FromSeconds(3) };
         var adapter = AlgorandChainFactory.Create(options, http, NullLoggerFactory.Instance);
 
         var tip = await adapter.GetLatestRoundAsync(cancellationToken).ConfigureAwait(false);
-        var last = tip - marginBehindTip;
+        var last = lastRound ?? tip - marginBehindTip;
         var first = last - (ulong)rounds + 1;
         Console.WriteLine($"Downloading {rounds} rounds of {chain}: {first} to {last} (tip {tip})");
 

@@ -27,9 +27,17 @@ public sealed class Seeder
     public void DryRun(BlockSet blocks, IEffectNormalizer normalizer)
     {
         var rewards = default(RewardsState);
+        var assets = new Dictionary<ulong, TokenInfo>();
         foreach (var block in blocks.Blocks)
         {
-            foreach (var delta in normalizer.Normalize(block, rewards))
+            // The indexer finds the records of assets created earlier in the range in its token store; the dry run keeps them here.
+            var normalized = normalizer.NormalizeBlock(block, rewards, new AssetDirectory(assets.Values));
+            foreach (var change in normalized.TokenChanges.Where(static t => t.Key.Kind == TokenKind.Asa))
+            {
+                assets[change.Key.TokenId] = change;
+            }
+
+            foreach (var delta in normalized.Deltas)
             {
                 var key = new HoldingKey(delta.Account, delta.Token);
                 var now = _running.GetValueOrDefault(key) + delta.Delta;

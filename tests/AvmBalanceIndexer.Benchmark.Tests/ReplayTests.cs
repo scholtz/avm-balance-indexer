@@ -43,11 +43,16 @@ public class ReplayTests
         Assert.Equal(3, set.Rounds);
         Assert.Equal((1UL, 3UL), (result.FirstRound, result.LastRound));
 
-        // Alice needs 6,000 for the first payment and fee, and the three asset units she later sends.
-        Assert.True(seeder.SeededAccounts >= 2);
-        var native = await storage.GetBalanceAtRoundAsync(Alice, TokenKey.Native, 3, CancellationToken.None);
-        Assert.True(native.Value >= 0);
+        // Alice pays 6,000 in round 1, nets 0 in round 2 (receives 1,000, pays a 1,000 fee), and pays 1,000 and three asset units in
+        // round 3: she must start with 7,000 and 3. Bob never goes negative; the fee sink only collects.
+        Assert.Equal(2, seeder.SeededAccounts);
+        Assert.Equal(7_000UL, (ulong)(await storage.GetBalanceAtRoundAsync(Alice, TokenKey.Native, 0, CancellationToken.None)).Value);
+        Assert.Equal(3UL, (ulong)(await storage.GetBalanceAtRoundAsync(Alice, TokenKey.Asa(77), 0, CancellationToken.None)).Value);
+        Assert.True((await storage.GetBalanceAtRoundAsync(Bob, TokenKey.Native, 0, CancellationToken.None)).IsZero);
+        Assert.True((await storage.GetBalanceAtRoundAsync(Alice, TokenKey.Native, 3, CancellationToken.None)).IsZero);
+        Assert.Equal(3_000UL, (ulong)(await storage.GetBalanceAtRoundAsync(Bob, TokenKey.Native, 3, CancellationToken.None)).Value);
         Assert.Equal(3UL, (ulong)(await storage.GetBalanceAtRoundAsync(Bob, TokenKey.Asa(77), 3, CancellationToken.None)).Value);
+        Assert.True((await storage.GetBalanceAtRoundAsync(Alice, TokenKey.Asa(77), 3, CancellationToken.None)).IsZero);
     }
 
     [Fact]
@@ -78,5 +83,11 @@ public class ReplayTests
         Assert.Contains("150.0 MiB | 600.0 MiB", markdown, StringComparison.Ordinal);
         Assert.Contains("**2 errors**", markdown, StringComparison.Ordinal);
         Assert.Contains("abcdef01", markdown, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Without_Results_There_Is_Nothing_To_Report()
+    {
+        Assert.Throws<ArgumentException>(() => Report.Render([]));
     }
 }

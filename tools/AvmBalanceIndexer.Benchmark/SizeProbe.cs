@@ -26,7 +26,7 @@ public static class SizeProbe
             JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = current_schema()
             LEFT JOIN pg_inherits i ON i.inhrelid = c.oid
             LEFT JOIN pg_class parent ON parent.oid = i.inhparent
-            WHERE c.relkind IN ('r', 'm') AND c.relispartition IS NOT NULL
+            WHERE c.relkind IN ('r', 'm')
             GROUP BY 1
             ORDER BY 2 DESC
             """,
@@ -48,19 +48,33 @@ public static class SizeProbe
 
     public static async Task<(StorageSizeResult Size, string Version)> CassandraAsync(string host, int port, string datacenter, string keyspace, string? container, long effects, int rounds, CancellationToken cancellationToken)
     {
+        // Memtables are written out and the sstables compacted, so the size is the settled one and not that of a moment mid-compaction.
         var flushed = false;
         if (!string.IsNullOrWhiteSpace(container))
         {
-            flushed = RunProcess("docker", $"exec {container} nodetool flush {keyspace}");
+            flushed = RunProcess("docker", $"exec {container} nodetool flush {keyspace}", out var flushOutput)
+                && RunProcess("docker", $"exec {container} nodetool compact {keyspace}", out var compactOutput);
         }
 
         var cluster = Cluster.Builder().AddContactPoint(host).WithPort(port).WithLoadBalancingPolicy(new DCAwareRoundRobinPolicy(datacenter)).Build();
-        using var _ = cluster;
+        using var clusterLifetime = cluster;
         var session = await cluster.ConnectAsync().ConfigureAwait(false);
 
-        // system_views.disk_usage reports the sstables of each table (Cassandra 5); data still in memtables is not in it.
-        var rows = await session.ExecuteAsync(new SimpleStatement($"SELECT table_name, mebibytes FROM system_views.disk_usage WHERE keyspace_name = '{keyspace}' ALLOW FILTERING")).ConfigureAwait(false);
-        var tables = rows.Select(static r => new TableSize(r.GetValue<string>("table_name"), r.GetValue<long>("mebibytes") * 1024L * 1024L)).OrderByDescending(static t => t.Bytes).ToList();
+        // Exact bytes from nodetool when it is reachable; otherwise system_views.disk_usage (Cassandra 5), which counts sstables only
+        // and has whole-MiB resolution.
+        List<TableSize>? tables = null;
+        if (flushed && RunProcess("docker", $"exec {container} nodetool tablestats -F json {keyspace}", out var json))
+        {
+            tables = ParseTableStats(json, keyspace);
+        }
+
+        if (tables is null || tables.Count == 0)
+        {
+            flushed = false;
+            var rows = await session.ExecuteAsync(new SimpleStatement($"SELECT table_name, mebibytes FROM system_views.disk_usage WHERE keyspace_name = '{keyspace}' ALLOW FILTERING")).ConfigureAwait(false);
+            tables = [.. rows.Select(static r => new TableSize(r.GetValue<string>("table_name"), r.GetValue<long>("mebibytes") * 1024L * 1024L)).OrderByDescending(static t => t.Bytes)];
+        }
+
         var release = (await session.ExecuteAsync(new SimpleStatement("SELECT release_version FROM system.local")).ConfigureAwait(false)).First().GetValue<string>("release_version");
         return (Describe(tables.Sum(static t => t.Bytes), effects, rounds, includesUnflushed: !flushed, tables), "Cassandra " + release);
     }
@@ -68,12 +82,43 @@ public static class SizeProbe
     private static StorageSizeResult Describe(long total, long effects, int rounds, bool includesUnflushed, List<TableSize> tables) =>
         new(total, effects, effects == 0 ? 0 : (double)total / effects, total / 1024.0 / rounds, includesUnflushed, tables);
 
-    private static bool RunProcess(string file, string arguments)
+    private static List<TableSize> ParseTableStats(string json, string keyspace)
     {
+        using var document = System.Text.Json.JsonDocument.Parse(json);
+        var result = new List<TableSize>();
+        if (document.RootElement.TryGetProperty(keyspace, out var space) && space.TryGetProperty("tables", out var tables))
+        {
+            foreach (var table in tables.EnumerateObject())
+            {
+                var bytes = table.Value.TryGetProperty("space_used_total", out var total) ? AsBytes(total)
+                    : table.Value.TryGetProperty("space_used_live", out var live) ? AsBytes(live) : 0;
+                result.Add(new TableSize(table.Name, bytes));
+            }
+        }
+
+        return [.. result.OrderByDescending(static t => t.Bytes)];
+    }
+
+    // nodetool prints the byte counts as strings.
+    private static long AsBytes(System.Text.Json.JsonElement value) =>
+        value.ValueKind == System.Text.Json.JsonValueKind.String ? long.Parse(value.GetString()!, System.Globalization.CultureInfo.InvariantCulture) : value.GetInt64();
+
+    private static bool RunProcess(string file, string arguments, out string output)
+    {
+        output = string.Empty;
         try
         {
             using var process = Process.Start(new ProcessStartInfo(file, arguments) { RedirectStandardOutput = true, RedirectStandardError = true });
-            process!.WaitForExit(TimeSpan.FromMinutes(2));
+            var error = process!.StandardError.ReadToEndAsync();
+            var read = process.StandardOutput.ReadToEndAsync();
+            if (!process.WaitForExit(TimeSpan.FromMinutes(5)))
+            {
+                process.Kill(entireProcessTree: true);
+                return false;
+            }
+
+            output = read.GetAwaiter().GetResult();
+            _ = error.GetAwaiter().GetResult();
             return process.ExitCode == 0;
         }
         catch (Exception)

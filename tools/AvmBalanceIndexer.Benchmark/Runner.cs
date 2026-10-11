@@ -21,6 +21,7 @@ public sealed record RunOptions(
     string Chain,
     int Rounds,
     ulong MarginBehindTip,
+    ulong? LastRound,
     string? PostgreSql,
     string? Cassandra,
     string CassandraDatacenter,
@@ -35,7 +36,12 @@ public static class Runner
     public static async Task<BenchmarkResult> RunAsync(RunOptions options, CancellationToken cancellationToken)
     {
         var isPostgres = string.Equals(options.Provider, "postgres", StringComparison.OrdinalIgnoreCase);
-        var (blocks, download) = await BlockSet.DownloadAsync(options.Chain, options.Rounds, options.MarginBehindTip, cancellationToken).ConfigureAwait(false);
+        if (!isPostgres && !string.Equals(options.Provider, "cassandra", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException($"Unknown provider '{options.Provider}'; use postgres or cassandra.");
+        }
+
+        var (blocks, download) = await BlockSet.DownloadAsync(options.Chain, options.Rounds, options.MarginBehindTip, options.LastRound, cancellationToken).ConfigureAwait(false);
 
         var run = $"avm_bench_{DateTime.UtcNow:yyyyMMddHHmmss}";
         var settings = isPostgres ? await PreparePostgreSqlAsync(options, run, cancellationToken).ConfigureAwait(false) : PrepareCassandra(options, run);
