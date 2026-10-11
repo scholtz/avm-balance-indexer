@@ -25,3 +25,4 @@ hashing or the live tests.
   empty payset). `txn256`/`txn512` are vector commitments: padded to a power of two (zero or one element stay one leaf), bit-reversed
   leaf order, padding leaf `H("MB")`. Both use the SHA-256 txid and SHA-256 entry hash as leaf content, `txn512` just hashes with SHA-512.
 - From v16 (`RequireGenesisHash`) blocks never flag `hgh`: the genesis hash is part of every transaction id regardless.
+- Voi archival gossip hosts are patchy (many lack blocks) but the fetcher fails over; `/v2/deltas` returns 404 for every Voi round, and the indexer refuses `round=`. A recent Voi window is verified by summing indexer transactions (inner ones flattened) per account against our transaction effects.

@@ -49,6 +49,43 @@ public sealed class ReferenceNode : IDisposable
     }
 
     /// <summary>
+    /// Transactions confirmed in rounds <paramref name="minRound"/> to <paramref name="maxRound"/> including inner
+    /// transactions (flattened, parents first), as seen by the indexer.
+    /// </summary>
+    public async Task<IReadOnlyList<ReferenceTransaction>> TransactionsInRangeAsync(ulong minRound, ulong maxRound)
+    {
+        var result = new List<ReferenceTransaction>();
+        string? next = null;
+        do
+        {
+            var url = $"{_indexer}/v2/transactions?min-round={minRound}&max-round={maxRound}&limit=1000" + (next is null ? string.Empty : $"&next={Uri.EscapeDataString(next)}");
+            using var json = await GetJsonAsync(url).ConfigureAwait(false);
+            var root = json.RootElement;
+            foreach (var transaction in root.GetProperty("transactions").EnumerateArray())
+            {
+                Flatten(transaction, result);
+            }
+
+            next = root.TryGetProperty("next-token", out var token) && token.ValueKind == JsonValueKind.String ? token.GetString() : null;
+        }
+        while (next is not null);
+
+        return result;
+    }
+
+    private static void Flatten(JsonElement transaction, List<ReferenceTransaction> into)
+    {
+        into.Add(ReferenceTransaction.From(transaction));
+        if (transaction.TryGetProperty("inner-txns", out var inner))
+        {
+            foreach (var child in inner.EnumerateArray())
+            {
+                Flatten(child, into);
+            }
+        }
+    }
+
+    /// <summary>
     /// The exact balances the ledger itself holds after <paramref name="round"/> for every account that round changed,
     /// from algod ledger state deltas. This is the strongest available oracle: it is the node own post-round state.
     /// </summary>
@@ -172,9 +209,9 @@ public sealed record ReferenceTransaction(
         }
 
         return new ReferenceTransaction(
-            tx.GetProperty("id").GetString()!,
+            tx.TryGetProperty("id", out var id) ? id.GetString()! : string.Empty,
             type,
-            tx.GetProperty("confirmed-round").GetUInt64(),
+            tx.TryGetProperty("confirmed-round", out var round) ? round.GetUInt64() : 0,
             Parse(tx.GetProperty("sender").GetString()!),
             Number(tx, "fee"),
             receiver,
