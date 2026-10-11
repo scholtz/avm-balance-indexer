@@ -51,7 +51,7 @@ public class VoiRecentRoundsTests(ITestOutputHelper output)
         var ids = new HashSet<string>(StringComparer.Ordinal);
         for (var i = 1; i < blocks.Length; i++)
         {
-            foreach (var delta in normalizer.Normalize(blocks[i], RewardsState.FromHeader(blocks[i - 1].Block)))
+            foreach (var delta in normalizer.NormalizeBlock(blocks[i], RewardsState.FromHeader(blocks[i - 1].Block), await LiveAssetDirectory.LoadAsync(reference, adapter, blocks[i])).Deltas)
             {
                 if (!TransactionEffects.Contains(delta.Type))
                 {

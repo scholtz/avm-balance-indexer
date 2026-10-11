@@ -43,7 +43,7 @@ public class AssetRoundsTests(ITestOutputHelper output)
         var kinds = new HashSet<EffectType>();
         for (var round = first; round <= last; round++)
         {
-            var normalized = normalizer.NormalizeBlock(blocks[round], RewardsState.FromHeader(blocks[round - 1].Block), await DirectoryAsync(reference, adapter, blocks[round]));
+            var normalized = normalizer.NormalizeBlock(blocks[round], RewardsState.FromHeader(blocks[round - 1].Block), await LiveAssetDirectory.LoadAsync(reference, adapter, blocks[round]));
             var perAccount = new Dictionary<(Address, ulong), BigInteger>();
             foreach (var delta in normalized.Deltas.Where(static d => d.Token.Kind == TokenKind.Asa))
             {
@@ -92,38 +92,5 @@ public class AssetRoundsTests(ITestOutputHelper output)
         Assert.True(problems.Count == 0, string.Join(Environment.NewLine, problems.Take(20)));
         Assert.True(checkedHoldings > 0, "No holding could be compared.");
         Assert.Contains(EffectType.AssetTransfer, kinds);
-    }
-
-    private static async Task<AssetDirectory> DirectoryAsync(ReferenceNode reference, AlgorandChainAdapter adapter, BlockData block)
-    {
-        var records = new List<TokenInfo>();
-        foreach (var assetId in AssetScanner.DestroyedAssets(block))
-        {
-            // The indexer reports a destroyed asset with total 0, so the supply is read from the creating transaction.
-            var (creator, createdAt) = await reference.AssetAsync(assetId);
-            var creation = await adapter.FetchBlockAsync(createdAt, CancellationToken.None);
-            var parameters = FindCreation(creation.ApplyData, assetId) ?? throw new InvalidOperationException($"Asset {assetId} was not created in round {createdAt}.");
-            records.Add(AssetRecords.Created(assetId, creator, parameters, createdAt));
-        }
-
-        return new AssetDirectory(records);
-    }
-
-    private static RawAssetParams? FindCreation(IEnumerable<TxnApplyData> transactions, ulong assetId)
-    {
-        foreach (var apply in transactions)
-        {
-            if (apply.CreatedAssetId == assetId)
-            {
-                return RawTransaction.Read(apply.RawTxn).Params;
-            }
-
-            if (FindCreation(apply.InnerTxns, assetId) is { } inner)
-            {
-                return inner;
-            }
-        }
-
-        return null;
     }
 }
