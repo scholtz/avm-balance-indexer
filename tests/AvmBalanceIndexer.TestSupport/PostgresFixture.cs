@@ -20,7 +20,21 @@ public sealed class PostgresFixture : IAsyncLifetime
     private int _databaseCounter;
     private readonly System.Collections.Concurrent.ConcurrentDictionary<PostgreSqlChainStorage, NpgsqlDataSource> _dataSources = new();
 
-    public async Task InitializeAsync()
+    // The server starts when the first test asks for a database, not when the collection is created (see CassandraFixture).
+    private readonly object _startGate = new();
+    private Task? _starting;
+
+    public Task InitializeAsync() => Task.CompletedTask;
+
+    private Task EnsureStartedAsync()
+    {
+        lock (_startGate)
+        {
+            return _starting ??= StartAsync();
+        }
+    }
+
+    private async Task StartAsync()
     {
         var configured = Environment.GetEnvironmentVariable(ConnectionVariable);
         if (!string.IsNullOrWhiteSpace(configured))
@@ -48,6 +62,7 @@ public sealed class PostgresFixture : IAsyncLifetime
     /// <summary>Creates an empty database, applies the schema (unless told not to) and returns the storage bound to it.</summary>
     public async Task<PostgreSqlChainStorage> CreateStorageAsync(string chain = ChainId.AlgorandTestnet, int accountPartitions = 4, bool applySchema = true, TimeSpan? readTimeout = null, TimeSpan? leaseHeartbeat = null)
     {
+        await EnsureStartedAsync().ConfigureAwait(false);
         var name = $"avm_test_{Environment.ProcessId}_{Interlocked.Increment(ref _databaseCounter)}_{Guid.NewGuid():N}";
         await using (var admin = new NpgsqlConnection(_adminConnectionString))
         {

@@ -24,7 +24,22 @@ public sealed class CassandraFixture : IAsyncLifetime
     private readonly System.Collections.Concurrent.ConcurrentBag<CassandraSessionSource> _sources = [];
     private readonly System.Collections.Concurrent.ConcurrentDictionary<CassandraChainStorage, (CassandraSessionSource Source, CassandraOptions Options)> _storages = new();
 
-    public async Task InitializeAsync()
+    // The node starts when the first test asks for a keyspace, not when the collection is created: a collection whose tests are all
+    // skipped (the live tests under AVM_SKIP_LIVE_TESTS=1) must not pay for a container, or need Docker.
+    private readonly object _startGate = new();
+    private Task? _starting;
+
+    public Task InitializeAsync() => Task.CompletedTask;
+
+    private Task EnsureStartedAsync()
+    {
+        lock (_startGate)
+        {
+            return _starting ??= StartAsync();
+        }
+    }
+
+    private async Task StartAsync()
     {
         var configured = Environment.GetEnvironmentVariable(ContactVariable);
         if (!string.IsNullOrWhiteSpace(configured))
@@ -72,7 +87,7 @@ public sealed class CassandraFixture : IAsyncLifetime
         }
     }
 
-    public CassandraOptions NewOptions(bool createKeyspace = true) => new()
+    private CassandraOptions NewOptions(bool createKeyspace = true) => new()
     {
         ContactPoints = [_host],
         Port = _port,
@@ -85,6 +100,7 @@ public sealed class CassandraFixture : IAsyncLifetime
     /// <summary>Creates a fresh keyspace, applies the schema (unless told not to) and returns the storage bound to it.</summary>
     public async Task<CassandraChainStorage> CreateStorageAsync(string chain = ChainId.AlgorandTestnet, bool applySchema = true, TimeSpan? readDeadline = null, TimeSpan? leaseTtl = null)
     {
+        await EnsureStartedAsync().ConfigureAwait(false);
         var options = NewOptions();
         var source = new CassandraSessionSource(options);
         _sources.Add(source);
