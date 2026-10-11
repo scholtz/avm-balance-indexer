@@ -54,7 +54,9 @@ public sealed class ReferenceNode : IDisposable
     /// </summary>
     public async Task<IReadOnlyDictionary<Address, ulong>> LedgerBalancesAfterAsync(ulong round)
     {
-        using var json = await GetJsonAsync($"{_algod}/v2/deltas/{round}").ConfigureAwait(false);
+        // Later sections of recent deltas carry integer map keys, which is not valid JSON, so only the leading Accts value is parsed.
+        var text = await GetTextAsync($"{_algod}/v2/deltas/{round}").ConfigureAwait(false);
+        using var json = JsonDocument.Parse(LeadingAccts(text));
         var result = new Dictionary<Address, ulong>();
         foreach (var account in json.RootElement.GetProperty("Accts").GetProperty("Accts").EnumerateArray())
         {
@@ -67,7 +69,47 @@ public sealed class ReferenceNode : IDisposable
 
     public void Dispose() => _http.Dispose();
 
-    private async Task<JsonDocument> GetJsonAsync(string url)
+    /// <summary>The <c>"Accts": { ... }</c> object of a delta document wrapped as a standalone JSON object.</summary>
+    private static string LeadingAccts(string text)
+    {
+        var start = text.IndexOf("\"Accts\"", StringComparison.Ordinal);
+        var open = start < 0 ? -1 : text.IndexOf('{', start);
+        if (open < 0)
+        {
+            throw new InvalidDataException("Delta document has no Accts object.");
+        }
+
+        var depth = 0;
+        var inString = false;
+        var escaped = false;
+        for (var i = open; i < text.Length; i++)
+        {
+            var c = text[i];
+            if (inString)
+            {
+                inString = c != '"' || escaped;
+                escaped = !escaped && c == '\\';
+            }
+            else if (c == '"')
+            {
+                inString = true;
+            }
+            else if (c == '{')
+            {
+                depth++;
+            }
+            else if (c == '}' && --depth == 0)
+            {
+                return "{\"Accts\":" + text[open..(i + 1)] + "}";
+            }
+        }
+
+        throw new InvalidDataException("Delta document has no Accts object.");
+    }
+
+    private async Task<JsonDocument> GetJsonAsync(string url) => JsonDocument.Parse(await GetTextAsync(url).ConfigureAwait(false));
+
+    private async Task<string> GetTextAsync(string url)
     {
         for (var attempt = 0; ; attempt++)
         {
@@ -76,7 +118,7 @@ public sealed class ReferenceNode : IDisposable
                 using var response = await _http.GetAsync(new Uri(url)).ConfigureAwait(false);
                 if (response.IsSuccessStatusCode)
                 {
-                    return await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync().ConfigureAwait(false)).ConfigureAwait(false);
+                    return await response.Content.ReadAsStringAsync().ConfigureAwait(false);
                 }
 
                 var retryable = response.StatusCode is HttpStatusCode.TooManyRequests or >= HttpStatusCode.InternalServerError;

@@ -14,5 +14,9 @@ hashing or the live tests.
 - Public oracle: `GET {nodely algod}/v2/deltas/{round}` gives exact post-round balances for TestNet and MainNet (not
   Voi, which prunes). Indexer `round=` rewind is disabled on free endpoints.
 - MainNet's first 1000 rounds have no transactions (only pool movement); TestNet has 28; Voi only zero-impact ones.
-- Proposer payout realizes pending rewards invisibly (Move with nil pointers); tracked in issue #20. Payset commitment
-  and certificate are unverified (issue #23).
+- Proposer payout realizes pending rewards invisibly (Move with nil pointers). `PayoutEraRoundsTests` compares recent
+  MainNet and TestNet rounds with `/v2/deltas` (relative check between two touches of an account, so a proposer's first
+  appearance in the window is not checked): no discrepancy found. Suspension, bonus and the old-proposer-with-unrealized-rewards
+  case are not exercised.
+- Recent `/v2/deltas` documents contain integer map keys (invalid JSON) after the leading `Accts` object; parse only that part.
+- Payset commitment and certificate are unverified (issue #23).
