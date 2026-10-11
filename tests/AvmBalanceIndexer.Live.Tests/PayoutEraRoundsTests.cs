@@ -50,10 +50,14 @@ public class PayoutEraRoundsTests(ITestOutputHelper output)
         }
 
         var effectSums = new Dictionary<ulong, Dictionary<Address, BigInteger>>();
+        var innerEffects = 0;
         for (var round = first; round <= last; round++)
         {
-            effectSums[round] = normalizer.NormalizeBlock(blocks[round], RewardsState.FromHeader(blocks[round - 1].Block), await LiveAssetDirectory.LoadAsync(reference, adapter, blocks[round])).Deltas
+            var native = normalizer.NormalizeBlock(blocks[round], RewardsState.FromHeader(blocks[round - 1].Block), await LiveAssetDirectory.LoadAsync(reference, adapter, blocks[round])).Deltas
                 .Where(static e => e.Token == TokenKey.Native)
+                .ToArray();
+            innerEffects += native.Count(static e => e.Id.InnerPath.Count > 0);
+            effectSums[round] = native
                 .GroupBy(static e => e.Account)
                 .ToDictionary(static g => g.Key, static g => g.Aggregate(BigInteger.Zero, static (a, e) => a + e.Delta));
         }
@@ -95,12 +99,13 @@ public class PayoutEraRoundsTests(ITestOutputHelper output)
             }
         }
 
-        output.WriteLine($"{chain}: rounds {first}-{last}, {proposers} proposer payouts ({checkedPayouts} to proposers the ledger reported earlier in the window), {problems.Count} problems");
+        output.WriteLine($"{chain}: rounds {first}-{last}, {proposers} proposer payouts ({checkedPayouts} to proposers the ledger reported earlier in the window), {innerEffects} native effects of inner transactions, {problems.Count} problems");
         foreach (var problem in problems)
         {
             output.WriteLine(problem);
         }
 
+        Assert.True(!expectPayouts || innerEffects > 0, "The window has no inner-transaction payments, so it proves nothing about them.");
         Assert.True(!expectPayouts || checkedPayouts > 0, "No proposer payout could be checked, so the window proves nothing about them.");
         Assert.True(problems.Count == 0, string.Join(Environment.NewLine, problems.Take(20)));
     }
