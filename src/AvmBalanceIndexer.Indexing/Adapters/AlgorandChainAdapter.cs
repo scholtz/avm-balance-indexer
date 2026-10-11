@@ -9,6 +9,8 @@ namespace AvmBalanceIndexer.Indexing.Adapters;
 public sealed class AlgorandChainAdapter : IChainAdapter, IDisposable
 {
     private readonly IBlockFetcher _blocks;
+    private const int GenesisAttempts = 4;
+
     private readonly HttpClient _algodHttp;
     private readonly AlgodClient _algod;
     private readonly IDisposable[] _owned;
@@ -41,8 +43,19 @@ public sealed class AlgorandChainAdapter : IChainAdapter, IDisposable
     public async Task<GenesisDocument> GetGenesisAsync(CancellationToken cancellationToken)
     {
         // The SDK Genesis model types the account state as raw bytes, so balances are read from the JSON directly.
-        var json = await _algodHttp.GetStringAsync(new Uri("genesis", UriKind.Relative), cancellationToken).ConfigureAwait(false);
-        return GenesisDocument.Parse(json);
+        // A pooled connection the server has closed fails the first request with a reset: ask again on a fresh one.
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                var json = await _algodHttp.GetStringAsync(new Uri("genesis", UriKind.Relative), cancellationToken).ConfigureAwait(false);
+                return GenesisDocument.Parse(json);
+            }
+            catch (HttpRequestException) when (attempt < GenesisAttempts)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(200 * attempt), cancellationToken).ConfigureAwait(false);
+            }
+        }
     }
 
     public Task<BlockData> FetchBlockAsync(ulong round, CancellationToken cancellationToken) =>
