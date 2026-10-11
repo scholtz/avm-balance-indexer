@@ -21,7 +21,10 @@ public sealed partial class PostgreSqlChainStorage : IChainStorage
 
     public PostgreSqlChainStorage(NpgsqlDataSource dataSource, ChainContext chain, int accountHashPartitions, TimeSpan? readTimeout = null)
     {
-        _readTimeoutMilliseconds = checked((int)(readTimeout ?? TimeSpan.FromSeconds(30)).TotalMilliseconds);
+        var timeout = readTimeout ?? TimeSpan.FromSeconds(30);
+        _readTimeoutMilliseconds = timeout > TimeSpan.Zero && timeout.TotalMilliseconds <= int.MaxValue
+            ? (int)timeout.TotalMilliseconds
+            : throw new ArgumentOutOfRangeException(nameof(readTimeout), "The read timeout must be positive.");
         _dataSource = dataSource ?? throw new ArgumentNullException(nameof(dataSource));
         _chain = chain?.Chain ?? throw new ArgumentNullException(nameof(chain));
         _accountPartitions = accountHashPartitions is >= 1 and <= MaxAccountPartitions

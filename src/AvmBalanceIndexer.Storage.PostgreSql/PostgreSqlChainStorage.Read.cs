@@ -158,7 +158,7 @@ public sealed partial class PostgreSqlChainStorage
     }
 
     public Task<Page<Holding>> GetHoldingsAsync(Address account, bool includeZero, string? cursor, int limit, CancellationToken cancellationToken) =>
-        TranslateTimeoutsAsync(() => GetHoldingsCoreAsync(account, includeZero, cursor, limit, cancellationToken));
+        TranslateTimeoutsAsync(() => GetHoldingsCoreAsync(account, includeZero, cursor, limit, cancellationToken), cancellationToken);
 
     private async Task<Page<Holding>> GetHoldingsCoreAsync(Address account, bool includeZero, string? cursor, int limit, CancellationToken cancellationToken)
     {
@@ -200,7 +200,7 @@ public sealed partial class PostgreSqlChainStorage
     }
 
     public Task<Amount> GetBalanceAtRoundAsync(Address account, TokenKey token, ulong round, CancellationToken cancellationToken) =>
-        TranslateTimeoutsAsync(() => GetBalanceAtRoundCoreAsync(account, token, round, cancellationToken));
+        TranslateTimeoutsAsync(() => GetBalanceAtRoundCoreAsync(account, token, round, cancellationToken), cancellationToken);
 
     private async Task<Amount> GetBalanceAtRoundCoreAsync(Address account, TokenKey token, ulong round, CancellationToken cancellationToken)
     {
@@ -230,7 +230,7 @@ public sealed partial class PostgreSqlChainStorage
     }
 
     public Task<Page<Holding>> GetHoldersAtRoundAsync(TokenKey token, ulong round, bool includeZero, string? cursor, int limit, CancellationToken cancellationToken) =>
-        TranslateTimeoutsAsync(() => GetHoldersAtRoundCoreAsync(token, round, includeZero, cursor, limit, cancellationToken));
+        TranslateTimeoutsAsync(() => GetHoldersAtRoundCoreAsync(token, round, includeZero, cursor, limit, cancellationToken), cancellationToken);
 
     private async Task<Page<Holding>> GetHoldersAtRoundCoreAsync(TokenKey token, ulong round, bool includeZero, string? cursor, int limit, CancellationToken cancellationToken)
     {
@@ -291,7 +291,7 @@ public sealed partial class PostgreSqlChainStorage
     }
 
     public Task<Page<TokenEffect>> GetEffectsAsync(Address account, TokenKey token, ulong? fromRound, ulong? toRound, string? cursor, int limit, CancellationToken cancellationToken) =>
-        TranslateTimeoutsAsync(() => GetEffectsCoreAsync(account, token, fromRound, toRound, cursor, limit, cancellationToken));
+        TranslateTimeoutsAsync(() => GetEffectsCoreAsync(account, token, fromRound, toRound, cursor, limit, cancellationToken), cancellationToken);
 
     private async Task<Page<TokenEffect>> GetEffectsCoreAsync(Address account, TokenKey token, ulong? fromRound, ulong? toRound, string? cursor, int limit, CancellationToken cancellationToken)
     {
@@ -465,13 +465,18 @@ public sealed partial class PostgreSqlChainStorage
             : throw new ArgumentException("Invalid cursor.", nameof(cursor));
     }
 
-    private static async Task<T> TranslateTimeoutsAsync<T>(Func<Task<T>> read)
+    /// <summary>
+    /// A query stopped by the server's statement timeout (or by Npgsql's client-side command timeout) is a storage timeout. A
+    /// cancellation the caller asked for is not.
+    /// </summary>
+    private static async Task<T> TranslateTimeoutsAsync<T>(Func<Task<T>> read, CancellationToken cancellationToken)
     {
         try
         {
             return await read().ConfigureAwait(false);
         }
-        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.QueryCanceled)
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested
+            && (ex is PostgresException { SqlState: PostgresErrorCodes.QueryCanceled } || ex is NpgsqlException { InnerException: TimeoutException }))
         {
             throw new StorageTimeoutException("The query exceeded the read timeout.", ex);
         }

@@ -273,6 +273,15 @@ public class PostgreSqlSpecificTests(PostgresFixture postgres)
     }
 
     [Fact]
+    public void The_Read_Timeout_Must_Be_Positive()
+    {
+        using var dataSource = NpgsqlDataSource.Create("Host=localhost");
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => new AvmBalanceIndexer.Storage.PostgreSql.PostgreSqlChainStorage(dataSource, new ChainContext(ChainId.Voi), 4, TimeSpan.Zero));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new AvmBalanceIndexer.Storage.PostgreSql.PostgreSqlChainStorage(dataSource, new ChainContext(ChainId.Voi), 4, TimeSpan.FromSeconds(-1)));
+    }
+
+    [Fact]
     public void Account_Partition_Count_Is_Validated()
     {
         using var dataSource = NpgsqlDataSource.Create("Host=localhost");

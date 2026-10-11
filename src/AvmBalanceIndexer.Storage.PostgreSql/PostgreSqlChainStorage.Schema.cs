@@ -102,7 +102,8 @@ public sealed partial class PostgreSqlChainStorage
 
     private static async Task ExecuteAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, string sql, CancellationToken cancellationToken)
     {
-        await using var command = new NpgsqlCommand(sql, connection, transaction);
+        // Schema scripts may copy a lot of data (the holdings_by_token backfill), so they are not subject to the command timeout.
+        await using var command = new NpgsqlCommand(sql, connection, transaction) { CommandTimeout = 0 };
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 }

@@ -19,7 +19,14 @@ public static class PostgreSqlStorageExtensions
 
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IValidateOptions<StorageOptions>, PostgreSqlOptionsValidator>());
         services.AddSingleton(static provider =>
-            NpgsqlDataSource.Create(provider.GetRequiredService<IOptions<StorageOptions>>().Value.PostgreSql.ConnectionString));
+        {
+            var settings = provider.GetRequiredService<IOptions<StorageOptions>>().Value.PostgreSql;
+
+            // Npgsql's own command timeout must not fire before the server's statement timeout (which is the one that is translated).
+            var connection = new NpgsqlConnectionStringBuilder(settings.ConnectionString);
+            connection.CommandTimeout = Math.Max(connection.CommandTimeout, settings.ReadTimeoutSeconds + 5);
+            return NpgsqlDataSource.Create(connection.ConnectionString);
+        });
         services.AddSingleton(static provider => new PostgreSqlChainStorage(
             provider.GetRequiredService<NpgsqlDataSource>(),
             provider.GetRequiredService<ChainContext>(),

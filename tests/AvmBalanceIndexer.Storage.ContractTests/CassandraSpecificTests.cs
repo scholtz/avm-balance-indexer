@@ -92,6 +92,17 @@ public class CassandraSpecificTests(CassandraFixture cassandra)
     }
 
     [Fact]
+    public async Task A_Read_That_Outlives_Its_Deadline_Is_A_Storage_Timeout()
+    {
+        var storage = await cassandra.CreateStorageAsync(readDeadline: TimeSpan.Zero);
+
+        await Assert.ThrowsAsync<StorageTimeoutException>(() => storage.GetHoldersAtRoundAsync(Native, 0, false, null, 10, CancellationToken.None));
+        using var cancelled = new CancellationTokenSource();
+        await cancelled.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => storage.GetHoldersAtRoundAsync(Native, 0, false, null, 10, cancelled.Token));
+    }
+
+    [Fact]
     public async Task Driver_Timeouts_Become_Storage_Timeouts()
     {
         var endpoint = new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, 9042);

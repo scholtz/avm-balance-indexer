@@ -153,7 +153,7 @@ public sealed partial class CassandraChainStorage
     }
 
     public Task<Page<Holding>> GetHoldingsAsync(Address account, bool includeZero, string? cursor, int limit, CancellationToken cancellationToken) =>
-        TranslateTimeoutsAsync(() => GetHoldingsCoreAsync(account, includeZero, cursor, limit, cancellationToken));
+        WithDeadlineAsync(deadline => GetHoldingsCoreAsync(account, includeZero, cursor, limit, deadline), cancellationToken);
 
     private async Task<Page<Holding>> GetHoldingsCoreAsync(Address account, bool includeZero, string? cursor, int limit, CancellationToken cancellationToken)
     {
@@ -199,7 +199,7 @@ public sealed partial class CassandraChainStorage
     }
 
     public Task<Amount> GetBalanceAtRoundAsync(Address account, TokenKey token, ulong round, CancellationToken cancellationToken) =>
-        TranslateTimeoutsAsync(() => GetBalanceAtRoundCoreAsync(account, token, round, cancellationToken));
+        WithDeadlineAsync(deadline => GetBalanceAtRoundCoreAsync(account, token, round, deadline), cancellationToken);
 
     private async Task<Amount> GetBalanceAtRoundCoreAsync(Address account, TokenKey token, ulong round, CancellationToken cancellationToken)
     {
@@ -213,7 +213,7 @@ public sealed partial class CassandraChainStorage
     }
 
     public Task<Page<Holding>> GetHoldersAtRoundAsync(TokenKey token, ulong round, bool includeZero, string? cursor, int limit, CancellationToken cancellationToken) =>
-        TranslateTimeoutsAsync(() => GetHoldersAtRoundCoreAsync(token, round, includeZero, cursor, limit, cancellationToken));
+        WithDeadlineAsync(deadline => GetHoldersAtRoundCoreAsync(token, round, includeZero, cursor, limit, deadline), cancellationToken);
 
     private async Task<Page<Holding>> GetHoldersAtRoundCoreAsync(TokenKey token, ulong round, bool includeZero, string? cursor, int limit, CancellationToken cancellationToken)
     {
@@ -408,7 +408,7 @@ public sealed partial class CassandraChainStorage
     }
 
     public Task<Page<TokenEffect>> GetEffectsAsync(Address account, TokenKey token, ulong? fromRound, ulong? toRound, string? cursor, int limit, CancellationToken cancellationToken) =>
-        TranslateTimeoutsAsync(() => GetEffectsCoreAsync(account, token, fromRound, toRound, cursor, limit, cancellationToken));
+        WithDeadlineAsync(deadline => GetEffectsCoreAsync(account, token, fromRound, toRound, cursor, limit, deadline), cancellationToken);
 
     private async Task<Page<TokenEffect>> GetEffectsCoreAsync(Address account, TokenKey token, ulong? fromRound, ulong? toRound, string? cursor, int limit, CancellationToken cancellationToken)
     {
@@ -502,6 +502,24 @@ public sealed partial class CassandraChainStorage
             pageSize,
             indexed,
             static e => string.Create(CultureInfo.InvariantCulture, $"{e.Id.Round}:{e.Id.IntraRoundOrder}:{e.Id.Ordinal}"));
+    }
+
+    /// <summary>
+    /// Bounds a whole read (all its requests together) by the read timeout, like PostgreSQL's statement timeout bounds a query.
+    /// A deadline that fires is a storage timeout; a cancellation of the caller is not.
+    /// </summary>
+    private async Task<T> WithDeadlineAsync<T>(Func<CancellationToken, Task<T>> read, CancellationToken cancellationToken)
+    {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(_readDeadline);
+        try
+        {
+            return await TranslateTimeoutsAsync(() => read(deadline.Token)).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new StorageTimeoutException("The read exceeded the read timeout.", ex);
+        }
     }
 
     internal static async Task<T> TranslateTimeoutsAsync<T>(Func<Task<T>> read)

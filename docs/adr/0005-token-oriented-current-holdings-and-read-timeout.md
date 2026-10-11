@@ -21,11 +21,16 @@ Separately, a slow scan could hold a snapshot and a connection for minutes.
   per-account lookup. The result is identical by construction and the shared contract suite compares both paths.
 - PostgreSQL databases created before the table existed are backfilled once by schema script `0002` when the table is empty.
   Cassandra has no deployments that predate the table; a keyspace created earlier must be replayed.
-- Reads have a timeout: PostgreSQL `SET LOCAL statement_timeout` per read snapshot, Cassandra the driver request timeout.
+- Upgrade procedure: the backfill copies what is in `holdings_by_account` when the schema is applied, so the single writer
+  must not be running an older version meanwhile (stop the old worker, then start the new one, which applies the schema first).
+  Schema scripts run without a command timeout because the backfill can copy a large table.
+- Reads have a timeout: PostgreSQL `SET LOCAL statement_timeout` per read snapshot (the connection's command timeout is raised above it), Cassandra a
+  deadline over the whole read plus the driver request timeout.
   Both surface as `StorageTimeoutException` and HTTP 503, so one request cannot hold a snapshot for minutes.
   Asynchronous scans for past rounds of very large tokens are tracked in #30.
 
 ## Consequences
 
 - One more row write per touched account and round in both providers (the account-oriented holdings write is doubled).
-- The timeout is per statement in PostgreSQL, so a request made of several statements can exceed it in total.
+- The PostgreSQL timeout is per statement, so a request made of several statements can exceed it in total; the Cassandra
+  deadline covers the whole read.
