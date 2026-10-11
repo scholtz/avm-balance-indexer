@@ -54,9 +54,9 @@ internal sealed partial class CassandraOptionsValidator : IValidateOptions<Stora
             errors.Add("Storage:Cassandra:ContactPoints needs at least one host when Storage:Provider is Cassandra.");
         }
 
-        if (settings.ReadTimeoutSeconds is < 1 or > 600)
+        if (settings.ReadTimeoutSeconds is < 5 or > 600)
         {
-            errors.Add("Storage:Cassandra:ReadTimeoutSeconds must be between 1 and 600.");
+            errors.Add("Storage:Cassandra:ReadTimeoutSeconds must be between 5 and 600 (it also bounds writes and schema changes).");
         }
 
         if (settings.Port is < 1 or > 65535)

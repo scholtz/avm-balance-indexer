@@ -92,6 +92,17 @@ public class CassandraSpecificTests(CassandraFixture cassandra)
     }
 
     [Fact]
+    public async Task Driver_Timeouts_Become_Storage_Timeouts()
+    {
+        var endpoint = new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, 9042);
+
+        await Assert.ThrowsAsync<StorageTimeoutException>(() =>
+            AvmBalanceIndexer.Storage.Cassandra.CassandraChainStorage.TranslateTimeoutsAsync<int>(() => throw new OperationTimedOutException(endpoint, 1000)));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            AvmBalanceIndexer.Storage.Cassandra.CassandraChainStorage.TranslateTimeoutsAsync<int>(() => throw new InvalidOperationException()));
+    }
+
+    [Fact]
     public async Task Replaying_A_Round_Whose_Rows_Were_Partly_Written_Converges_To_The_Same_State()
     {
         var storage = await cassandra.CreateStorageAsync();

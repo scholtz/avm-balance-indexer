@@ -82,7 +82,7 @@ curl http://localhost:5000/v1/algorand-testnet/status
 | `Storage:Provider` | `PostgreSql` or `Cassandra`. Only the selected provider is opened. |
 | `Storage:PostgreSql:ConnectionString` | Required for PostgreSQL. Keep it in a secret. |
 | `Storage:PostgreSql:AccountHashPartitions` | Hash partitions of the account effect table, 1 to 1024. Fixed per database. |
-| `Storage:PostgreSql:ReadTimeoutSeconds` / `Storage:Cassandra:ReadTimeoutSeconds` | Longest a read may run (default 30). A slower holder scan fails with HTTP 503 instead of holding a snapshot. |
+| `Storage:PostgreSql:ReadTimeoutSeconds` / `Storage:Cassandra:ReadTimeoutSeconds` | Default 30. PostgreSQL: `statement_timeout` of each read query. Cassandra: driver timeout of every request (at least 5). A slower read fails with HTTP 503 instead of holding a snapshot. |
 | `Storage:Cassandra:ContactPoints` / `Port` | Required for Cassandra: hosts and native-protocol port (default 9042). |
 | `Storage:Cassandra:Keyspace` / `LocalDatacenter` | One keyspace per chain deployment; the datacenter the driver routes to. Reads and writes use `LOCAL_QUORUM`. |
 | `Storage:Cassandra:CreateKeyspace` / `ReplicationFactor` | Let the worker create the keyspace (`NetworkTopologyStrategy`, default 3 replicas). Use `ReplicationFactor` 1 on a single-node dev cluster (reads and writes need a `LOCAL_QUORUM`). Set `CreateKeyspace` to false when the operator manages it. |

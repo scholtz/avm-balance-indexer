@@ -167,8 +167,10 @@ public sealed partial class CassandraChainStorage
         var timestamp = unchecked((long)round) + 1;
         await RunBoundedAsync(
             latest.Values.ToArray(),
-            effect => Task.WhenAll(
-                ExecuteAsync(
+            async effect =>
+            {
+                // One after the other, so the in-flight bound stays the number of accounts being written.
+                await ExecuteAsync(
                     upsertHolding,
                     cancellationToken,
                     effect.Account.ToArray(),
@@ -177,8 +179,8 @@ public sealed partial class CassandraChainStorage
                     effect.BalanceAfter.ToString(),
                     effect.Type != EffectType.AssetOptOut,
                     roundValue,
-                    timestamp),
-                ExecuteAsync(
+                    timestamp).ConfigureAwait(false);
+                await ExecuteAsync(
                     upsertByToken,
                     cancellationToken,
                     effect.Token.Kind.ToStorageName(),
@@ -187,7 +189,8 @@ public sealed partial class CassandraChainStorage
                     effect.Account.ToArray(),
                     effect.BalanceAfter.ToString(),
                     roundValue,
-                    timestamp)),
+                    timestamp).ConfigureAwait(false);
+            },
             cancellationToken).ConfigureAwait(false);
     }
 

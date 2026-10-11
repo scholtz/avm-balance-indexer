@@ -29,7 +29,7 @@ public sealed class CassandraOptions
 
     public int Port { get; set; } = 9042;
 
-    /// <summary>Longest a read may run before the driver gives up.</summary>
+    /// <summary>Longest any single request (read, write or schema change) may take before the driver gives up.</summary>
     public int ReadTimeoutSeconds { get; set; } = 30;
 
     public string Keyspace { get; set; } = "avm_indexer";

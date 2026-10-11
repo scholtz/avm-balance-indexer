@@ -504,7 +504,7 @@ public sealed partial class CassandraChainStorage
             static e => string.Create(CultureInfo.InvariantCulture, $"{e.Id.Round}:{e.Id.IntraRoundOrder}:{e.Id.Ordinal}"));
     }
 
-    private static async Task<T> TranslateTimeoutsAsync<T>(Func<Task<T>> read)
+    internal static async Task<T> TranslateTimeoutsAsync<T>(Func<Task<T>> read)
     {
         try
         {

@@ -190,19 +190,29 @@ public sealed partial class PostgreSqlChainStorage
               WHERE holdings_by_token.last_changed_round <= EXCLUDED.last_changed_round
             """;
 
-        foreach (var statement in new[] { sql, byTokenSql })
-        {
-            await using var command = new NpgsqlCommand(statement, connection, transaction);
-            command.Parameters.AddWithValue("round", unchecked((long)round));
-            AddArray(command, "account", NpgsqlDbType.Bytea, latest.Select(static e => e.Account.ToArray()).ToArray());
-            AddArray(command, "kind", NpgsqlDbType.Text, latest.Select(static e => e.Token.Kind.ToStorageName()).ToArray());
-            AddArray(command, "id", NpgsqlDbType.Bigint, latest.Select(static e => StorageId(e.Token.TokenId)).ToArray());
-            AddArray(command, "amount", NpgsqlDbType.Text, latest.Select(static e => e.BalanceAfter.ToString()).ToArray());
-            if (ReferenceEquals(statement, sql))
-            {
-                AddArray(command, "optedin", NpgsqlDbType.Boolean, latest.Select(static e => e.Type != EffectType.AssetOptOut).ToArray());
-            }
+        var accounts = latest.Select(static e => e.Account.ToArray()).ToArray();
+        var kinds = latest.Select(static e => e.Token.Kind.ToStorageName()).ToArray();
+        var ids = latest.Select(static e => StorageId(e.Token.TokenId)).ToArray();
+        var amounts = latest.Select(static e => e.BalanceAfter.ToString()).ToArray();
 
+        await using (var command = new NpgsqlCommand(sql, connection, transaction))
+        {
+            command.Parameters.AddWithValue("round", unchecked((long)round));
+            AddArray(command, "account", NpgsqlDbType.Bytea, accounts);
+            AddArray(command, "kind", NpgsqlDbType.Text, kinds);
+            AddArray(command, "id", NpgsqlDbType.Bigint, ids);
+            AddArray(command, "amount", NpgsqlDbType.Text, amounts);
+            AddArray(command, "optedin", NpgsqlDbType.Boolean, latest.Select(static e => e.Type != EffectType.AssetOptOut).ToArray());
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        await using (var command = new NpgsqlCommand(byTokenSql, connection, transaction))
+        {
+            command.Parameters.AddWithValue("round", unchecked((long)round));
+            AddArray(command, "account", NpgsqlDbType.Bytea, accounts);
+            AddArray(command, "kind", NpgsqlDbType.Text, kinds);
+            AddArray(command, "id", NpgsqlDbType.Bigint, ids);
+            AddArray(command, "amount", NpgsqlDbType.Text, amounts);
             await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
     }
