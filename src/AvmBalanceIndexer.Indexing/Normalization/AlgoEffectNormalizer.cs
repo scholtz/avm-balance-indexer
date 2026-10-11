@@ -199,7 +199,7 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
             round.Record(AssetRecords.Created(assetId, sender, parameters, round.Round));
             round.Add(sender, new BigInteger(parameters.Total), TokenKey.Asa(assetId), EffectType.AssetCreate, null, path, keepZero: true);
         }
-        else if (raw.ConfigAssetId != 0 && raw.Params is null)
+        else if (raw.Params is null)
         {
             var info = round.FindAsset(raw.ConfigAssetId)
                 ?? throw new InvalidDataException($"Round {round.Round}: asset {raw.ConfigAssetId} is destroyed but was never seen created.");
@@ -211,6 +211,8 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
             round.Add(creator, BigInteger.Zero, token, EffectType.AssetOptOut, null, path, keepZero: true);
             round.Record(info with { DeletedRound = round.Round });
         }
+
+        // Reconfiguring an existing asset (caid with apar) moves no units; its effect on the token record is #34.
     }
 
     private static readonly DomainAddress ZeroAddress = new(new byte[DomainAddress.Length]);
