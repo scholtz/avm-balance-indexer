@@ -163,12 +163,13 @@ public class InMemoryChainStorage(ChainContext context) : IChainStorage
     {
         lock (_gate)
         {
+            var after = ParseHoldingCursor(cursor);
             var indexed = IndexedRound();
             var rows = _holdings.Values
                 .Where(h => h.Account == account && (includeZero || !h.Amount.IsZero))
                 .OrderBy(static h => h.Token.Kind.ToStorageName(), StringComparer.Ordinal)
                 .ThenBy(static h => h.Token.TokenId)
-                .Where(h => cursor is null || CompareHolding(h, cursor) > 0)
+                .Where(h => after is not { } key || CompareHolding(h, key) > 0)
                 .Take(Clamp(limit) + 1)
                 .ToList();
             return Task.FromResult(ToPage(rows, Clamp(limit), indexed, static h => $"{h.Token.Kind.ToStorageName()}:{h.Token.TokenId.ToString(CultureInfo.InvariantCulture)}"));
@@ -226,12 +227,13 @@ public class InMemoryChainStorage(ChainContext context) : IChainStorage
     {
         lock (_gate)
         {
+            var before = ParseEffectCursor(cursor);
             var indexed = IndexedRound();
             var upper = Math.Min(toRound ?? indexed, indexed);
             var rows = (_effects.GetValueOrDefault(new HoldingKey(account, token)) ?? [])
                 .Where(e => e.Id.Round >= (fromRound ?? 0) && e.Id.Round <= upper)
                 .OrderByDescending(static e => (e.Id.Round, e.Id.IntraRoundOrder, e.Id.Ordinal))
-                .Where(e => cursor is null || CompareEffect(e, cursor) < 0)
+                .Where(e => before is not { } key || CompareEffect(e, key) < 0)
                 .Take(Clamp(limit) + 1)
                 .ToList();
             return Task.FromResult(ToPage(
@@ -263,31 +265,43 @@ public class InMemoryChainStorage(ChainContext context) : IChainStorage
 
     private static int Clamp(int limit) => limit < 1 ? 1 : Math.Min(limit, 1000);
 
-    private static int CompareHolding(Holding holding, string cursor)
+    private static (string Kind, ulong Id)? ParseHoldingCursor(string? cursor)
     {
-        var parts = cursor.Split(':');
-        if (parts.Length != 2 || !ulong.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var id))
+        if (cursor is null)
         {
-            throw new ArgumentException("Invalid cursor.", nameof(cursor));
+            return null;
         }
 
-        var kindOrder = string.CompareOrdinal(holding.Token.Kind.ToStorageName(), parts[0]);
-        return kindOrder != 0 ? kindOrder : holding.Token.TokenId.CompareTo(id);
+        var parts = cursor.Split(':');
+        return parts.Length == 2 && ulong.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var id) && id <= long.MaxValue
+            ? (parts[0], id)
+            : throw new ArgumentException("Invalid cursor.", nameof(cursor));
     }
 
-    private static int CompareEffect(TokenEffect effect, string cursor)
+    private static (ulong Round, int Order, int Ordinal)? ParseEffectCursor(string? cursor)
     {
-        var parts = cursor.Split(':');
-        if (parts.Length != 3
-            || !ulong.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out var round)
-            || !int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var order)
-            || !int.TryParse(parts[2], NumberStyles.None, CultureInfo.InvariantCulture, out var ordinal))
+        if (cursor is null)
         {
-            throw new ArgumentException("Invalid cursor.", nameof(cursor));
+            return null;
         }
 
-        return (effect.Id.Round, effect.Id.IntraRoundOrder, effect.Id.Ordinal).CompareTo((round, order, ordinal));
+        var parts = cursor.Split(':');
+        return parts.Length == 3
+            && ulong.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out var round) && round <= long.MaxValue
+            && int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var order)
+            && int.TryParse(parts[2], NumberStyles.None, CultureInfo.InvariantCulture, out var ordinal)
+            ? (round, order, ordinal)
+            : throw new ArgumentException("Invalid cursor.", nameof(cursor));
     }
+
+    private static int CompareHolding(Holding holding, (string Kind, ulong Id) cursor)
+    {
+        var kindOrder = string.CompareOrdinal(holding.Token.Kind.ToStorageName(), cursor.Kind);
+        return kindOrder != 0 ? kindOrder : holding.Token.TokenId.CompareTo(cursor.Id);
+    }
+
+    private static int CompareEffect(TokenEffect effect, (ulong Round, int Order, int Ordinal) cursor) =>
+        (effect.Id.Round, effect.Id.IntraRoundOrder, effect.Id.Ordinal).CompareTo(cursor);
 
     private static Page<T> ToPage<T>(List<T> fetched, int pageSize, ulong indexed, Func<T, string> cursorOf)
     {

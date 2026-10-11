@@ -585,7 +585,7 @@ public sealed partial class CassandraChainStorage
 
         var parts = cursor.Split(':');
         return parts.Length == 3
-            && ulong.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out var round)
+            && ulong.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out var round) && round <= long.MaxValue
             && int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var order)
             && int.TryParse(parts[2], NumberStyles.None, CultureInfo.InvariantCulture, out var ordinal)
             ? new EffectCursor(round, order, ordinal)

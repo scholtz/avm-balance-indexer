@@ -151,6 +151,7 @@ public abstract class StorageContractTests
         var storage = await IndexedAsync();
 
         await Assert.ThrowsAsync<ArgumentException>(() => storage.GetHoldingsAsync(Alice, true, cursor, 10, CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentException>(() => storage.GetHoldingsAsync(TestChain.Account(99), true, cursor, 10, CancellationToken.None));
     }
 
     [Theory]
@@ -158,11 +159,13 @@ public abstract class StorageContractTests
     [InlineData("1:2")]
     [InlineData("1:2:x")]
     [InlineData("1:-2:3")]
+    [InlineData("9223372036854775808:0:0")]
     public async Task A_Malformed_Effects_Cursor_Is_An_Argument_Error(string cursor)
     {
         var storage = await IndexedAsync();
 
         await Assert.ThrowsAsync<ArgumentException>(() => storage.GetEffectsAsync(Alice, Native, null, null, cursor, 10, CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentException>(() => storage.GetEffectsAsync(TestChain.Account(99), Native, null, null, cursor, 10, CancellationToken.None));
     }
 
     [Fact]

@@ -6,6 +6,7 @@ using AvmBalanceIndexer.Domain.Storage;
 using AvmBalanceIndexer.Indexing.Ingestion;
 using AvmBalanceIndexer.Indexing.Normalization;
 using AvmBalanceIndexer.TestSupport;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -107,7 +108,7 @@ public sealed class ReadApiTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.OK, status);
         Assert.Equal(expected.ToString(System.Globalization.CultureInfo.InvariantCulture), body.GetProperty("amount").GetString());
         Assert.Equal((long)round, body.GetProperty("round").GetInt64());
-        Assert.Contains("immutable", response.Headers.CacheControl!.ToString(), StringComparison.Ordinal);
+        Assert.Contains("max-age=3600", response.Headers.CacheControl!.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -222,11 +223,17 @@ public sealed class ReadApiTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task A_Lower_Case_Address_Is_Answered_With_The_Canonical_Text()
+    public async Task Only_The_Canonical_Spelling_Of_An_Address_Is_Accepted()
     {
-        var (_, body, _) = await GetAsync($"/v1/algorand-testnet/accounts/{Text(Alice).ToLowerInvariant()}/tokens");
+        var (status, _, _) = await GetAsync($"/v1/algorand-testnet/accounts/{Text(Alice).ToLowerInvariant()}/tokens");
 
-        Assert.Equal(Text(Alice), body.GetProperty("account").GetString());
+        Assert.Equal(HttpStatusCode.BadRequest, status);
+    }
+
+    [Fact]
+    public void A_Rejected_Request_Keeps_Its_Own_Status()
+    {
+        Assert.Equal(413, ApiExceptionHandler.Map(new BadHttpRequestException("too large", 413))!.Value.Status);
     }
 
     [Fact]
@@ -243,7 +250,7 @@ public sealed class ReadApiTests : IAsyncLifetime
         var closed = await GetAsync($"/v1/algorand-testnet/accounts/{Text(Alice)}/tokens/algo/0/transactions?toRound=3");
         var open = await GetAsync($"/v1/algorand-testnet/accounts/{Text(Alice)}/tokens/algo/0/transactions");
 
-        Assert.Contains("immutable", closed.Response.Headers.CacheControl!.ToString(), StringComparison.Ordinal);
+        Assert.Contains("max-age=3600", closed.Response.Headers.CacheControl!.ToString(), StringComparison.Ordinal);
         Assert.Null(open.Response.Headers.CacheControl);
     }
 

@@ -18,7 +18,9 @@ public static class AddressText
         try
         {
             address = new Address(new global::Algorand.Address(text).Bytes);
-            return true;
+
+            // Only the canonical spelling is accepted, so one account has one URL (and one cache entry).
+            return string.Equals(Format(address), text, StringComparison.Ordinal);
         }
         catch (Exception ex) when (ex is ArgumentException or FormatException)
         {

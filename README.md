@@ -115,9 +115,9 @@ They take a few minutes.
 | `GET /v1/{chain}/accounts/{address}/tokens/{kind}/{tokenId}/transactions` | account/token effect history | available |
 | `GET /v1/{chain}/tokens/{kind}/{tokenId}` | token metadata | available |
 
-Amounts and deltas are decimal strings. Every list response has `indexedRound` and `nextCursor` (opaque; pass it back as
+Amounts and deltas are decimal strings. Every list response has `indexedRound` (as of the response) and `nextCursor` (opaque; pass it back as
 `cursor`). `limit` is 1 to 1000 (default 100); `kind` is `algo`, `asa` or `arc200`. Without `round`, balance and holders use
-the latest published round; an explicit round is immutable, so those answers carry `Cache-Control: public, immutable`.
+the latest published round; an explicit published round has a fixed answer, so those responses carry `Cache-Control: public, max-age=3600`.
 Errors: 400 for invalid input or cursor, 404 for an unknown token, a round beyond the published one (with `indexedRound`) or
 another chain, 503 while nothing is indexed yet. A walk over the holders of the latest round should pass the
 `round` it received, so that all pages come from one round.

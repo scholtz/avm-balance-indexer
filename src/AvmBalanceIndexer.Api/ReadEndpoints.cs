@@ -210,12 +210,15 @@ public static class ReadEndpoints
 
     private static TokenRef Ref(TokenKey token) => new(token.Kind.ToStorageName(), token.TokenId);
 
-    /// <summary>A round that was asked for explicitly and is published never changes, so clients and proxies may keep the answer.</summary>
+    /// <summary>
+    /// A round that was asked for explicitly and is published has a fixed answer, so clients and proxies may keep it for a while.
+    /// Not <c>immutable</c>: <c>indexedRound</c> in the body is as of generation time, and an operator may have to reindex.
+    /// </summary>
     private static void MarkImmutable(HttpContext http, ulong? requestedRound)
     {
         if (requestedRound is not null)
         {
-            http.Response.Headers.CacheControl = "public, max-age=31536000, immutable";
+            http.Response.Headers.CacheControl = "public, max-age=3600";
         }
     }
 
