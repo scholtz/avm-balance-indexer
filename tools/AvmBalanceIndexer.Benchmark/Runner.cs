@@ -94,6 +94,7 @@ public static class Runner
             {
                 // The statistics are extra: a storage timeout while scanning a huge token must not discard hours of measurements.
                 Console.Error.WriteLine($"Asset statistics skipped: {exception.Message}");
+                Console.Error.WriteLine("::warning::Asset statistics skipped, see the log");
             }
 
             var machine = $"{RuntimeInformation.OSDescription.Trim()}, {Environment.ProcessorCount} cores, {GC.GetGCMemoryInfo().TotalAvailableMemoryBytes / 1073741824.0:F0} GiB";
@@ -142,7 +143,7 @@ public static class Runner
         }
 
         var top = new List<TopToken>();
-        foreach (var (token, effects) in perToken.OrderByDescending(static p => p.Value).Take(TopTokens))
+        foreach (var (token, effects) in perToken.OrderByDescending(static p => p.Value).ThenBy(static p => p.Key.Kind).ThenBy(static p => p.Key.TokenId).Take(TopTokens))
         {
             var (holders, optedIn) = await CountHoldersAsync(storage, token, (ulong)rounds, cancellationToken).ConfigureAwait(false);
             if (!records.TryGetValue(token, out var info))
@@ -200,9 +201,13 @@ public static class Runner
             new("history, typical account", "/accounts/{a}/tokens/algo/0/transactions?limit=100", i => $"/v1/{chain}/accounts/{cold[i % cold.Length]}/tokens/algo/0/transactions?limit=100"),
             new("holders, native, latest", "/tokens/algo/0/holders?limit=100", _ => $"/v1/{chain}/tokens/algo/0/holders?limit=100"),
             new("holders, native, past round", "/tokens/algo/0/holders?round=N&limit=100", _ => $"/v1/{chain}/tokens/algo/0/holders?round={middle}&limit=100"),
-            new("holders, busiest ASA, latest", "/tokens/asa/{id}/holders?limit=100", _ => $"/v1/{chain}/tokens/asa/{asa}/holders?limit=100"),
             new("token info", "/tokens/algo/0", _ => $"/v1/{chain}/tokens/algo/0"),
         };
+
+        if (asa is not null)
+        {
+            cases.Insert(cases.FindIndex(static c => c.Name == "token info"), new("holders, busiest ASA, latest", "/tokens/asa/{id}/holders?limit=100", _ => $"/v1/{chain}/tokens/asa/{asa}/holders?limit=100"));
+        }
 
         if (arc200 is not null)
         {

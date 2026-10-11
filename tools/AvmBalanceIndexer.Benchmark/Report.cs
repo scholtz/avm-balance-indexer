@@ -74,7 +74,7 @@ public static class Report
 
         text.AppendLine("### What the range contains");
         text.AppendLine();
-        text.AppendLine(string.Create(CultureInfo.InvariantCulture, $"Tokens with at least one effect in the range: {string.Join(", ", assets.TokensByKind.OrderBy(static p => p.Key, StringComparer.Ordinal).Select(static p => $"{p.Value:N0} {Label(p.Key)}"))}. {assets.AssetsCreated:N0} ASAs with an effect were created inside the range, {assets.Arc20Assets:N0} of them ARC-20 Smart ASAs."));
+        text.AppendLine(string.Create(CultureInfo.InvariantCulture, $"Tokens with at least one effect in the range: {string.Join(", ", assets.TokensByKind.OrderBy(static p => p.Key, StringComparer.Ordinal).Select(static p => $"{p.Value:N0} {Label(p.Key)}"))}. {assets.AssetsCreated:N0} of those ASAs were created inside the range, {assets.Arc20Assets:N0} of them ARC-20 Smart ASAs."));
         text.AppendLine();
         text.AppendLine("Holders are counted among the accounts that had an effect in the range (plus the starting balances the replay needed); a token with a long history has more holders on the real chain than shown here. Names exist only for tokens created inside the range.");
         text.AppendLine();

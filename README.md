@@ -177,7 +177,7 @@ Block download is the same for both and not part of the table: 58 rounds/s from 
 
 #### What the range contains
 
-Tokens with at least one effect in the range: 1 native, 8 ARC-200 tokens, 7,066 ASAs. 3,120 ASAs were created inside the range, 0 of them ARC-20 Smart ASAs.
+Tokens with at least one effect in the range: 1 native, 8 ARC-200 tokens, 7,066 ASAs. 3,120 of those ASAs were created inside the range, 0 of them ARC-20 Smart ASAs.
 
 Holders are counted among the accounts that had an effect in the range (plus the starting balances the replay needed); a token with a long history has more holders on the real chain than shown here. Names exist only for tokens created inside the range.
 
@@ -238,7 +238,7 @@ Block download is the same for both and not part of the table: 74 rounds/s from 
 
 #### What the range contains
 
-Tokens with at least one effect in the range: 1 native, 26 ARC-200 tokens, 15 ASAs. 0 ASAs were created inside the range, 0 of them ARC-20 Smart ASAs.
+Tokens with at least one effect in the range: 1 native, 26 ARC-200 tokens, 15 ASAs. 0 of those ASAs were created inside the range, 0 of them ARC-20 Smart ASAs.
 
 Holders are counted among the accounts that had an effect in the range (plus the starting balances the replay needed); a token with a long history has more holders on the real chain than shown here. Names exist only for tokens created inside the range.
 
@@ -273,8 +273,8 @@ One request at a time (p50 / p95 / p99), then 16 requests at a time (throughput 
 | holders, busiest ARC-200, latest | 2.5 / 3.1 / 3.5 ms; 2,025 req/s, p95 21 ms | 2.3 / 3.0 / 3.3 ms; 3,702 req/s, p95 6 ms |
 | token info | 0.8 / 1.1 / 1.5 ms; 14,617 req/s, p95 1 ms | 0.7 / 1.0 / 2.2 ms; 10,535 req/s, p95 2 ms |
 
-What it says, in short (MainNet): PostgreSQL answers the holder queries (a page of the biggest token's holders, at the latest or at a past round) 5 to 10 times faster
-and indexes about a third faster on one node; Cassandra stores the same data in about a quarter of the space (compression, no secondary
+What it says, in short (MainNet): PostgreSQL answers the holder queries (a page of the biggest token's holders, at the latest or at a past round) about 4 to 11 times faster
+and indexes about 1.7 times faster on one node; Cassandra stores the same data in about a quarter of the space (compression, no secondary
 indexes) and is the one to pick when you need to scale writes and storage across nodes. Account queries (holdings, balances, history) are within
 a few milliseconds of each other (PostgreSQL has the lower tail at 16 concurrent requests). Voi shows the same picture on a smaller scale: 6 times
 less disk on Cassandra, the same ranking, with the differences small on such a quiet chain. Caveats: both databases ran as one local node (Cassandra with replication factor 1: a real cluster stores

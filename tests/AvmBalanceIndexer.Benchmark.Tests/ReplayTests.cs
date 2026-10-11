@@ -123,7 +123,7 @@ public class ReplayTests
         var markdown = Report.Render([result]);
 
         Assert.Contains("1 native, 3 ARC-200 tokens, 40 ASAs", markdown, StringComparison.Ordinal);
-        Assert.Contains("7 ASAs with an effect were created inside the range, 2 of them ARC-20", markdown, StringComparison.Ordinal);
+        Assert.Contains("7 of those ASAs were created inside the range, 2 of them ARC-20", markdown, StringComparison.Ordinal);
         Assert.Contains("| asa:31566704 | USDC | 5,000 | 1,234 | 2,000 |", markdown, StringComparison.Ordinal);
         Assert.Contains("| algo:0 | A\\|B \\[x\\](y)  | 9,000 |", markdown, StringComparison.Ordinal);
         Assert.DoesNotContain("66 M", markdown, StringComparison.Ordinal);

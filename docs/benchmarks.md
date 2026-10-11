@@ -34,7 +34,7 @@ the many near-empty rounds a backfill is made of).
 | Snapshot in the README | [PostgreSQL or Cassandra?](../README.md#postgresql-or-cassandra) (updated by hand from `latest.md` when something changes) |
 
 The workflow runs at 02:17 UTC and on demand (Actions, Run workflow, optionally with another number of MainNet or Voi rounds). PostgreSQL and Cassandra each run
-on their own runner with only that database next to the API, so one does not disturb the other. A failed night is visible as a red run.
+on their own runner with only that database next to the API, so one does not disturb the other. A failed MainNet night is a red run; a failed Voi step is only an orange annotation (so the MainNet result is still published), and `latest.md` then has no Voi section for that night.
 
 ## Run it yourself
 

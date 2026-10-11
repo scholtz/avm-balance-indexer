@@ -80,6 +80,7 @@ jobs:
           --postgres "Host=localhost;Port=5432;Username=avm;Password=avm;Database=postgres"
       # A flaky Voi node must not cost the night's MainNet result.
       - name: Voi
+        if: ${{ !cancelled() }}
         continue-on-error: ${{ github.event_name != 'pull_request' }}
         run: >
           dotnet $BENCH run --provider postgres --chain voi --rounds "$VOI_ROUNDS" --last-round "${{ needs.range.outputs.voi }}"
@@ -124,6 +125,7 @@ jobs:
           --commit "$GITHUB_SHA" --out results --api-dll $API
           --cassandra localhost:9042 --dc dc1 --cassandra-container "$(docker ps -q --filter ancestor=cassandra:5.0 | head -1)"
       - name: Voi
+        if: ${{ !cancelled() }}
         continue-on-error: ${{ github.event_name != 'pull_request' }}
         run: >
           dotnet $BENCH run --provider cassandra --chain voi --rounds "$VOI_ROUNDS" --last-round "${{ needs.range.outputs.voi }}"
