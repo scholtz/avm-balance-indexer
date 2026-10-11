@@ -85,6 +85,18 @@ public static class Runner
                 api.AddRange(await MeasureApiAsync(options, settings, blocks, seeder, cancellationToken).ConfigureAwait(false));
             }
 
+            AssetStatistics? assets = null;
+            try
+            {
+                assets = await CollectAssetsAsync(storage, seeder, blocks.Rounds, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                // The statistics are extra: a storage timeout while scanning a huge token must not discard hours of measurements.
+                Console.Error.WriteLine($"Asset statistics skipped: {exception.Message}");
+                Console.Error.WriteLine("::warning::Asset statistics skipped, see the log");
+            }
+
             var machine = $"{RuntimeInformation.OSDescription.Trim()}, {Environment.ProcessorCount} cores, {GC.GetGCMemoryInfo().TotalAvailableMemoryBytes / 1073741824.0:F0} GiB";
             return new BenchmarkResult(
                 options.Provider.ToLowerInvariant(),
@@ -99,12 +111,72 @@ public static class Runner
                 download,
                 indexing,
                 size,
-                api);
+                api,
+                assets);
         }
         finally
         {
             await CleanUpAsync(options, run).ConfigureAwait(false);
         }
+    }
+
+    private const int TopTokens = 10;
+
+    /// <summary>Counts the tokens the range touched per kind and the holders of the busiest ones, read back through the storage contract.</summary>
+    public static async Task<AssetStatistics> CollectAssetsAsync(IChainStorage storage, Seeder seeder, int rounds, CancellationToken cancellationToken)
+    {
+        var perToken = seeder.Touches.GroupBy(static p => p.Key.Token).ToDictionary(static g => g.Key, static g => g.Sum(static p => (long)p.Value));
+        var byKind = perToken.Keys.GroupBy(static t => t.Kind.ToStorageName()).ToDictionary(static g => g.Key, static g => g.Count());
+
+        var created = 0;
+        var arc20 = 0;
+        var records = new Dictionary<TokenKey, TokenInfo?>();
+        foreach (var token in perToken.Keys.Where(static t => t.Kind == TokenKind.Asa))
+        {
+            var record = await storage.GetAsync(token, cancellationToken).ConfigureAwait(false);
+            records[token] = record;
+            if (record is { CreatedRound: > 0 })
+            {
+                created++;
+                arc20 += record.Standard == TokenStandard.Arc20 ? 1 : 0;
+            }
+        }
+
+        var top = new List<TopToken>();
+        foreach (var (token, effects) in perToken.OrderByDescending(static p => p.Value).ThenBy(static p => p.Key.Kind).ThenBy(static p => p.Key.TokenId).Take(TopTokens))
+        {
+            var (holders, optedIn) = await CountHoldersAsync(storage, token, (ulong)rounds, cancellationToken).ConfigureAwait(false);
+            if (!records.TryGetValue(token, out var info))
+            {
+                info = await storage.GetAsync(token, cancellationToken).ConfigureAwait(false);
+            }
+
+            var name = string.IsNullOrEmpty(info?.Symbol) ? info?.Name : info.Symbol;
+            top.Add(new TopToken(token.ToString(), string.IsNullOrEmpty(name) ? null : name, effects, holders, optedIn));
+        }
+
+        var statistics = new AssetStatistics(byKind, created, arc20, top);
+        var largest = statistics.Top.Count > 0 ? statistics.Top[0] : null;
+        Console.WriteLine($"Tokens touched: {string.Join(", ", byKind.Select(static p => $"{p.Key} {p.Value}"))}; top token {largest?.Token} has {largest?.Holders} holders");
+        return statistics;
+    }
+
+    /// <summary>One scan including zero balances gives both numbers: accounts opted in, and those with a non-zero balance.</summary>
+    private static async Task<(long NonZero, long OptedIn)> CountHoldersAsync(IChainStorage storage, TokenKey token, ulong round, CancellationToken cancellationToken)
+    {
+        long nonZero = 0;
+        long count = 0;
+        string? cursor = null;
+        do
+        {
+            var page = await storage.GetHoldersAtRoundAsync(token, round, true, cursor, 1000, cancellationToken).ConfigureAwait(false);
+            count += page.Items.Count;
+            nonZero += page.Items.Count(static h => !h.Amount.IsZero);
+            cursor = page.NextCursor;
+        }
+        while (cursor is not null);
+
+        return (nonZero, count);
     }
 
     private static async Task<IReadOnlyList<EndpointResult>> MeasureApiAsync(RunOptions options, Dictionary<string, string?> settings, BlockSet blocks, Seeder seeder, CancellationToken cancellationToken)
@@ -114,8 +186,9 @@ public static class Runner
         var native = seeder.Touches.Where(static p => p.Key.Token == TokenKey.Native).OrderByDescending(static p => p.Value).ToArray();
         var hot = Text(native[0].Key.Account);
         var cold = native.Skip(native.Length / 10).OrderBy(_ => random.Next()).Take(500).Select(static p => Text(p.Key.Account)).ToArray();
-        string TopToken(TokenKind kind) => seeder.Touches.Where(p => p.Key.Token.Kind == kind).GroupBy(static p => p.Key.Token.TokenId).OrderByDescending(static g => g.Sum(static p => p.Value)).Select(static g => g.Key.ToString(CultureInfo.InvariantCulture)).FirstOrDefault() ?? "0";
+        string? TopToken(TokenKind kind) => seeder.Touches.Where(p => p.Key.Token.Kind == kind).GroupBy(static p => p.Key.Token.TokenId).OrderByDescending(static g => g.Sum(static p => p.Value)).Select(static g => g.Key.ToString(CultureInfo.InvariantCulture)).FirstOrDefault();
         var asa = TopToken(TokenKind.Asa);
+        var arc200 = TopToken(TokenKind.Arc200);
         var middle = blocks.Rounds / 2;
 
         var cases = new List<LoadCase>
@@ -128,12 +201,21 @@ public static class Runner
             new("history, typical account", "/accounts/{a}/tokens/algo/0/transactions?limit=100", i => $"/v1/{chain}/accounts/{cold[i % cold.Length]}/tokens/algo/0/transactions?limit=100"),
             new("holders, native, latest", "/tokens/algo/0/holders?limit=100", _ => $"/v1/{chain}/tokens/algo/0/holders?limit=100"),
             new("holders, native, past round", "/tokens/algo/0/holders?round=N&limit=100", _ => $"/v1/{chain}/tokens/algo/0/holders?round={middle}&limit=100"),
-            new("holders, busiest ASA, latest", "/tokens/asa/{id}/holders?limit=100", _ => $"/v1/{chain}/tokens/asa/{asa}/holders?limit=100"),
             new("token info", "/tokens/algo/0", _ => $"/v1/{chain}/tokens/algo/0"),
         };
 
+        if (asa is not null)
+        {
+            cases.Insert(cases.FindIndex(static c => c.Name == "token info"), new("holders, busiest ASA, latest", "/tokens/asa/{id}/holders?limit=100", _ => $"/v1/{chain}/tokens/asa/{asa}/holders?limit=100"));
+        }
+
+        if (arc200 is not null)
+        {
+            cases.Insert(cases.FindIndex(static c => c.Name == "token info"), new("holders, busiest ARC-200, latest", "/tokens/arc200/{id}/holders?limit=100", _ => $"/v1/{chain}/tokens/arc200/{arc200}/holders?limit=100"));
+        }
+
         var environment = settings.Where(static p => p.Value is not null).ToDictionary(static p => p.Key.Replace(":", "__", StringComparison.Ordinal), static p => p.Value!);
-        await using var load = await ApiLoad.StartAsync(options.ApiDll!, environment, 5088, cancellationToken).ConfigureAwait(false);
+        await using var load = await ApiLoad.StartAsync(options.ApiDll!, environment, FreePort(), cancellationToken).ConfigureAwait(false);
         var results = new List<EndpointResult>();
         foreach (var test in cases)
         {
@@ -143,6 +225,13 @@ public static class Runner
         }
 
         return results;
+    }
+
+    private static int FreePort()
+    {
+        using var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        listener.Start();
+        return ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
     }
 
     private static string Text(Address address) => new Algorand.Address(address.ToArray()).EncodeAsString();

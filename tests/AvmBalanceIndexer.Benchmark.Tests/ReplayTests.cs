@@ -86,6 +86,50 @@ public class ReplayTests
     }
 
     [Fact]
+    public async Task The_Asset_Statistics_Count_Tokens_And_Holders_Of_The_Replayed_Range()
+    {
+        var set = MidChainRange();
+        var storage = new InMemoryChainStorage(new ChainContext(ChainId.AlgorandTestnet));
+        var normalizer = new LenientNormalizer(new AlgoEffectNormalizer(), set.RewardsBeforeFirstRound);
+        var seeder = new Seeder();
+        seeder.DryRun(set, normalizer);
+        await seeder.WriteGenesisAsync(storage, set, CancellationToken.None);
+        await new RoundIndexer(set, normalizer, storage, Options.Create(new IndexerOptions()), NullLogger<RoundIndexer>.Instance)
+            .RunAsync((ulong)set.Rounds, CancellationToken.None);
+
+        var statistics = await Runner.CollectAssetsAsync(storage, seeder, set.Rounds, CancellationToken.None);
+
+        Assert.Equal(1, statistics.TokensByKind["algo"]);
+        Assert.Equal(1, statistics.TokensByKind["asa"]);
+        var asa = Assert.Single(statistics.Top, static t => t.Token.StartsWith("asa:", StringComparison.Ordinal));
+        // Asset 77: Bob holds 3 units at the end, Alice opted in and holds none.
+        Assert.Equal(1, asa.Holders);
+        Assert.Equal(2, asa.OptedIn);
+        Assert.True(statistics.Top[0].Effects >= statistics.Top[^1].Effects);
+    }
+
+    [Fact]
+    public void The_Report_Lists_The_Token_Counts_And_The_Holders_Of_The_Top_Tokens()
+    {
+        var assets = new AssetStatistics(
+            new Dictionary<string, int> { ["algo"] = 1, ["asa"] = 40, ["arc200"] = 3 },
+            AssetsCreated: 7,
+            Arc20Assets: 2,
+            [new TopToken("asa:31566704", "USDC", 5_000, 1_234, 2_000), new TopToken("algo:0", "A|B [x](y)" + "\n", 9_000, 900, 900)]);
+        var result = new BenchmarkResult(
+            "postgres", "PostgreSQL 17", "voi", "2026-10-11", "abc", "machine", 100_000, 1, 100_000,
+            new DownloadResult(1, 1, 1), new IndexingResult(1, 1, 1, 1, 0), new StorageSizeResult(1, 1, 1, 1, false, []), [], assets);
+
+        var markdown = Report.Render([result]);
+
+        Assert.Contains("1 native, 3 ARC-200 tokens, 40 ASAs", markdown, StringComparison.Ordinal);
+        Assert.Contains("7 of those ASAs were created inside the range, 2 of them ARC-20", markdown, StringComparison.Ordinal);
+        Assert.Contains("| asa:31566704 | USDC | 5,000 | 1,234 | 2,000 |", markdown, StringComparison.Ordinal);
+        Assert.Contains("| algo:0 | A\\|B \\[x\\](y)  | 9,000 |", markdown, StringComparison.Ordinal);
+        Assert.DoesNotContain("66 M", markdown, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Without_Results_There_Is_Nothing_To_Report()
     {
         Assert.Throws<ArgumentException>(() => Report.Render([]));
