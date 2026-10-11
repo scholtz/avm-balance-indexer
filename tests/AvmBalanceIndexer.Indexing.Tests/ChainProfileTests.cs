@@ -50,6 +50,35 @@ public class ChainProfileTests
         Assert.Equal("testnet-v1.0", genesis.Id);
     }
 
+    [Fact]
+    public async Task Genesis_Request_Survives_Transient_Connection_Resets()
+    {
+        var calls = 0;
+        var handler = new RecordingHandler(_ => ++calls < 3
+            ? throw new HttpRequestException("Connection reset by peer")
+            : new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent("{\"alloc\":[],\"id\":\"v1.0\",\"network\":\"testnet\"}") });
+        using var algod = Algorand.HttpClientConfigurator.ConfigureHttpClient("https://gateway.test/algod/", string.Empty, string.Empty, -1, handler);
+        using var adapter = new AlgorandChainAdapter(ChainProfile.For(ChainId.AlgorandTestnet), new byte[32], new NoBlocks(), algod);
+
+        var genesis = await adapter.GetGenesisAsync(CancellationToken.None);
+
+        Assert.Equal("testnet-v1.0", genesis.Id);
+        Assert.Equal(3, calls);
+    }
+
+    [Fact]
+    public async Task Genesis_Request_Gives_Up_After_Repeated_Failures()
+    {
+        var calls = 0;
+        var handler = new RecordingHandler(_ => throw new HttpRequestException($"reset {++calls}"));
+        using var algod = Algorand.HttpClientConfigurator.ConfigureHttpClient("https://gateway.test/algod/", string.Empty, string.Empty, -1, handler);
+        using var adapter = new AlgorandChainAdapter(ChainProfile.For(ChainId.AlgorandTestnet), new byte[32], new NoBlocks(), algod);
+
+        await Assert.ThrowsAsync<HttpRequestException>(() => adapter.GetGenesisAsync(CancellationToken.None));
+
+        Assert.Equal(4, calls);
+    }
+
     private sealed class RecordingHandler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
