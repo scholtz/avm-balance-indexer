@@ -41,7 +41,7 @@ jobs:
       - run: dotnet restore AvmBalanceIndexer.slnx
       - run: dotnet build AvmBalanceIndexer.slnx -c Release --no-restore
       - run: dotnet test AvmBalanceIndexer.slnx -c Release --no-build --logger "trx;LogFileName=results.trx" --results-directory TestResults
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: test-results
@@ -70,7 +70,7 @@ jobs:
       # Indexes the first 1000 rounds of Algorand TestNet and MainNet from public archival nodes into PostgreSQL and
       # compares every balance with the ledger state deltas published by a public algod.
       - run: dotnet test tests/AvmBalanceIndexer.Live.Tests -c Release --logger "trx;LogFileName=live.trx" --results-directory TestResults
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: live-test-results
