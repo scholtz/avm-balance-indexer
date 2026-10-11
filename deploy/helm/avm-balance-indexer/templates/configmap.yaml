@@ -15,6 +15,9 @@ data:
   OTEL_EXPORTER_OTLP_PROTOCOL: {{ .Values.telemetry.otlpProtocol | quote }}
   {{- end }}
   Worker__HealthPort: {{ .Values.worker.healthPort | quote }}
+  Scans__MaxActive: {{ .Values.scans.maxActive | quote }}
+  Scans__Retention: {{ .Values.scans.retention | quote }}
+  Scans__StaleAfter: {{ .Values.scans.staleAfter | quote }}
   Storage__Provider: {{ .Values.storage.provider | quote }}
   Storage__PostgreSql__AccountHashPartitions: {{ .Values.storage.postgreSql.accountHashPartitions | quote }}
   Storage__Cassandra__UseTls: {{ .Values.storage.cassandra.useTls | quote }}

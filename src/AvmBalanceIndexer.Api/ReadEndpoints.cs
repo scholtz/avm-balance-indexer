@@ -234,7 +234,7 @@ public static class ReadEndpoints
         return error is null;
     }
 
-    private static bool TryToken(string kind, string tokenId, out TokenKey token, out IResult? error)
+    internal static bool TryToken(string kind, string tokenId, out TokenKey token, out IResult? error)
     {
         token = default;
         error = null;
@@ -279,7 +279,7 @@ public static class ReadEndpoints
         return error is null;
     }
 
-    private static bool TryLimit(string? text, out int pageSize, out IResult? error)
+    internal static bool TryLimit(string? text, out int pageSize, out IResult? error)
     {
         pageSize = DefaultLimit;
         if (text is not null)

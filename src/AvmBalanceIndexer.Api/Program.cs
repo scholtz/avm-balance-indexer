@@ -11,6 +11,8 @@ builder.Services.AddOpenApi();
 builder.Services.AddHealthChecks().AddCheck<StorageHealthCheck>("storage", tags: ["ready"]);
 builder.Services.AddChainStorage(builder.Configuration);
 builder.Services.AddAvmTelemetry(builder.Configuration, "avm-api", TelemetryExtensions.AspNetCoreMeters.ToArray());
+builder.Services.AddOptions<ScanOptions>().Bind(builder.Configuration.GetSection(ScanOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
+builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddExceptionHandler<ApiExceptionHandler>();
 builder.Services.AddProblemDetails();
 
@@ -59,6 +61,7 @@ v1.MapGet(
     .WithName("GetChainStatus");
 
 v1.MapReadEndpoints();
+v1.MapScanEndpoints();
 
 app.Run();
 

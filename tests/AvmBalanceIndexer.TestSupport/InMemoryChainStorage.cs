@@ -11,7 +11,9 @@ namespace AvmBalanceIndexer.TestSupport;
 /// Reference implementation of the storage contract backed by plain collections. It defines the expected behaviour
 /// that every real provider is compared against in the contract suite, and keeps indexer tests hermetic.
 /// </summary>
+#pragma warning disable CA1001 // The writer lease double (InMemoryWriterLease.cs) holds nothing that needs releasing.
 public partial class InMemoryChainStorage(ChainContext context) : IChainStorage
+#pragma warning restore CA1001
 {
     private readonly object _gate = new();
     private readonly Dictionary<HoldingKey, List<TokenEffect>> _effects = [];
@@ -193,7 +195,7 @@ public partial class InMemoryChainStorage(ChainContext context) : IChainStorage
         }
     }
 
-    public Task<Page<Holding>> GetHoldersAtRoundAsync(TokenKey token, ulong round, bool includeZero, string? cursor, int limit, CancellationToken cancellationToken)
+    public virtual Task<Page<Holding>> GetHoldersAtRoundAsync(TokenKey token, ulong round, bool includeZero, string? cursor, int limit, CancellationToken cancellationToken)
     {
         lock (_gate)
         {

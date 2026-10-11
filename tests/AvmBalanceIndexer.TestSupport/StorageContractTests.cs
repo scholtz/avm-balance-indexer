@@ -244,6 +244,208 @@ public abstract class StorageContractTests
         ChainStatus Status(ulong round) => new(ChainId.AlgorandTestnet, round, TestChain.FakeHash(round), null, IngestionState.Following, DateTimeOffset.UnixEpoch);
     }
 
+    private static readonly DateTimeOffset T0 = new(2030, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
+    private static ScanJob NewJob(Guid? id = null, TimeSpan? created = null, TimeSpan? ttl = null) =>
+        new(
+            id ?? Guid.NewGuid(),
+            Native,
+            5,
+            false,
+            ScanState.Pending,
+            0,
+            null,
+            null,
+            T0 + (created ?? TimeSpan.Zero),
+            T0 + (created ?? TimeSpan.Zero),
+            T0 + (created ?? TimeSpan.Zero) + (ttl ?? TimeSpan.FromHours(24)));
+
+    private static Holding Row(int index, ulong amount = 1) => new(TestChain.Account(200 + index), Native, Amount.From(amount), true, 3);
+
+    private async Task<IScanJobStore> ScanStoreAsync() => Assert.IsAssignableFrom<IScanJobStore>(await CreateStorageAsync());
+
+    [Fact]
+    public async Task A_Scan_Job_Is_Claimed_Once_Filled_In_Order_And_Read_Back_In_Pages()
+    {
+        var store = await ScanStoreAsync();
+        var job = NewJob();
+        await store.CreateAsync(job, CancellationToken.None);
+        Assert.Equal(ScanState.Pending, (await store.GetJobAsync(job.Id, CancellationToken.None))!.State);
+        Assert.Equal(1, await store.CountActiveAsync(T0, CancellationToken.None));
+
+        var claimed = await store.ClaimNextAsync("worker-a", T0.AddSeconds(1), T0 - TimeSpan.FromMinutes(2), CancellationToken.None);
+        Assert.Equal((job.Id, ScanState.Running), (claimed!.Id, claimed.State));
+        Assert.Null(await store.ClaimNextAsync("worker-b", T0.AddSeconds(2), T0 - TimeSpan.FromMinutes(2), CancellationToken.None));
+
+        Assert.True(await store.AppendAsync(job.Id, "worker-a", [Row(0), Row(1), Row(2)], "cursor-1", T0.AddSeconds(3), CancellationToken.None));
+        Assert.True(await store.AppendAsync(job.Id, "worker-a", [Row(3), Row(4)], null, T0.AddSeconds(4), CancellationToken.None));
+        Assert.False(await store.AppendAsync(job.Id, "worker-b", [Row(9)], null, T0.AddSeconds(4), CancellationToken.None));
+        Assert.True(await store.CompleteAsync(job.Id, "worker-a", T0.AddSeconds(5), CancellationToken.None));
+
+        var finished = (await store.GetJobAsync(job.Id, CancellationToken.None))!;
+        Assert.Equal((ScanState.Completed, 5L), (finished.State, finished.HoldersFound));
+        Assert.Equal(0, await store.CountActiveAsync(T0.AddSeconds(6), CancellationToken.None));
+
+        var collected = new List<Holding>();
+        string? cursor = null;
+        var pages = 0;
+        do
+        {
+            var page = await store.GetResultAsync(job.Id, cursor, 2, CancellationToken.None);
+            collected.AddRange(page.Items);
+            cursor = page.NextCursor;
+            pages++;
+            Assert.Equal(5UL, page.IndexedRound);
+        }
+        while (cursor is not null);
+
+        Assert.Equal(3, pages);
+        Assert.Equal(Enumerable.Range(0, 5).Select(i => Row(i).Account), collected.Select(static h => h.Account));
+        Assert.False(await store.AppendAsync(job.Id, "worker-a", [Row(7)], null, T0.AddSeconds(7), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task A_Reader_Can_Follow_A_Running_Scan_With_The_Cursor_It_Is_Given()
+    {
+        var store = await ScanStoreAsync();
+        var job = NewJob();
+        await store.CreateAsync(job, CancellationToken.None);
+        await store.ClaimNextAsync("a", T0.AddSeconds(1), T0 - TimeSpan.FromMinutes(2), CancellationToken.None);
+
+        var empty = await store.GetResultAsync(job.Id, null, 10, CancellationToken.None);
+        Assert.Empty(empty.Items);
+        Assert.Null(empty.NextCursor);
+
+        await store.AppendAsync(job.Id, "a", [Row(0), Row(1)], "c1", T0.AddSeconds(2), CancellationToken.None);
+        var first = await store.GetResultAsync(job.Id, null, 10, CancellationToken.None);
+        var caughtUp = await store.GetResultAsync(job.Id, first.NextCursor, 10, CancellationToken.None);
+        Assert.Equal(2, first.Items.Count);
+        Assert.NotNull(first.NextCursor);
+        Assert.Empty(caughtUp.Items);
+        Assert.Equal(first.NextCursor, caughtUp.NextCursor);
+
+        await store.AppendAsync(job.Id, "a", [Row(2)], ScanJob.EndOfList, T0.AddSeconds(3), CancellationToken.None);
+        var more = await store.GetResultAsync(job.Id, first.NextCursor, 10, CancellationToken.None);
+        Assert.Equal(Row(2).Account, Assert.Single(more.Items).Account);
+        Assert.NotNull(more.NextCursor);
+
+        await store.CompleteAsync(job.Id, "a", T0.AddSeconds(4), CancellationToken.None);
+        var finished = await store.GetResultAsync(job.Id, more.NextCursor, 10, CancellationToken.None);
+        Assert.Empty(finished.Items);
+        Assert.Null(finished.NextCursor);
+    }
+
+    [Fact]
+    public async Task Cancelling_A_Scan_Stops_Its_Owner_And_Removes_It_From_The_Queue()
+    {
+        var store = await ScanStoreAsync();
+        var running = NewJob();
+        var waiting = NewJob(created: TimeSpan.FromSeconds(1));
+        await store.CreateAsync(running, CancellationToken.None);
+        await store.CreateAsync(waiting, CancellationToken.None);
+        Assert.Equal(running.Id, (await store.ClaimNextAsync("a", T0.AddSeconds(2), T0 - TimeSpan.FromMinutes(2), CancellationToken.None))!.Id);
+
+        Assert.True(await store.CancelAsync(waiting.Id, T0.AddSeconds(3), CancellationToken.None));
+        Assert.True(await store.CancelAsync(running.Id, T0.AddSeconds(3), CancellationToken.None));
+        Assert.False(await store.CancelAsync(running.Id, T0.AddSeconds(4), CancellationToken.None));
+        Assert.False(await store.CancelAsync(Guid.NewGuid(), T0.AddSeconds(4), CancellationToken.None));
+
+        Assert.False(await store.AppendAsync(running.Id, "a", [Row(0)], null, T0.AddSeconds(5), CancellationToken.None));
+        Assert.False(await store.CompleteAsync(running.Id, "a", T0.AddSeconds(5), CancellationToken.None));
+        Assert.Null(await store.ClaimNextAsync("b", T0.AddSeconds(6), T0 + TimeSpan.FromHours(1), CancellationToken.None));
+        Assert.Equal(ScanState.Cancelled, (await store.GetJobAsync(running.Id, CancellationToken.None))!.State);
+        Assert.Equal(ScanState.Cancelled, (await store.GetJobAsync(waiting.Id, CancellationToken.None))!.State);
+    }
+
+    [Fact]
+    public async Task A_Scan_Whose_Owner_Stopped_Checkpointing_Is_Taken_Over_And_Resumes_From_Its_Cursor()
+    {
+        var store = await ScanStoreAsync();
+        var job = NewJob();
+        await store.CreateAsync(job, CancellationToken.None);
+        await store.ClaimNextAsync("a", T0.AddSeconds(1), T0 - TimeSpan.FromMinutes(2), CancellationToken.None);
+        await store.AppendAsync(job.Id, "a", [Row(0), Row(1)], "resume-here", T0.AddSeconds(2), CancellationToken.None);
+
+        Assert.Null(await store.ClaimNextAsync("b", T0.AddSeconds(30), T0.AddSeconds(1), CancellationToken.None));
+        var taken = await store.ClaimNextAsync("b", T0.AddMinutes(10), T0.AddMinutes(5), CancellationToken.None);
+
+        Assert.Equal((job.Id, 2L, "resume-here"), (taken!.Id, taken.HoldersFound, taken.Cursor));
+        Assert.False(await store.AppendAsync(job.Id, "a", [Row(8)], null, T0.AddMinutes(11), CancellationToken.None));
+        Assert.True(await store.AppendAsync(job.Id, "b", [Row(2)], null, T0.AddMinutes(11), CancellationToken.None));
+        Assert.Equal(3, (await store.GetResultAsync(job.Id, null, 10, CancellationToken.None)).Items.Count);
+    }
+
+    [Fact]
+    public async Task A_Failed_Scan_Keeps_Its_Error_And_The_Oldest_Pending_Job_Goes_First()
+    {
+        var store = await ScanStoreAsync();
+        var later = NewJob(created: TimeSpan.FromSeconds(10));
+        var earlier = NewJob(created: TimeSpan.FromSeconds(1));
+        await store.CreateAsync(later, CancellationToken.None);
+        await store.CreateAsync(earlier, CancellationToken.None);
+
+        var first = await store.ClaimNextAsync("a", T0.AddMinutes(1), T0 - TimeSpan.FromMinutes(2), CancellationToken.None);
+        Assert.True(await store.FailAsync(earlier.Id, "a", "the token is too large", T0.AddMinutes(2), CancellationToken.None));
+
+        Assert.Equal(earlier.Id, first!.Id);
+        var failed = (await store.GetJobAsync(earlier.Id, CancellationToken.None))!;
+        Assert.Equal((ScanState.Failed, "the token is too large"), (failed.State, failed.Error));
+        Assert.Equal(later.Id, (await store.ClaimNextAsync("a", T0.AddMinutes(3), T0 - TimeSpan.FromMinutes(2), CancellationToken.None))!.Id);
+    }
+
+    [Fact]
+    public async Task Expired_Scans_Are_Removed_With_Their_Results_And_Are_Not_Claimed()
+    {
+        var store = await ScanStoreAsync();
+        var shortLived = NewJob(ttl: TimeSpan.FromMinutes(5));
+        var longLived = NewJob(created: TimeSpan.FromSeconds(1), ttl: TimeSpan.FromDays(2));
+        await store.CreateAsync(shortLived, CancellationToken.None);
+        await store.CreateAsync(longLived, CancellationToken.None);
+        Assert.Equal(shortLived.Id, (await store.ClaimNextAsync("a", T0.AddSeconds(2), T0 - TimeSpan.FromMinutes(2), CancellationToken.None))!.Id);
+        await store.AppendAsync(shortLived.Id, "a", [Row(0)], null, T0.AddSeconds(3), CancellationToken.None);
+
+        // The abandoned, expired job is not taken over; the live one is.
+        var next = await store.ClaimNextAsync("b", T0.AddHours(1), T0.AddMinutes(30), CancellationToken.None);
+        var removed = await store.DeleteExpiredAsync(T0.AddHours(1), CancellationToken.None);
+
+        Assert.Equal(longLived.Id, next!.Id);
+        Assert.Equal(1, removed);
+        Assert.Null(await store.GetJobAsync(shortLived.Id, CancellationToken.None));
+        Assert.Empty((await store.GetResultAsync(shortLived.Id, null, 10, CancellationToken.None)).Items);
+        Assert.NotNull(await store.GetJobAsync(longLived.Id, CancellationToken.None));
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("99999999999999")]
+    [InlineData("9223372036854775807")]
+    public async Task A_Scan_Result_Cursor_Beyond_The_Stored_Rows_Is_An_Empty_Page(string cursor)
+    {
+        var store = await ScanStoreAsync();
+        var job = NewJob();
+        await store.CreateAsync(job, CancellationToken.None);
+        await store.ClaimNextAsync("a", T0.AddSeconds(1), T0 - TimeSpan.FromMinutes(2), CancellationToken.None);
+        await store.AppendAsync(job.Id, "a", [Row(0)], ScanJob.EndOfList, T0.AddSeconds(2), CancellationToken.None);
+        await store.CompleteAsync(job.Id, "a", T0.AddSeconds(3), CancellationToken.None);
+
+        var page = await store.GetResultAsync(job.Id, cursor, 10, CancellationToken.None);
+
+        Assert.Empty(page.Items);
+        Assert.Null(page.NextCursor);
+    }
+
+    [Theory]
+    [InlineData("zz")]
+    [InlineData("-1")]
+    public async Task A_Malformed_Scan_Result_Cursor_Is_An_Argument_Error(string cursor)
+    {
+        var store = await ScanStoreAsync();
+        var job = NewJob();
+        await store.CreateAsync(job, CancellationToken.None);
+
+        await Assert.ThrowsAsync<ArgumentException>(() => store.GetResultAsync(job.Id, cursor, 10, CancellationToken.None));
+    }
+
     [Fact]
     public async Task The_Writer_Lease_Is_Exclusive_And_Free_Again_After_It_Is_Released()
     {

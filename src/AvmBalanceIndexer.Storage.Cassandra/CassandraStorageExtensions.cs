@@ -26,6 +26,7 @@ public static class CassandraStorageExtensions
             leaseTtl: TimeSpan.FromSeconds(provider.GetRequiredService<IOptions<StorageOptions>>().Value.Cassandra.LeaseTtlSeconds)));
         services.AddSingleton<IChainStorage>(static provider => provider.GetRequiredService<CassandraChainStorage>());
         services.AddSingleton<IStorageFailureClassifier, CassandraErrors>();
+        services.AddSingleton<IScanJobStore>(static provider => provider.GetRequiredService<CassandraChainStorage>());
         services.AddSingleton<IWriterLeaseProvider>(static provider => provider.GetRequiredService<CassandraChainStorage>());
         return services;
     }

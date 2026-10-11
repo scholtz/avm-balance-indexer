@@ -28,7 +28,7 @@ public sealed class ApiExceptionHandler : IExceptionHandler
     {
         ChainNotStartedException e => (StatusCodes.Status503ServiceUnavailable, new { error = "The chain has not been indexed yet.", chain = e.Chain }),
         RoundNotIndexedException e => (StatusCodes.Status404NotFound, new { error = "The round is not indexed yet.", requestedRound = e.RequestedRound, indexedRound = e.IndexedRound }),
-        StorageTimeoutException => (StatusCodes.Status503ServiceUnavailable, new { error = "The query took too long to answer synchronously." }),
+        StorageTimeoutException => (StatusCodes.Status503ServiceUnavailable, new { error = "The query took too long to answer synchronously. For a large token use an asynchronous scan: POST /v1/{chain}/tokens/{kind}/{tokenId}/holders/scans." }),
         BadHttpRequestException { StatusCode: >= 400 and < 500 } e => (e.StatusCode, new { error = "The request could not be understood." }),
         ArgumentException { ParamName: "cursor" } => (StatusCodes.Status400BadRequest, new { error = "The cursor is not valid." }),
         ArgumentOutOfRangeException { ParamName: "tokenId" } => (StatusCodes.Status400BadRequest, new { error = "The token id is not supported." }),

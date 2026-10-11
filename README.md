@@ -93,6 +93,7 @@ curl http://localhost:5000/v1/algorand-testnet/status
 | `Algorand:GossipHosts` | Archival gossip node URLs. Empty discovers them through DNS SRV. Use your own nodes in production. |
 | `Algorand:ExpectedGenesisHash` | Base64 genesis hash. Pinned for Algorand MainNet, TestNet and Voi; set it only for another network. |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` / `Telemetry:Enabled` | Publishes metrics over OTLP from API and worker (ASP.NET Core, .NET runtime, `AvmBalanceIndexer.Worker` instruments) when an endpoint is set; `Telemetry:Enabled=false` forces it off. The other `OTEL_*` variables apply. |
+| `Scans:MaxActive` / `Retention` / `Concurrency` / `PollInterval` / `StaleAfter` / `PageSize` | Asynchronous holder scans: admission limit (20), how long a scan and its result are kept (24 h), scans one worker replica runs at once (2), how often an idle worker looks for work (5 s), when a silent owner loses a running scan (2 min), holders per step (1000). |
 | `Indexer:LeaseRetryInterval` | How often a standby replica asks again for the writer lease (default 5 s). |
 | `Worker:HealthPort` / `HealthHost` | Worker probe endpoints `/healthz/live` and `/healthz/ready` (default 8081, 0 = off; use `localhost` as host on Windows). Metrics are on the `AvmBalanceIndexer.Worker` meter. |
 | `Indexer:FetchConcurrency` | Blocks fetched in parallel ahead of the commit position. |
@@ -121,10 +122,17 @@ They take a few minutes.
 | `GET /v1/{chain}/tokens/{kind}/{tokenId}/holders?round=R` | paginated end-of-round holders | available |
 | `GET /v1/{chain}/accounts/{address}/tokens/{kind}/{tokenId}/transactions` | account/token effect history | available |
 | `GET /v1/{chain}/tokens/{kind}/{tokenId}` | token metadata | available |
+| `POST /v1/{chain}/tokens/{kind}/{tokenId}/holders/scans` | start an asynchronous holder export (`{ "round": R, "includeZero": false }`) | available |
+| `GET /v1/{chain}/scans/{id}` / `GET .../scans/{id}/holders` / `DELETE .../scans/{id}` | poll, read the result pages, cancel | available |
 
 Amounts and deltas are decimal strings. Every list response has `indexedRound` (as of the response) and `nextCursor` (opaque; pass it back as
 `cursor`). `limit` is 1 to 1000 (default 100); `kind` is `algo`, `asa` or `arc200`. Without `round`, balance and holders use
 the latest published round; an explicit published round has a fixed answer, so those responses carry `Cache-Control: public, max-age=3600`.
+Scan results carry the scan's `round` instead of `indexedRound`. If a result page has no `nextCursor` and `complete` is false, repeat
+the same request (same cursor) a moment later: the scan is still running. Asynchronous scans: `POST` answers `202` with a `Location`; the job reports `state` (`Pending`, `Running`, `Completed`, `Failed`,
+`Cancelled`), `holdersFound` and `error`. The result is a consistent list of the holders at the scan's round, in account order; pages
+can be read while the scan runs (`complete` is true only for a finished scan and its last page). Every worker replica runs scans; a
+scan whose replica dies is resumed from its checkpoint by another one. `429` with `Retry-After` when too many scans are active.
 Errors: 400 for invalid input or cursor, 404 for an unknown token, a round beyond the published one (with `indexedRound`) or
 another chain, 503 while nothing is indexed yet. A walk over the holders of the latest round should pass the
 `round` it received, so that all pages come from one round.
@@ -133,7 +141,7 @@ another chain, 503 while nothing is indexed yet. A walk over the holders of the 
 
 - Holders at the latest round are one ordered index scan. Holders at an older round read each holder's latest balance from its
   own history, one lookup per account, so a page is cheap but a huge token at a past round can exceed the read timeout
-  (HTTP 503). Asynchronous scans are planned (#30).
+  (HTTP 503): use an asynchronous scan for it.
 - Indexing speed is about 60 rounds per second with default settings, which is far too slow to backfill MainNet in a
   reasonable time. Batching and fetch tuning are follow-up work.
 - Several workers may run per chain: one holds the writer lease (PostgreSQL advisory lock on a dedicated session, Cassandra TTL row) and indexes, the others stand by. Failover takes up to the lease TTL (30 s) on Cassandra and about 30 s (TCP keepalives of the lease session) on PostgreSQL. Worker metrics are published on the `AvmBalanceIndexer.Worker` meter and exported over OTLP when an endpoint is configured.
