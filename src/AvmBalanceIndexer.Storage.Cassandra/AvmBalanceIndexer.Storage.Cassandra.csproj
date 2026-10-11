@@ -6,7 +6,7 @@
 
   <ItemGroup>
     <PackageReference Include="CassandraCSharpDriver" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" VersionOverride="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
     <PackageReference Include="Newtonsoft.Json" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" />
