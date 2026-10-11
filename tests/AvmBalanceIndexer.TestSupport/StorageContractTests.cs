@@ -634,4 +634,3 @@ public abstract class StorageContractTests
         Assert.Equal((Alice, "TST", "Test asset", 2, 1UL, 6UL), (token.Creator, token.Symbol, token.Name, token.Decimals, token.CreatedRound, token.DeletedRound));
     }
 }
-

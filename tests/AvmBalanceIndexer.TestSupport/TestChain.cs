@@ -341,6 +341,9 @@ public sealed class TestChain
         }
         else if (asset.Create)
         {
+            // A real transaction omits apar when every parameter is zero.
+            if (asset.Total > 0 || asset.Decimals > 0 || asset.UnitName is not null || asset.Name is not null)
+            {
             entries.Add(("apar", (ref MessagePackWriter w) =>
             {
                 var fields = 1 + (asset.Decimals > 0 ? 1 : 0) + (asset.UnitName is not null ? 1 : 0) + (asset.Name is not null ? 1 : 0);
@@ -365,6 +368,7 @@ public sealed class TestChain
                     w.Write(asset.UnitName);
                 }
             }));
+            }
         }
         else
         {

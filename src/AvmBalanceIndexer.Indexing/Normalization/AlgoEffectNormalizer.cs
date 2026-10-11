@@ -189,12 +189,14 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
 
     private static void ApplyAssetConfiguration(RoundBuilder round, DomainAddress sender, RawTransaction raw, TxnApplyData apply, int[] path)
     {
-        if (raw.ConfigAssetId == 0 && raw.Params is { } parameters)
+        if (raw.ConfigAssetId == 0)
         {
+            // The ledger creates an asset whenever the config asset id is zero; apar is omitted when all its fields are zero.
+            var parameters = raw.Params ?? new RawAssetParams(0, 0, null, null, null);
             var assetId = apply.CreatedAssetId != 0
                 ? apply.CreatedAssetId
                 : throw new InvalidDataException($"Round {round.Round}: an asset creation has no created asset id in its apply data.");
-            round.Created(AssetRecords.Created(assetId, sender, parameters, round.Round));
+            round.Record(AssetRecords.Created(assetId, sender, parameters, round.Round));
             round.Add(sender, new BigInteger(parameters.Total), TokenKey.Asa(assetId), EffectType.AssetCreate, null, path, keepZero: true);
         }
         else if (raw.ConfigAssetId != 0 && raw.Params is null)
@@ -207,7 +209,7 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
             // The ledger only destroys an asset whose whole supply is held by the creator, and removes that holding.
             round.Add(creator, -new BigInteger(AssetRecords.Total(info)), token, EffectType.AssetDestroy, null, path, keepZero: true);
             round.Add(creator, BigInteger.Zero, token, EffectType.AssetOptOut, null, path, keepZero: true);
-            round.Destroyed(info with { DeletedRound = round.Round });
+            round.Record(info with { DeletedRound = round.Round });
         }
     }
 
@@ -242,13 +244,7 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
 
         public TokenInfo? FindAsset(ulong assetId) => _assets.TryGetValue(assetId, out var info) ? info : assets.Find(assetId);
 
-        public void Created(TokenInfo info)
-        {
-            _assets[info.Key.TokenId] = info;
-            _tokenChanges.Add(info);
-        }
-
-        public void Destroyed(TokenInfo info)
+        public void Record(TokenInfo info)
         {
             _assets[info.Key.TokenId] = info;
             _tokenChanges.Add(info);

@@ -136,7 +136,7 @@ another chain, 503 while nothing is indexed yet. A walk over the holders of the 
   certificate signatures are not verified (ADR 0004). A host serving a whole fabricated chain is not detected: run your
   own archival nodes.
 - Proposer payouts are verified against recent MainNet rounds (see `docs/ledger-facts.md`).
-- ARC-200 transfers (#33) and ARC-20 classification (#34) are not indexed yet; ASA balances are. Application-driven native movements are only seen through inner payments.
+- A database indexed before ASA support (#18) holds no asset history: rebuild it from genesis, otherwise the first transfer of an older asset fails with a negative balance. ARC-200 transfers (#33) and ARC-20 classification (#34) are not indexed yet; ASA balances are. Application-driven native movements are only seen through inner payments.
 
 ## License
 

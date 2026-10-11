@@ -168,4 +168,24 @@ public class AssetEffectNormalizerTests
 
         Assert.Throws<InvalidDataException>(() => Normalize(block));
     }
+
+    [Fact]
+    public void A_Creation_Without_Parameters_In_The_Transaction_Is_Still_A_Creation()
+    {
+        var block = Normalize(Chain.Block(5, [new TestPayment(Alice, Alice, 0, Asset: new TestAsset("acfg", Create: true, CreatedAssetId: Asset))]));
+
+        Assert.Equal([(Alice, EffectType.AssetCreate, 0L)], AssetEffects(block));
+        Assert.Equal(0UL, AssetRecords.Total(Assert.Single(block.TokenChanges)));
+    }
+
+    [Fact]
+    public void Names_Are_Stripped_Of_Nul_Characters_Which_The_Database_Rejects()
+    {
+        var block = Normalize(Chain.Block(5, [new TestPayment(Alice, Alice, 0, Asset: TestAsset.Creation(Asset, 1, unit: "AB\0\0", name: "Na\0me"))]));
+
+        var token = Assert.Single(block.TokenChanges);
+        Assert.Equal(("AB", "Name"), (token.Symbol, token.Name));
+        Assert.DoesNotContain('\0', token.MetadataJson!);
+    }
 }
+

@@ -16,15 +16,15 @@ public static class AssetRecords
         var metadata = JsonSerializer.Serialize(new Dictionary<string, string?>
         {
             ["total"] = parameters.Total.ToString(CultureInfo.InvariantCulture),
-            ["url"] = parameters.Url,
+            ["url"] = Clean(parameters.Url),
         });
 
         return new TokenInfo(
             TokenKey.Asa(assetId),
             creator,
             (int)parameters.Decimals,
-            parameters.UnitName,
-            parameters.Name,
+            Clean(parameters.UnitName),
+            Clean(parameters.Name),
             TokenStandard.Asa,
             StandardVerified: true,
             ControllingAppId: null,
@@ -32,6 +32,9 @@ public static class AssetRecords
             DeletedRound: null,
             metadata);
     }
+
+    // Asset names are arbitrary bytes and often padded with NUL, which PostgreSQL text and jsonb columns reject.
+    private static string? Clean(string? text) => text?.Replace("\0", string.Empty, StringComparison.Ordinal);
 
     /// <summary>Total supply recorded at creation.</summary>
     /// <exception cref="InvalidDataException">The record carries no total.</exception>
