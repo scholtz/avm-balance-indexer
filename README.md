@@ -14,7 +14,7 @@ Full design: [PRODUCT-DESCRIPTION.md](PRODUCT-DESCRIPTION.md). Decisions: [docs/
 | PostgreSQL provider | Done: schema, atomic round writer, current and historical balances, holders, history. |
 | Cassandra provider | Done: schema, idempotent round writer with compare-and-set publication, current and historical balances, holders, history. Runs the same contract suite as PostgreSQL. |
 | ASA, ARC-20, ARC-200 effects | Not started. |
-| Read API | `/v1/{chain}/status` only. |
+| Read API | Done: status, holdings, balance at a round, holders, history, token metadata. |
 | Voi | Genesis pinned and verified; first 1000 rounds indexed (they contain no balance-moving transactions). |
 
 ## How indexing works
@@ -109,13 +109,18 @@ They take a few minutes.
 | Endpoint | Purpose | State |
 |---|---|---|
 | `GET /v1/{chain}/status` | indexed round, target round, lag, ingestion state | available |
-| `GET /v1/{chain}/accounts/{address}/tokens` | current holdings | planned |
-| `GET /v1/{chain}/accounts/{address}/tokens/{kind}/{tokenId}/balance?round=R` | end-of-round balance | planned |
-| `GET /v1/{chain}/tokens/{kind}/{tokenId}/holders?round=R` | paginated end-of-round holders | planned |
-| `GET /v1/{chain}/accounts/{address}/tokens/{kind}/{tokenId}/transactions` | account/token effect history | planned |
-| `GET /v1/{chain}/tokens/{kind}/{tokenId}` | token metadata | planned |
+| `GET /v1/{chain}/accounts/{address}/tokens` | current holdings | available |
+| `GET /v1/{chain}/accounts/{address}/tokens/{kind}/{tokenId}/balance?round=R` | end-of-round balance | available |
+| `GET /v1/{chain}/tokens/{kind}/{tokenId}/holders?round=R` | paginated end-of-round holders | available |
+| `GET /v1/{chain}/accounts/{address}/tokens/{kind}/{tokenId}/transactions` | account/token effect history | available |
+| `GET /v1/{chain}/tokens/{kind}/{tokenId}` | token metadata | available |
 
-The storage contract behind these endpoints is implemented and tested; only the HTTP layer is missing.
+Amounts and deltas are decimal strings. Every list response has `indexedRound` (as of the response) and `nextCursor` (opaque; pass it back as
+`cursor`). `limit` is 1 to 1000 (default 100); `kind` is `algo`, `asa` or `arc200`. Without `round`, balance and holders use
+the latest published round; an explicit published round has a fixed answer, so those responses carry `Cache-Control: public, max-age=3600`.
+Errors: 400 for invalid input or cursor, 404 for an unknown token, a round beyond the published one (with `indexedRound`) or
+another chain, 503 while nothing is indexed yet. A walk over the holders of the latest round should pass the
+`round` it received, so that all pages come from one round.
 
 ## Known limitations
 
