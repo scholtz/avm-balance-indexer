@@ -244,8 +244,10 @@ public class IndexerWorkerTests : IDisposable
         await WaitForRoundAsync(storage, Scenario.LastRound);
         storage.RevokeLease();
         await WaitUntilAsync(() => health.LeasesLost == 1 && health.State == WorkerState.Leader && storage.LeasesGranted == 2);
-        adapter.Latest = 6;
+        // The block first, then the tip that announces it: the other way round the indexer can see an announced block that is not there
+        // yet, and a starved test thread turns that into enough consecutive failures to stop the worker.
         adapter.Add(next);
+        adapter.Latest = 6;
         await WaitForRoundAsync(storage, 6);
         await worker.StopAsync(CancellationToken.None);
 
