@@ -86,6 +86,26 @@ public class ReplayTests
     }
 
     [Fact]
+    public void The_Report_Lists_The_Token_Counts_And_The_Holders_Of_The_Top_Tokens()
+    {
+        var assets = new AssetStatistics(
+            new Dictionary<string, int> { ["algo"] = 1, ["asa"] = 40, ["arc200"] = 3 },
+            AssetsCreated: 7,
+            Arc20Assets: 2,
+            [new TopToken("asa:31566704", "USDC", 5_000, 1_234, 2_000), new TopToken("algo:0", "ALGO", 9_000, 900, 900)]);
+        var result = new BenchmarkResult(
+            "postgres", "PostgreSQL 17", "voi", "2026-10-11", "abc", "machine", 100_000, 1, 100_000,
+            new DownloadResult(1, 1, 1), new IndexingResult(1, 1, 1, 1, 0), new StorageSizeResult(1, 1, 1, 1, false, []), [], assets);
+
+        var markdown = Report.Render([result]);
+
+        Assert.Contains("1 native, 3 ARC-200 tokens, 40 ASAs", markdown, StringComparison.Ordinal);
+        Assert.Contains("7 ASAs were created inside the range, 2 of them ARC-20", markdown, StringComparison.Ordinal);
+        Assert.Contains("| asa:31566704 | USDC | 5,000 | 1,234 | 2,000 |", markdown, StringComparison.Ordinal);
+        Assert.DoesNotContain("66 M", markdown, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Without_Results_There_Is_Nothing_To_Report()
     {
         Assert.Throws<ArgumentException>(() => Report.Render([]));

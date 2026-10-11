@@ -28,7 +28,7 @@ public static class Report
         Row(text, "Effects written", ordered, static r => $"{r.Indexing.Effects:N0} ({r.Indexing.EffectsPerSecond:N0}/s)");
         Row(text, "Time for the range", ordered, static r => $"{r.Indexing.Seconds:N1} s");
         Row(text, "Stored size", ordered, static r => $"{r.Storage.TotalBytes / 1048576.0:N1} MiB{(r.Storage.IncludesUnflushedData ? " (sstables only)" : string.Empty)}");
-        Row(text, "Per round", ordered, static r => $"{r.Storage.KilobytesPerRound:N1} KiB");
+        Row(text, "Per round", ordered, static r => $"{r.Storage.KilobytesPerRound:N2} KiB");
         Row(text, "Per effect", ordered, static r => $"{r.Storage.BytesPerEffect:N0} bytes");
         if (first.Chain == "algorand-mainnet")
         {
@@ -46,6 +46,7 @@ public static class Report
         }
 
         text.AppendLine();
+        AppendAssets(text, ordered[0]);
         text.AppendLine("### API latency");
         text.AppendLine();
         text.AppendLine("One request at a time (p50 / p95 / p99), then 16 requests at a time (throughput and p95). The API runs as its own process on the same machine, so network time is not included.");
@@ -63,6 +64,37 @@ public static class Report
 
         return text.ToString();
     }
+
+    private static void AppendAssets(StringBuilder text, BenchmarkResult result)
+    {
+        if (result.Assets is not { } assets)
+        {
+            return;
+        }
+
+        text.AppendLine("### What the range contains");
+        text.AppendLine();
+        text.AppendLine(string.Create(CultureInfo.InvariantCulture, $"Tokens with at least one effect in the range: {string.Join(", ", assets.TokensByKind.OrderBy(static p => p.Key, StringComparer.Ordinal).Select(static p => $"{p.Value:N0} {Label(p.Key)}"))}. {assets.AssetsCreated:N0} ASAs were created inside the range, {assets.Arc20Assets:N0} of them ARC-20 Smart ASAs."));
+        text.AppendLine();
+        text.AppendLine("Holders are counted among the accounts that had an effect in the range (plus the starting balances the replay needed); a token with a long history has more holders on the real chain than shown here. Names exist only for tokens created inside the range.");
+        text.AppendLine();
+        text.AppendLine("| Token | Name | Effects | Holders (non-zero) | Opted in (incl. zero) |");
+        text.AppendLine("|---|---|---:|---:|---:|");
+        foreach (var token in assets.Top)
+        {
+            text.AppendLine(string.Create(CultureInfo.InvariantCulture, $"| {token.Token} | {token.Name ?? string.Empty} | {token.Effects:N0} | {token.Holders:N0} | {token.OptedIn:N0} |"));
+        }
+
+        text.AppendLine();
+    }
+
+    private static string Label(string kind) => kind switch
+    {
+        "algo" => "native",
+        "asa" => "ASAs",
+        "arc200" => "ARC-200 tokens",
+        _ => kind,
+    };
 
     private static void Row(StringBuilder text, string label, BenchmarkResult[] results, Func<BenchmarkResult, string> value) =>
         text.AppendLine($"| {label} | {string.Join(" | ", results.Select(value))} |");

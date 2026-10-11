@@ -57,7 +57,7 @@ var options = new RunOptions(
 
 var result = await Runner.RunAsync(options, cancellation.Token);
 Directory.CreateDirectory(options.OutputDirectory);
-var path = Path.Combine(options.OutputDirectory, $"bench-{result.Provider}.json");
+var path = Path.Combine(options.OutputDirectory, $"bench-{result.Chain}-{result.Provider}.json");
 await File.WriteAllTextAsync(path, JsonSerializer.Serialize(result, BenchmarkResult.Json));
 Console.WriteLine($"Wrote {path}");
 return 0;

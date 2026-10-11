@@ -1,7 +1,9 @@
 # Benchmarks: PostgreSQL against Cassandra
 
-`tools/AvmBalanceIndexer.Benchmark` measures what an operator needs to choose a database: how fast the indexer commits real MainNet data, how
-much disk the data takes, and how fast the API answers on top of it.
+`tools/AvmBalanceIndexer.Benchmark` measures what an operator needs to choose a database: how fast the indexer commits real chain data, how
+much disk the data takes, and how fast the API answers on top of it. Two ranges are measured every night: the 10,000 newest Algorand MainNet
+rounds (dense: about 100 effects per round) and the 100,000 newest Voi rounds (a quiet chain with few transactions, which shows the cost of
+the many near-empty rounds a backfill is made of).
 
 ## What is measured
 
@@ -15,7 +17,10 @@ much disk the data takes, and how fast the API answers on top of it.
 3. **Stored size.** PostgreSQL: `pg_total_relation_size` of every table including indexes, TOAST and partitions, after `VACUUM (ANALYZE)`.
    Cassandra: `nodetool flush` and `compact`, then the exact bytes of `nodetool tablestats` (sstables, compressed, one replica; without the container name the tool falls back to `system_views.disk_usage` at MiB resolution and says so). The estimate for the whole chain
    multiplies the per-round size by 66 million rounds, an upper bound since early rounds carry far less data.
-4. **API.** The real API runs as its own process (`dotnet AvmBalanceIndexer.Api.dll`, rate limit off) and ten request kinds are timed over
+4. **What the range contains.** Per token kind how many tokens had an effect (native, ASA, ARC-200), how many ASAs were created inside the
+   range and how many of those are ARC-20 Smart ASAs, and for the ten tokens with the most effects the number of holders at the last
+   round (non-zero balances, and including opted-in zero balances).
+5. **API.** The real API runs as its own process (`dotnet AvmBalanceIndexer.Api.dll`, rate limit off) and ten request kinds are timed over
    loopback HTTP: 300 sequential requests (p50 / p95 / p99), then 2,000 with 16 in flight (throughput and p95). Accounts are chosen from the data:
    the busiest account, and 500 typical ones drawn from the 90 percent less active.
 
@@ -25,7 +30,7 @@ much disk the data takes, and how fast the API answers on top of it.
 |---|---|
 | Summary of the newest run | Actions, [Nightly benchmark](https://github.com/scholtz/avm-balance-indexer/actions/workflows/benchmark.yml), newest run, summary page |
 | Latest comparison table | branch [`benchmark-results`](https://github.com/scholtz/avm-balance-indexer/tree/benchmark-results), `latest.md` |
-| Raw numbers of every night | the same branch, `history/YYYY-MM-DD-<provider>.json`, and the run artifacts `bench-postgres` / `bench-cassandra` |
+| Raw numbers of every night | the same branch, `history/YYYY-MM-DD-<chain>-<provider>.json`, and the run artifacts `bench-postgres` / `bench-cassandra` (`bench-<chain>-<provider>.json`) |
 | Snapshot in the README | [PostgreSQL or Cassandra?](../README.md#postgresql-or-cassandra) (updated by hand from `latest.md` when something changes) |
 
 The workflow runs at 02:17 UTC and on demand (Actions, Run workflow, optionally with another number of rounds). PostgreSQL and Cassandra each run
@@ -48,7 +53,7 @@ dotnet tools/AvmBalanceIndexer.Benchmark/bin/Release/net10.0/AvmBalanceIndexer.B
 dotnet tools/AvmBalanceIndexer.Benchmark/bin/Release/net10.0/AvmBalanceIndexer.Benchmark.dll report results/bench-cassandra.json results/bench-postgres.json
 ```
 
-`--rounds` changes the size of the range (default 10000), `--last-round` pins its end, `AVM_BENCH_KEEP=1` keeps the database or keyspace afterwards.
+`--chain voi` and `--rounds 100000` measure Voi, `--rounds` changes the size of the range (default 10000), `--last-round` pins its end, `AVM_BENCH_KEEP=1` keeps the database or keyspace afterwards.
 
 ## Reading the numbers
 

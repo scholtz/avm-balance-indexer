@@ -85,6 +85,7 @@ public static class Runner
                 api.AddRange(await MeasureApiAsync(options, settings, blocks, seeder, cancellationToken).ConfigureAwait(false));
             }
 
+            var assets = await CollectAssetsAsync(storage, seeder, blocks.Rounds, cancellationToken).ConfigureAwait(false);
             var machine = $"{RuntimeInformation.OSDescription.Trim()}, {Environment.ProcessorCount} cores, {GC.GetGCMemoryInfo().TotalAvailableMemoryBytes / 1073741824.0:F0} GiB";
             return new BenchmarkResult(
                 options.Provider.ToLowerInvariant(),
@@ -99,12 +100,62 @@ public static class Runner
                 download,
                 indexing,
                 size,
-                api);
+                api,
+                assets);
         }
         finally
         {
             await CleanUpAsync(options, run).ConfigureAwait(false);
         }
+    }
+
+    private const int TopTokens = 10;
+
+    /// <summary>Counts the tokens the range touched per kind and the holders of the busiest ones, read back through the storage contract.</summary>
+    private static async Task<AssetStatistics> CollectAssetsAsync(IChainStorage storage, Seeder seeder, int rounds, CancellationToken cancellationToken)
+    {
+        var perToken = seeder.Touches.GroupBy(static p => p.Key.Token).ToDictionary(static g => g.Key, static g => g.Sum(static p => (long)p.Value));
+        var byKind = perToken.Keys.GroupBy(static t => t.Kind.ToStorageName()).ToDictionary(static g => g.Key, static g => g.Count());
+
+        var created = 0;
+        var arc20 = 0;
+        foreach (var token in perToken.Keys.Where(static t => t.Kind == TokenKind.Asa))
+        {
+            if (await storage.GetAsync(token, cancellationToken).ConfigureAwait(false) is { } record && record.CreatedRound is > 0)
+            {
+                created++;
+                arc20 += record.Standard == TokenStandard.Arc20 ? 1 : 0;
+            }
+        }
+
+        var top = new List<TopToken>();
+        foreach (var (token, effects) in perToken.OrderByDescending(static p => p.Value).Take(TopTokens))
+        {
+            var holders = await CountHoldersAsync(storage, token, (ulong)rounds, includeZero: false, cancellationToken).ConfigureAwait(false);
+            var optedIn = await CountHoldersAsync(storage, token, (ulong)rounds, includeZero: true, cancellationToken).ConfigureAwait(false);
+            var info = await storage.GetAsync(token, cancellationToken).ConfigureAwait(false);
+            top.Add(new TopToken(token.ToString(), info?.Symbol ?? info?.Name, effects, holders, optedIn));
+        }
+
+        var statistics = new AssetStatistics(byKind, created, arc20, [.. top.OrderByDescending(static t => t.Holders)]);
+        var largest = statistics.Top.Count > 0 ? statistics.Top[0] : null;
+        Console.WriteLine($"Tokens touched: {string.Join(", ", byKind.Select(static p => $"{p.Key} {p.Value}"))}; top token {largest?.Token} has {largest?.Holders} holders");
+        return statistics;
+    }
+
+    private static async Task<long> CountHoldersAsync(IChainStorage storage, TokenKey token, ulong round, bool includeZero, CancellationToken cancellationToken)
+    {
+        long count = 0;
+        string? cursor = null;
+        do
+        {
+            var page = await storage.GetHoldersAtRoundAsync(token, round, includeZero, cursor, 1000, cancellationToken).ConfigureAwait(false);
+            count += page.Items.Count;
+            cursor = page.NextCursor;
+        }
+        while (cursor is not null);
+
+        return count;
     }
 
     private static async Task<IReadOnlyList<EndpointResult>> MeasureApiAsync(RunOptions options, Dictionary<string, string?> settings, BlockSet blocks, Seeder seeder, CancellationToken cancellationToken)
@@ -116,6 +167,7 @@ public static class Runner
         var cold = native.Skip(native.Length / 10).OrderBy(_ => random.Next()).Take(500).Select(static p => Text(p.Key.Account)).ToArray();
         string TopToken(TokenKind kind) => seeder.Touches.Where(p => p.Key.Token.Kind == kind).GroupBy(static p => p.Key.Token.TokenId).OrderByDescending(static g => g.Sum(static p => p.Value)).Select(static g => g.Key.ToString(CultureInfo.InvariantCulture)).FirstOrDefault() ?? "0";
         var asa = TopToken(TokenKind.Asa);
+        var arc200 = TopToken(TokenKind.Arc200);
         var middle = blocks.Rounds / 2;
 
         var cases = new List<LoadCase>
@@ -129,11 +181,12 @@ public static class Runner
             new("holders, native, latest", "/tokens/algo/0/holders?limit=100", _ => $"/v1/{chain}/tokens/algo/0/holders?limit=100"),
             new("holders, native, past round", "/tokens/algo/0/holders?round=N&limit=100", _ => $"/v1/{chain}/tokens/algo/0/holders?round={middle}&limit=100"),
             new("holders, busiest ASA, latest", "/tokens/asa/{id}/holders?limit=100", _ => $"/v1/{chain}/tokens/asa/{asa}/holders?limit=100"),
+            new("holders, busiest ARC-200, latest", "/tokens/arc200/{id}/holders?limit=100", _ => arc200 == "0" ? $"/v1/{chain}/tokens/algo/0/holders?limit=100" : $"/v1/{chain}/tokens/arc200/{arc200}/holders?limit=100"),
             new("token info", "/tokens/algo/0", _ => $"/v1/{chain}/tokens/algo/0"),
         };
 
         var environment = settings.Where(static p => p.Value is not null).ToDictionary(static p => p.Key.Replace(":", "__", StringComparison.Ordinal), static p => p.Value!);
-        await using var load = await ApiLoad.StartAsync(options.ApiDll!, environment, 5088, cancellationToken).ConfigureAwait(false);
+        await using var load = await ApiLoad.StartAsync(options.ApiDll!, environment, FreePort(), cancellationToken).ConfigureAwait(false);
         var results = new List<EndpointResult>();
         foreach (var test in cases)
         {
@@ -143,6 +196,13 @@ public static class Runner
         }
 
         return results;
+    }
+
+    private static int FreePort()
+    {
+        using var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        listener.Start();
+        return ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
     }
 
     private static string Text(Address address) => new Algorand.Address(address.ToArray()).EncodeAsString();
