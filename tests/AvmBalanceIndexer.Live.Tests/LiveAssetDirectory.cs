@@ -4,39 +4,26 @@ using AvmBalanceIndexer.Indexing.Normalization;
 
 namespace AvmBalanceIndexer.Live.Tests;
 
-/// <summary>Resolves the assets a mid-chain block destroys from the public indexer and the creating block, since the live tests do not index from genesis.</summary>
+/// <summary>
+/// Resolves the assets a mid-chain block destroys or reconfigures, since the live tests do not index from genesis: the creation
+/// round comes from the public indexer and the record from normalizing the creating block.
+/// </summary>
 public static class LiveAssetDirectory
 {
     public static async Task<AssetDirectory> LoadAsync(ReferenceNode reference, AlgorandChainAdapter adapter, BlockData block)
     {
+        var normalizer = new AlgoEffectNormalizer();
         var records = new List<TokenInfo>();
-        foreach (var assetId in AssetScanner.DestroyedAssets(block))
+        foreach (var assetId in AssetScanner.ReferencedAssets(block))
         {
-            // The indexer reports a destroyed asset with total 0, so the supply is read from the creating transaction.
-            var (creator, createdAt) = await reference.AssetAsync(assetId);
+            var (_, createdAt) = await reference.AssetAsync(assetId);
             var creation = await adapter.FetchBlockAsync(createdAt, CancellationToken.None);
-            var parameters = FindCreation(creation.ApplyData, assetId) ?? throw new InvalidOperationException($"Asset {assetId} was not created in round {createdAt}.");
-            records.Add(AssetRecords.Created(assetId, creator, parameters, createdAt));
+            var previous = await adapter.FetchBlockAsync(createdAt - 1, CancellationToken.None);
+            var created = normalizer.NormalizeBlock(creation, RewardsState.FromHeader(previous.Block), await LoadAsync(reference, adapter, creation))
+                .TokenChanges.LastOrDefault(t => t.Key == TokenKey.Asa(assetId));
+            records.Add(created ?? throw new InvalidOperationException($"Asset {assetId} was not created in round {createdAt}."));
         }
 
         return new AssetDirectory(records);
-    }
-
-    private static RawAssetParams? FindCreation(IEnumerable<TxnApplyData> transactions, ulong assetId)
-    {
-        foreach (var apply in transactions)
-        {
-            if (apply.CreatedAssetId == assetId)
-            {
-                return RawTransaction.Read(apply.RawTxn).Params;
-            }
-
-            if (FindCreation(apply.InnerTxns, assetId) is { } inner)
-            {
-                return inner;
-            }
-        }
-
-        return null;
     }
 }

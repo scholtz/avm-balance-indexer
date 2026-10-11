@@ -238,7 +238,7 @@ public sealed partial class RoundIndexer(
                 $"Round {block.Round} does not link to the published round {previous.IndexedRound}. The database must be rebuilt.");
         }
 
-        var normalized = normalizer.NormalizeBlock(block, previousRewards, await LoadDestroyedAssetsAsync(block, cancellationToken).ConfigureAwait(false));
+        var normalized = normalizer.NormalizeBlock(block, previousRewards, await LoadReferencedAssetsAsync(block, cancellationToken).ConfigureAwait(false));
         var round = await tracker.ApplyAsync(normalized.Deltas, cancellationToken).ConfigureAwait(false);
 
         // Token records are written before the round is published: a crash in between only leaves rows that replaying the
@@ -287,16 +287,17 @@ public sealed partial class RoundIndexer(
         return false;
     }
 
-    private async Task<AssetDirectory> LoadDestroyedAssetsAsync(BlockData block, CancellationToken cancellationToken)
+    private async Task<AssetDirectory> LoadReferencedAssetsAsync(BlockData block, CancellationToken cancellationToken)
     {
-        var destroyed = AssetScanner.DestroyedAssets(block);
-        if (destroyed.Count == 0)
+        // Destroying and reconfiguring an asset both need the record written when it was created.
+        var referenced = AssetScanner.ReferencedAssets(block);
+        if (referenced.Count == 0)
         {
             return AssetDirectory.Empty;
         }
 
-        var records = new List<TokenInfo>(destroyed.Count);
-        foreach (var assetId in destroyed)
+        var records = new List<TokenInfo>(referenced.Count);
+        foreach (var assetId in referenced)
         {
             if (await storage.GetAsync(TokenKey.Asa(assetId), cancellationToken).ConfigureAwait(false) is { } record)
             {

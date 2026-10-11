@@ -146,6 +146,56 @@ public sealed class ReferenceNode : IDisposable
         return (new Address(new Algorand.Address(asset.GetProperty("params").GetProperty("creator").GetString()!).Bytes), asset.GetProperty("created-at-round").GetUInt64());
     }
 
+    /// <summary>
+    /// Asset creations (top-level or inner) the public indexer lists for rounds <paramref name="minRound"/> to <paramref name="maxRound"/>:
+    /// (round, created asset id, creator).
+    /// </summary>
+    public async Task<IReadOnlyList<(ulong Round, ulong AssetId, Address Creator)>> AssetCreationsAsync(ulong minRound, ulong maxRound, int limit)
+    {
+        using var json = await GetJsonAsync($"{_indexer}/v2/transactions?tx-type=acfg&min-round={minRound}&max-round={maxRound}&limit={limit}").ConfigureAwait(false);
+        var result = new List<(ulong, ulong, Address)>();
+        foreach (var transaction in json.RootElement.GetProperty("transactions").EnumerateArray())
+        {
+            Collect(transaction, transaction.GetProperty("confirmed-round").GetUInt64(), result);
+        }
+
+        return result;
+
+        static void Collect(JsonElement transaction, ulong round, List<(ulong, ulong, Address)> into)
+        {
+            if (transaction.TryGetProperty("created-asset-index", out var created))
+            {
+                into.Add((round, created.GetUInt64(), new Address(new Algorand.Address(transaction.GetProperty("sender").GetString()!).Bytes)));
+            }
+
+            if (transaction.TryGetProperty("inner-txns", out var inner))
+            {
+                foreach (var child in inner.EnumerateArray())
+                {
+                    Collect(child, round, into);
+                }
+            }
+        }
+    }
+
+    /// <summary>Assets the public indexer lists for a unit name, with their creation round and clawback address.</summary>
+    public async Task<IReadOnlyList<(ulong AssetId, ulong CreatedAtRound, bool DefaultFrozen, string Clawback)>> AssetsByUnitAsync(string unit, int limit)
+    {
+        using var json = await GetJsonAsync($"{_indexer}/v2/assets?unit={Uri.EscapeDataString(unit)}&limit={limit}").ConfigureAwait(false);
+        return
+        [
+            .. json.RootElement.GetProperty("assets").EnumerateArray().Select(static a =>
+            {
+                var parameters = a.GetProperty("params");
+                return (
+                    a.GetProperty("index").GetUInt64(),
+                    a.GetProperty("created-at-round").GetUInt64(),
+                    parameters.TryGetProperty("default-frozen", out var frozen) && frozen.GetBoolean(),
+                    parameters.TryGetProperty("clawback", out var clawback) ? clawback.GetString()! : string.Empty);
+            }),
+        ];
+    }
+
     /// <summary>Distinct rounds of the newest ARC-200 transfers the ARC indexer lists, newest first.</summary>
     public async Task<IReadOnlyList<ulong>> RecentArc200RoundsAsync(int transfers)
     {
