@@ -27,6 +27,18 @@ public class BackfillBenchmark(PostgresFixture postgres, ITestOutputHelper outpu
         var options = new AlgorandChainOptions { Chain = ChainId.AlgorandMainnet, MaxAttempts = 30, BaseRetryDelay = TimeSpan.FromMilliseconds(200), MaxRetryDelay = TimeSpan.FromSeconds(3) };
         var inner = AlgorandChainFactory.Create(options, http, NullLoggerFactory.Instance);
 
+        foreach (var concurrency in new[] { 64, 256 })
+        {
+            // Early blocks are tiny, so this isolates request latency and host behaviour from payload size.
+            var started = Stopwatch.StartNew();
+            var early = 3_000_000UL + (ulong)(concurrency * 5_000);
+            await foreach (var _ in OrderedPrefetch.StreamAsync(early, early + 1_199, concurrency, inner.FetchBlockAsync, CancellationToken.None))
+            {
+            }
+
+            output.WriteLine($"early (small) blocks, concurrency {concurrency}: {1200 / started.Elapsed.TotalSeconds:F0} rounds/s");
+        }
+
         foreach (var concurrency in new[] { 8, 32, 96, 192 })
         {
             var cpuBefore = Process.GetCurrentProcess().TotalProcessorTime;

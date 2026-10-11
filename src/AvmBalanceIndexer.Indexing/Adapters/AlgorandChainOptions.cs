@@ -36,7 +36,7 @@ public sealed class AlgorandChainOptions : IValidatableObject
 
     /// <summary>Timeout of one HTTP attempt.</summary>
     [Range(typeof(TimeSpan), "00:00:01", "00:10:00")]
-    public TimeSpan RequestTimeout { get; set; } = TimeSpan.FromSeconds(20);
+    public TimeSpan RequestTimeout { get; set; } = TimeSpan.FromSeconds(10);
 
     /// <summary>First retry delay; doubled per attempt up to <see cref="MaxRetryDelay"/> with full jitter.</summary>
     [Range(typeof(TimeSpan), "00:00:00", "00:01:00")]
