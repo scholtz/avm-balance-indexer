@@ -1,0 +1,104 @@
+name: Deploy production
+
+# A version tag (v1.2.3) on a commit of main builds the images, pushes them to Docker Hub and upgrades the production releases:
+#   mainnet (algorand-mainnet, https://mainnet.balance-indexer.biatec.io) and then voi (https://voi.balance-indexer.biatec.io).
+# Run it by hand with an existing image tag to redeploy or roll back (no build). The `production` environment can require a reviewer.
+# See docs/deployment-pipelines.md.
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+  workflow_dispatch:
+    inputs:
+      image-tag:
+        description: Existing image tag to deploy (for example v1.2.3 or main-abc1234)
+        required: true
+      ref:
+        description: Commit or tag of main whose chart and values are used (default is the image tag, which then has to be a git tag)
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    name: Choose what to deploy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      sha: ${{ steps.plan.outputs.sha }}
+      tag: ${{ steps.plan.outputs.tag }}
+      build: ${{ steps.plan.outputs.build }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          IMAGE_TAG: ${{ inputs.image-tag }}
+          REQUESTED: ${{ inputs.ref }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$EVENT" = push ]; then
+            sha="$(git rev-parse HEAD)"
+            git merge-base --is-ancestor "$sha" origin/main || { echo "::error::Tag ${GITHUB_REF_NAME} is not on main; only commits of main are released"; exit 1; }
+            # CI (build, tests, live checks) must have passed on exactly this commit.
+            passed="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${sha}&status=success" --jq '.total_count')"
+            [ "${passed:-0}" -gt 0 ] || { echo "::error::CI has not succeeded on ${sha}; wait for it (or re-run it) and push the tag again"; exit 1; }
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          else
+            # The chart and values of a rollback must match the image: say which commit (or tag) they come from.
+            [ -n "$REQUESTED" ] || REQUESTED="$IMAGE_TAG"
+            sha="$(git rev-parse --verify --quiet "${REQUESTED}^{commit}")" || { echo "::error::'${REQUESTED}' is not a commit or tag of this repository; pass the ref input"; exit 1; }
+            git merge-base --is-ancestor "$sha" origin/main || { echo "::error::${REQUESTED} is not on main; only commits of main are deployed"; exit 1; }
+            echo "tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+  images:
+    name: Images
+    needs: plan
+    if: needs.plan.outputs.build == 'true'
+    uses: ./.github/workflows/docker-publish.yml
+    with:
+      ref: ${{ needs.plan.outputs.sha }}
+      tags: |
+        ${{ needs.plan.outputs.tag }}
+        latest
+    secrets: inherit
+
+  mainnet:
+    name: Algorand MainNet
+    needs: [plan, images]
+    # Run when the images were built, or skipped on purpose for a redeploy; not when the build failed.
+    if: ${{ !cancelled() && !failure() && needs.plan.result == 'success' }}
+    uses: ./.github/workflows/helm-deploy.yml
+    with:
+      environment: production
+      ref: ${{ needs.plan.outputs.sha }}
+      release: mainnet
+      values: prod-algorand.yaml
+      chain: algorand-mainnet
+      host: mainnet.balance-indexer.biatec.io
+      image-tag: ${{ needs.plan.outputs.tag }}
+    secrets: inherit
+
+  voi:
+    name: Voi
+    needs: [plan, mainnet]
+    if: ${{ !cancelled() && !failure() && needs.plan.result == 'success' }}
+    uses: ./.github/workflows/helm-deploy.yml
+    with:
+      environment: production
+      ref: ${{ needs.plan.outputs.sha }}
+      release: voi
+      values: prod-voi.yaml
+      chain: voi
+      host: voi.balance-indexer.biatec.io
+      image-tag: ${{ needs.plan.outputs.tag }}
+    secrets: inherit

@@ -1,0 +1,146 @@
+name: Helm deploy
+
+# Installs or upgrades one release of the chart in the namespace avm-balance-indexer, using the kube config in the secret KUBE_CONFIG.
+# Called by deploy-testnet.yml and deploy-production.yml; see docs/deployment-pipelines.md.
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: GitHub environment (testnet or production); environment secrets override repository secrets
+        type: string
+        required: true
+      ref:
+        description: Commit whose chart is deployed
+        type: string
+        required: true
+      release:
+        description: Helm release name (testnet, mainnet, voi)
+        type: string
+        required: true
+      values:
+        description: Values overlay in deploy/helm/values
+        type: string
+        required: true
+      chain:
+        type: string
+        required: true
+      host:
+        description: Public host name of the API, used for the smoke test
+        type: string
+        required: true
+      image-tag:
+        description: Tag of the images to run
+        type: string
+        required: true
+      require-head-of-main:
+        description: Refuse to deploy when ref is no longer the head of main (an older run must not roll back a newer one)
+        type: boolean
+        default: false
+    secrets:
+      KUBE_CONFIG:
+        required: true
+      DOCKERHUB_USERNAME:
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  NAMESPACE: avm-balance-indexer
+
+jobs:
+  guard:
+    name: Is this still wanted?
+    runs-on: ubuntu-latest
+    outputs:
+      go: ${{ steps.head.outputs.go }}
+    steps:
+      - id: head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ inputs.ref }}
+          REQUIRE_HEAD: ${{ inputs.require-head-of-main }}
+        run: |
+          head="$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq .sha)"
+          if [ "$REQUIRE_HEAD" = true ] && [ "$head" != "$SHA" ]; then
+            echo "::notice::$SHA is no longer the head of main ($head); the newer run deploys"
+            echo "go=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  deploy:
+    name: Deploy ${{ inputs.release }}
+    needs: guard
+    if: needs.guard.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    # Two deployments of one release must not run at the same time; a newer one waits instead of cancelling a running upgrade.
+    concurrency:
+      group: deploy-${{ inputs.release }}
+      cancel-in-progress: false
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: azure/setup-helm@v5
+      - uses: azure/setup-kubectl@v4
+      - name: Kube config
+        env:
+          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
+        run: |
+          mkdir -p ~/.kube
+          # The secret may hold the YAML itself or its base64 encoding.
+          if printf '%s' "$KUBE_CONFIG" | grep -q 'apiVersion:'; then
+            printf '%s' "$KUBE_CONFIG" > ~/.kube/config
+          else
+            printf '%s' "$KUBE_CONFIG" | base64 -d > ~/.kube/config
+          fi
+          chmod 600 ~/.kube/config
+          kubectl -n "$NAMESPACE" get pods > /dev/null
+      - name: Upgrade the release
+        env:
+          RELEASE: ${{ inputs.release }}
+          VALUES: ${{ inputs.values }}
+          CHAIN: ${{ inputs.chain }}
+          IMAGE_TAG: ${{ inputs.image-tag }}
+          CASSANDRA_NODE: ${{ vars.CASSANDRA_NODE }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+        run: |
+          if ! [[ "$IMAGE_TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then echo "::error::Invalid image tag"; exit 1; fi
+          if [ -z "$CASSANDRA_NODE" ]; then
+            echo "::error::Set the Actions variable CASSANDRA_NODE to the name of the node that owns /mnt/nvme1/avm-balance-indexer (docs/deployment-pipelines.md)"; exit 1
+          fi
+          common=(--namespace "$NAMESPACE" -f "deploy/helm/values/$VALUES"
+            --set-string "image.repository=docker.io/${DOCKERHUB_USERNAME}/avm-balance-indexer"
+            --set-string "cassandra.embedded.node=$CASSANDRA_NODE" --atomic --timeout 25m)
+
+          # Upgrade rules of docs/operations.md: the worker first (it applies schema changes; Recreate so that no old writer runs meanwhile),
+          # the API only after the new worker is ready. A first installation has nothing to protect and goes in one step.
+          api_image="$(kubectl -n "$NAMESPACE" get deployment "${RELEASE}-${CHAIN}-api" -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || true)"
+          if [ -n "$api_image" ] && [ "${api_image##*:}" != "$IMAGE_TAG" ]; then
+            echo "Step 1: worker ${IMAGE_TAG}, API stays on ${api_image##*:}"
+            helm upgrade --install "$RELEASE" deploy/helm/avm-balance-indexer "${common[@]}" \
+              --set-string "image.tag=$IMAGE_TAG" --set-string "image.apiTag=${api_image##*:}" --set worker.strategy=Recreate
+          fi
+          echo "Step 2: everything on ${IMAGE_TAG}"
+          helm upgrade --install "$RELEASE" deploy/helm/avm-balance-indexer "${common[@]}" --set-string "image.tag=$IMAGE_TAG"
+      - name: What runs
+        if: always()
+        env:
+          RELEASE: ${{ inputs.release }}
+        run: |
+          kubectl -n "$NAMESPACE" get pods,svc,ingress -l "app.kubernetes.io/instance=$RELEASE" -o wide || true
+      - name: Smoke test
+        env:
+          HOST: ${{ inputs.host }}
+          CHAIN: ${{ inputs.chain }}
+        run: |
+          # The ingress and its certificate can take a few minutes after the first install; a failure here is a warning, not a failed deployment.
+          if curl -fsS --retry 12 --retry-delay 15 --retry-all-errors "https://${HOST}/v1/${CHAIN}/status"; then
+            echo
+          else
+            echo "::warning::https://${HOST}/v1/${CHAIN}/status did not answer; check the ingress, DNS and the certificate"
+          fi

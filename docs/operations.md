@@ -51,6 +51,8 @@ expose the worker health port outside the cluster.
 
 ## Upgrade
 
+The GitHub deploy workflows (docs/deployment-pipelines.md, ADR 0013) perform both rules below themselves; the commands are for manual upgrades.
+
 Rules that every release has to respect (they come from the ADRs):
 
 1. **Upgrade the worker first.** Every worker replica applies pending schema changes when it starts (ADR 0005 migrations, ADR 0012 scan tables). The API must not be upgraded

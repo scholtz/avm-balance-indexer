@@ -2,12 +2,16 @@
 chain: algorand-testnet
 
 image:
-  repository: ghcr.io/scholtz/avm-balance-indexer
+  # The images are <repository>-api and <repository>-worker (Docker Hub allows only user/repository names).
+  repository: docker.io/scholtz/avm-balance-indexer
   tag: ""          # defaults to Chart.appVersion
   # Per-component tags (default: tag). Upgrade the worker first by setting workerTag alone, then apiTag (docs/operations.md).
   apiTag: ""
   workerTag: ""
   pullPolicy: IfNotPresent
+
+# Pull secrets for a private registry (names of existing kubernetes.io/dockerconfigjson Secrets).
+imagePullSecrets: []
 
 storage:
   # PostgreSql | Cassandra  -- selected per deployment, never dual-written.
@@ -35,6 +39,38 @@ storage:
     replicationFactor: 3
     # Secret with keys "username" and "password"
     existingSecret: ""
+
+# A single-node Cassandra started by this release, for clusters without a database operator.
+# Needs storage.provider=Cassandra and storage.cassandra.replicationFactor=1. The data lives in a directory of one node.
+cassandra:
+  embedded:
+    enabled: false
+    # Directory on the node that keeps the data (created when missing). Required when enabled.
+    hostPath: ""
+    # Name of the node (label kubernetes.io/hostname) that owns the directory. Required (or nodeSelector): the pod must never
+    # start on another node, where the directory would be created empty and a new, empty database would be indexed.
+    node: ""
+    # Extra node labels instead of or in addition to the node name.
+    nodeSelector: {}
+    image: cassandra:5.0
+    initImage: busybox:1.37
+    maxHeapSize: 2G
+    heapNewSize: 400M
+    resources:
+      requests: { cpu: "1", memory: 3Gi }
+      limits: { memory: 4Gi }
+
+ingress:
+  enabled: false
+  className: ""
+  host: ""
+  annotations: {}
+  tls:
+    enabled: false
+    # Secret that holds the certificate; defaults to <release>-<chain>-tls (created by cert-manager when clusterIssuer is set).
+    secretName: ""
+    # Adds the cert-manager.io/cluster-issuer annotation, for example letsencrypt-prod.
+    clusterIssuer: ""
 
 api:
   replicaCount: 2

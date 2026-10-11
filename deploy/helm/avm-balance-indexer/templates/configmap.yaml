@@ -38,7 +38,11 @@ data:
   Storage__Cassandra__ReplicationFactor: {{ .Values.storage.cassandra.replicationFactor | quote }}
   Storage__Cassandra__Keyspace: {{ .Values.storage.cassandra.keyspace | quote }}
   Storage__Cassandra__LocalDatacenter: {{ .Values.storage.cassandra.localDatacenter | quote }}
-  {{- range $i, $cp := .Values.storage.cassandra.contactPoints }}
+  {{- $contactPoints := .Values.storage.cassandra.contactPoints }}
+  {{- if and .Values.cassandra.embedded.enabled (not $contactPoints) }}
+  {{- $contactPoints = list (printf "%s-cassandra" (include "avm.fullname" .)) }}
+  {{- end }}
+  {{- range $i, $cp := $contactPoints }}
   Storage__Cassandra__ContactPoints__{{ $i }}: {{ $cp | quote }}
   {{- end }}
   Algorand__AlgodUrl: {{ .Values.algorand.algodUrl | quote }}

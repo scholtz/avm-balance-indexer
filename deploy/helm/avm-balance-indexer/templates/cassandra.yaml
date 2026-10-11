@@ -1,0 +1,128 @@
+{{- if .Values.cassandra.embedded.enabled }}
+{{- if ne .Values.storage.provider "Cassandra" }}
+{{- fail "cassandra.embedded.enabled needs storage.provider=Cassandra" }}
+{{- end }}
+{{- if not (or .Values.cassandra.embedded.node .Values.cassandra.embedded.nodeSelector) }}
+{{- fail "cassandra.embedded.node (or nodeSelector) is required: the data directory belongs to one machine, the pod must always run there" }}
+{{- end }}
+{{- if ne (int .Values.storage.cassandra.replicationFactor) 1 }}
+{{- fail "the embedded single-node Cassandra needs storage.cassandra.replicationFactor=1" }}
+{{- end }}
+{{- $data := required "cassandra.embedded.hostPath is required (directory on the node that keeps the data)" .Values.cassandra.embedded.hostPath }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "avm.fullname" . }}-cassandra
+  labels: {{- include "avm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cassandra
+spec:
+  clusterIP: None
+  ports:
+    - name: cql
+      port: 9042
+      targetPort: cql
+  selector: {{- include "avm.selectorLabels" (merge (dict "component" "cassandra") .) | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "avm.fullname" . }}-cassandra
+  labels: {{- include "avm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cassandra
+spec:
+  # One node: the data lives in one directory of one machine (hostPath), so a second replica could not share it.
+  replicas: 1
+  serviceName: {{ include "avm.fullname" . }}-cassandra
+  selector:
+    matchLabels: {{- include "avm.selectorLabels" (merge (dict "component" "cassandra") .) | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "avm.labels" . | nindent 8 }}
+        app.kubernetes.io/component: cassandra
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      nodeSelector:
+        {{- if .Values.cassandra.embedded.node }}
+        kubernetes.io/hostname: {{ .Values.cassandra.embedded.node | quote }}
+        {{- end }}
+        {{- with .Values.cassandra.embedded.nodeSelector }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      terminationGracePeriodSeconds: 120
+      initContainers:
+        # The kubelet creates a missing hostPath directory owned by root; Cassandra runs as uid 999.
+        - name: data-permissions
+          image: {{ .Values.cassandra.embedded.initImage }}
+          # Only when the top directory is not yet Cassandra's: a recursive chown of a large data set on every start would delay it for minutes.
+          command: ["sh", "-c", "[ \"$(stat -c %u /var/lib/cassandra)\" = 999 ] || chown -R 999:999 /var/lib/cassandra"]
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/cassandra
+      containers:
+        - name: cassandra
+          image: {{ .Values.cassandra.embedded.image }}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: cql
+              containerPort: 9042
+          env:
+            - name: CASSANDRA_CLUSTER_NAME
+              value: {{ include "avm.fullname" . | quote }}
+            - name: CASSANDRA_DC
+              value: {{ .Values.storage.cassandra.localDatacenter | quote }}
+            - name: CASSANDRA_ENDPOINT_SNITCH
+              value: GossipingPropertyFileSnitch
+            - name: MAX_HEAP_SIZE
+              value: {{ .Values.cassandra.embedded.maxHeapSize | quote }}
+            - name: HEAP_NEWSIZE
+              value: {{ .Values.cassandra.embedded.heapNewSize | quote }}
+          startupProbe:
+            tcpSocket: { port: cql }
+            periodSeconds: 10
+            failureThreshold: 360
+          readinessProbe:
+            tcpSocket: { port: cql }
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: { port: cql }
+            periodSeconds: 20
+            failureThreshold: 6
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sh", "-c", "nodetool drain"]
+          resources: {{- toYaml .Values.cassandra.embedded.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/cassandra
+      volumes:
+        - name: data
+          hostPath:
+            path: {{ $data | quote }}
+            type: DirectoryOrCreate
+{{- if .Values.networkPolicy.enabled }}
+---
+# Only this release's API and worker pods may talk to the embedded database.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "avm.fullname" . }}-cassandra
+  labels: {{- include "avm.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "avm.selectorLabels" (merge (dict "component" "cassandra") .) | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: {{ .Release.Name }}
+              avm.scholtz.sk/chain: {{ .Values.chain }}
+      ports:
+        - port: 9042
+{{- end }}
+{{- end }}
