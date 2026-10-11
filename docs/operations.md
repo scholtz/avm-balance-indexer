@@ -55,8 +55,10 @@ Rules that every release has to respect (they come from the ADRs):
 
 1. **Upgrade the worker first.** Every worker replica applies pending schema changes when it starts (ADR 0005 migrations, ADR 0012 scan tables). The API must not be upgraded
    before a new worker has applied the schema: newer queries select new columns. Do it in two steps with the per-component image tags:
-   `helm upgrade ... --set image.workerTag=<new>` (the API keeps `image.tag`, which still holds the old version), wait until the new workers are ready, then
-   `helm upgrade ... --set image.tag=<new> --set image.workerTag=` (or set `image.apiTag`).
+   `helm upgrade ... --set image.apiTag=<old> --set image.workerTag=<new>`, wait until the new workers are ready (`kubectl rollout status`), then
+   `helm upgrade ... --set image.tag=<new>` (without the two per-component tags). Migrations are additive (new tables and columns that the previous API simply
+   does not use), which is what keeps the old API working in between; a release with a breaking migration says so in its notes and needs the API scaled to 0 for the
+   duration.
 2. **No writer of the previous version may run while a migration is applied.** With the default `worker.strategy: RollingUpdate` an old replica can keep the writer lease while a
    new pod applies the schema, whatever the replica count. For a release that contains a migration (the release notes say so) set `worker.strategy=Recreate`, or scale the worker to 0 before
    the upgrade and back afterwards, so that the old writer is gone first.
@@ -87,7 +89,7 @@ Set `telemetry.otlpEndpoint` (ADR 0011). The metrics:
 | `avm.indexer.status_age_seconds` | Critical above a few minutes: the writer has not updated the status (stuck, no leader, database away). |
 | `avm.indexer.indexed_round` | Should rise by about one round per few seconds on MainNet; flat means stuck. |
 | `avm.indexer.status_sample_failures` | Rises while a replica cannot read the database; the other `avm.indexer.*` gauges are then stale. |
-| `avm.worker.is_leader` | The sum over replicas must be 1; 0 for longer than the lease time is critical, 2 is a bug. |
+| `avm.worker.is_leader` | The sum over live replicas should be 1. Alert when it is 0 for longer than the lease time plus a minute. A sum of 2 can appear for a moment while an old pod's last sample is still visible: alert only when it lasts several minutes (`for: 5m`). |
 | `avm.worker.leases_lost` | Alert on a rate above a few per hour (flapping connection or Cassandra timeouts). |
 | `avm.worker.leases_acquired` | A step of 1 is a failover; many in a short time is flapping. |
 | `avm.worker.transient_failures` | Sustained growth means the archive, algod or the database is unhealthy. |

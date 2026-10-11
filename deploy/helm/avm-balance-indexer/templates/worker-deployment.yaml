@@ -4,6 +4,9 @@ metadata:
   name: {{ include "avm.fullname" . }}-worker
   labels: {{- include "avm.labels" . | nindent 4 }}
     app.kubernetes.io/component: worker
+{{- if not (has .Values.worker.strategy (list "RollingUpdate" "Recreate")) }}
+{{- fail (printf "worker.strategy must be RollingUpdate or Recreate, not %q" .Values.worker.strategy) }}
+{{- end }}
 spec:
   replicas: {{ .Values.worker.replicaCount }}
   # Several replicas may run: the writer lease keeps exactly one of them indexing, the others stand by.

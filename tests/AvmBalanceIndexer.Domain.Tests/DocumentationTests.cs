@@ -43,7 +43,11 @@ public partial class DocumentationTests
     private static partial Regex Metric();
 
     /// <summary>The text of one options class, found by its name among the source files.</summary>
-    private static string ClassText(string name)
+    private static string ClassText(string name) => ClassTexts.GetOrAdd(name, static n => FindClassText(n));
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> ClassTexts = new();
+
+    private static string FindClassText(string name)
     {
         foreach (var file in SourceFiles.Value)
         {
@@ -81,7 +85,7 @@ public partial class DocumentationTests
 
             Assert.True(Sections.TryGetValue(section, out var type), $"{key}: the section {section} is not a known options section.");
             Assert.True(
-                Regex.IsMatch(ClassText(type!), $@"public [\w<>\[\]?, ]+ {property} \{{ get; set; \}}", RegexOptions.None, TimeSpan.FromSeconds(5)),
+                Regex.IsMatch(ClassText(type!), $@"public [\w<>\[\]?, ]+ {property} \{{ get; (?:set|init); \}}", RegexOptions.None, TimeSpan.FromSeconds(5)),
                 $"{key} is in the runbook but {type} has no property {property}.");
         }
     }
