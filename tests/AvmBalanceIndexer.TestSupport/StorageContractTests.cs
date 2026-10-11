@@ -52,6 +52,21 @@ public abstract class StorageContractTests
     }
 
     [Fact]
+    public async Task Progress_Updates_Change_Target_State_And_Time_But_Never_The_Cursor()
+    {
+        var storage = await IndexedAsync();
+        var published = (await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!;
+        var later = DateTimeOffset.UnixEpoch.AddYears(30);
+
+        await storage.UpdateProgressAsync(published with { TargetRound = 99, State = IngestionState.Following, UpdatedAt = later }, CancellationToken.None);
+        await storage.UpdateProgressAsync(published with { IndexedRound = 2, TargetRound = 1, State = IngestionState.Failed }, CancellationToken.None);
+
+        var status = (await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!;
+        Assert.Equal((LastRound, 99UL, IngestionState.Following, later), (status.IndexedRound, status.TargetRound, status.State, status.UpdatedAt));
+        Assert.Equal(published.IndexedBlockHash.ToArray(), status.IndexedBlockHash.ToArray());
+    }
+
+    [Fact]
     public async Task Native_Token_Metadata_Is_Stored()
     {
         var storage = await IndexedAsync(1);

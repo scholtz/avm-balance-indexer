@@ -14,7 +14,8 @@ public sealed partial class SrvGossipHostProvider(
     TimeProvider? timeProvider = null) : IGossipHostProvider, IDisposable
 {
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
-    private static readonly TimeSpan RetryAfterFailure = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan RetryStaleAfterFailure = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan RetryEmptyAfterFailure = TimeSpan.FromSeconds(5);
     private readonly SemaphoreSlim _gate = new(1, 1);
     private volatile Snapshot? _snapshot;
 
@@ -52,14 +53,14 @@ public sealed partial class SrvGossipHostProvider(
                 if (_snapshot is { Hosts.Length: > 0 } stale)
                 {
                     // Keep serving the last known hosts and look again soon.
-                    _snapshot = stale with { Expires = _time.GetUtcNow() + RetryAfterFailure };
+                    _snapshot = stale with { Expires = _time.GetUtcNow() + RetryStaleAfterFailure };
                     LogRefreshFailed(logger, ex, network, stale.Hosts.Length);
                 }
                 else
                 {
                     // Nothing to fall back on. Remember the failure briefly so that concurrent fetches do not each repeat the
                     // blocking lookup; they see no hosts and fail fast, and the next lookup happens once the pause is over.
-                    _snapshot = new Snapshot([], _time.GetUtcNow() + RetryAfterFailure);
+                    _snapshot = new Snapshot([], _time.GetUtcNow() + RetryEmptyAfterFailure);
                     throw;
                 }
             }

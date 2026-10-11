@@ -35,6 +35,27 @@ public class IndexerWorkerTests : IDisposable
     }
 
     [Fact]
+    public async Task An_Idle_Indexer_At_The_Tip_Keeps_The_Published_Timestamp_Moving()
+    {
+        var storage = NewStorage();
+        var (worker, _) = Create(storage, Scenario.Adapter(), maxFailures: 10);
+
+        await worker.StartAsync(CancellationToken.None);
+        await WaitForRoundAsync(storage, Scenario.LastRound);
+        var first = (await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!.UpdatedAt;
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        while ((await storage.GetAsync(ChainId.AlgorandTestnet, timeout.Token))!.UpdatedAt <= first)
+        {
+            await Task.Delay(10, timeout.Token);
+        }
+
+        await worker.StopAsync(CancellationToken.None);
+
+        var status = (await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!;
+        Assert.Equal((Scenario.LastRound, IngestionState.Following), (status.IndexedRound, status.State));
+    }
+
+    [Fact]
     public async Task The_Failure_Count_Resets_When_Rounds_Were_Indexed_In_Between()
     {
         var storage = NewStorage();

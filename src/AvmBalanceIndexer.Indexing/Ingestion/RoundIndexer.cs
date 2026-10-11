@@ -88,6 +88,9 @@ public sealed partial class RoundIndexer(
                     break;
                 }
 
+                // Caught up: keep the published target and timestamp moving so an idle indexer is distinguishable from a stalled one.
+                status = status with { TargetRound = latest, State = IngestionState.Following, UpdatedAt = _time.GetUtcNow() };
+                await storage.UpdateProgressAsync(status, cancellationToken).ConfigureAwait(false);
                 await Task.Delay(_options.FollowPollInterval, _time, cancellationToken).ConfigureAwait(false);
                 continue;
             }
