@@ -56,6 +56,26 @@ public class HostingExtensionsTests
     }
 
     [Fact]
+    public void Telemetry_Is_Off_Unless_An_Endpoint_Or_The_Switch_Is_Configured()
+    {
+        var off = new ServiceCollection().AddAvmTelemetry(Config(("Chain", ChainId.Voi)), "avm-test");
+        using var offProvider = off.BuildServiceProvider();
+        Assert.Null(offProvider.GetService<OpenTelemetry.Metrics.MeterProvider>());
+
+        var viaEndpoint = new ServiceCollection().AddAvmTelemetry(Config(("Chain", ChainId.Voi), (TelemetryExtensions.EndpointVariable, "http://localhost:4317")), "avm-test", "Some.Meter");
+        using var endpointProvider = viaEndpoint.BuildServiceProvider();
+        Assert.NotNull(endpointProvider.GetService<OpenTelemetry.Metrics.MeterProvider>());
+
+        var viaSwitch = new ServiceCollection().AddAvmTelemetry(Config(("Telemetry:Enabled", "true")), "avm-test");
+        using var switchProvider = viaSwitch.BuildServiceProvider();
+        Assert.NotNull(switchProvider.GetService<OpenTelemetry.Metrics.MeterProvider>());
+
+        var forcedOff = new ServiceCollection().AddAvmTelemetry(Config(("Telemetry:Enabled", "false"), (TelemetryExtensions.EndpointVariable, "http://localhost:4317")), "avm-test");
+        using var forcedOffProvider = forcedOff.BuildServiceProvider();
+        Assert.Null(forcedOffProvider.GetService<OpenTelemetry.Metrics.MeterProvider>());
+    }
+
+    [Fact]
     public async Task Cassandra_Registers_One_Storage_For_The_Configured_Chain_Without_Connecting()
     {
         await using var provider = Build(Config(

@@ -13,6 +13,9 @@ public sealed class WorkerOptions
 
     /// <summary>Host in the listener prefix; <c>+</c> listens on every interface (needs rights on Windows, use localhost there).</summary>
     public string HealthHost { get; set; } = "+";
+
+    /// <summary>How often the published status is read for the indexed-round, lag and status-age metrics.</summary>
+    public int StatusSampleSeconds { get; set; } = 15;
 }
 
 /// <summary>

@@ -53,6 +53,12 @@ worker:
     requests: { cpu: 500m, memory: 512Mi }
     limits: { cpu: "2", memory: 2Gi }
 
+telemetry:
+  # OTLP endpoint of an OpenTelemetry collector (or a backend with an OTLP receiver, for example Prometheus). Empty turns metrics
+  # export off. Protocol, headers and interval use the standard OTEL_* variables, add them through extraEnv if needed.
+  otlpEndpoint: ""
+  otlpProtocol: grpc
+
 algorand:
   # Algod node used for the latest round and the genesis allocations. Empty uses the chain public endpoint.
   algodUrl: ""

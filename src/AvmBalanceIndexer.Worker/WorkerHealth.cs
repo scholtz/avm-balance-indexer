@@ -1,4 +1,5 @@
 using System.Diagnostics.Metrics;
+using AvmBalanceIndexer.Domain.Chains;
 
 namespace AvmBalanceIndexer.Worker;
 
@@ -28,6 +29,8 @@ public sealed class WorkerHealth : IDisposable
     private long _leasesLost;
     private long _transientFailures;
     private Func<long> _roundsCommitted = static () => 0;
+    private ChainStatus? _chainStatus;
+    private Func<DateTimeOffset> _now = static () => DateTimeOffset.UtcNow;
 
     /// <param name="meterName">Only tests pass another name, to observe one instance without the others running in parallel.</param>
     public WorkerHealth(string meterName = MeterName)
@@ -38,6 +41,16 @@ public sealed class WorkerHealth : IDisposable
         _meter.CreateObservableCounter("avm.worker.leases_lost", () => Interlocked.Read(ref _leasesLost), description: "Times the writer lease was lost while indexing");
         _meter.CreateObservableCounter("avm.worker.transient_failures", () => Interlocked.Read(ref _transientFailures), description: "Retried indexing failures");
         _meter.CreateObservableCounter("avm.worker.rounds_committed", () => _roundsCommitted(), description: "Rounds this process committed");
+
+        // What the database says, sampled by StatusSampler: the same numbers the API reports, as time series.
+        _meter.CreateObservableGauge("avm.indexer.indexed_round", () => Measure(static s => (long)s.IndexedRound), description: "Published round");
+        _meter.CreateObservableGauge("avm.indexer.target_round", () => Measure(static s => s.TargetRound is { } t ? (long)t : null), description: "Latest round of the chain as last seen by the indexer");
+        _meter.CreateObservableGauge("avm.indexer.lag_rounds", () => Measure(static s => (long)s.Lag), description: "Rounds between the chain tip and the published round");
+        _meter.CreateObservableGauge(
+            "avm.indexer.status_age_seconds",
+            () => Measure(s => (long)Math.Max(0, (_now() - s.UpdatedAt).TotalSeconds)),
+            unit: "s",
+            description: "Seconds since the writer last updated the status (rises when indexing is stuck)");
     }
 
     public WorkerState State
@@ -54,6 +67,20 @@ public sealed class WorkerHealth : IDisposable
     public bool Ready => State != WorkerState.Starting;
 
     public void ReportRoundsSource(Func<long> roundsCommitted) => _roundsCommitted = roundsCommitted;
+
+    /// <summary>The last status read from the database (null when nothing is published yet).</summary>
+    public void ReportChainStatus(ChainStatus? status) => Volatile.Write(ref _chainStatus, status);
+
+    /// <summary>Tests replace the clock to make the status age deterministic.</summary>
+    internal void UseClock(Func<DateTimeOffset> now) => _now = now;
+
+    private IEnumerable<Measurement<long>> Measure(Func<ChainStatus, long?> value)
+    {
+        if (Volatile.Read(ref _chainStatus) is { } status && value(status) is { } measured)
+        {
+            yield return new Measurement<long>(measured);
+        }
+    }
 
     public void BecameStandby() => State = WorkerState.Standby;
 
