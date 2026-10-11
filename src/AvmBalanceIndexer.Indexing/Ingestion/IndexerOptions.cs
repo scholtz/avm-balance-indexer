@@ -8,12 +8,12 @@ public sealed class IndexerOptions : IValidatableObject
     public const string SectionName = "Indexer";
 
     /// <summary>
-    /// Blocks fetched in parallel ahead of the commit position. Downloading is what limits a backfill (a block takes about
-    /// 100 ms from a gossip host, so 8 in flight is under 10 rounds per second); 64 gives about 40. Every block in flight is held
-    /// decoded (typically 20 to 100 KB), so memory grows with this value.
+    /// Blocks fetched in parallel ahead of the commit position. Downloading is what limits a backfill (a block takes 50 to
+    /// 700 ms from a gossip host, so 8 in flight is under 20 rounds per second); 128 gives about 60 to 150. Every block in
+    /// flight is held decoded (typically 20 to 100 KB), so memory grows with this value.
     /// </summary>
     [Range(1, 1024)]
-    public int FetchConcurrency { get; set; } = 64;
+    public int FetchConcurrency { get; set; } = 128;
 
     /// <summary>
     /// While backfilling, this many consecutive rounds are committed in one database transaction (one cursor update, a handful

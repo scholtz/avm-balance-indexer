@@ -97,7 +97,7 @@ curl http://localhost:5000/v1/algorand-testnet/status
 | `Scans:MaxActive` / `Retention` / `Concurrency` / `PollInterval` / `StaleAfter` / `PageSize` | Asynchronous holder scans: admission limit (20), how long a scan and its result are kept (24 h), scans one worker replica runs at once (2), how often an idle worker looks for work (5 s), when a silent owner loses a running scan (2 min), holders per step (1000). |
 | `Indexer:LeaseRetryInterval` | How often a standby replica asks again for the writer lease (default 5 s). |
 | `Worker:HealthPort` / `HealthHost` | Worker probe endpoints `/healthz/live` and `/healthz/ready` (default 8081, 0 = off; use `localhost` as host on Windows). Metrics are on the `AvmBalanceIndexer.Worker` meter. |
-| `Indexer:FetchConcurrency` | Blocks fetched in parallel ahead of the commit position (default 64; each block in flight is held decoded, typically 20 to 100 KB). Downloading from the gossip hosts is what limits a backfill: about 9 rounds/s at 8, 25 at 32 and 45 to 60 at 192 on busy MainNet blocks. |
+| `Indexer:FetchConcurrency` | Blocks fetched in parallel ahead of the commit position (default 128; each block in flight is held decoded, typically 20 to 100 KB). Downloading from the gossip hosts is what limits a backfill: about 17 rounds/s at 8, 30 at 32 and 60 to 70 at 96 or more on busy MainNet blocks, 100 to 160 on tiny early blocks. The fetcher prefers the archival hosts that answer fastest (they differ by 10x); your own archival nodes remove the limit. |
 | `Indexer:CommitBatchRounds` / `CommitBatchEffects` | While backfilling, up to this many consecutive rounds (default 25) or effects (default 20,000) are written in one transaction; near the tip every round is committed alone. 1 turns batching off. |
 
 ## Tests

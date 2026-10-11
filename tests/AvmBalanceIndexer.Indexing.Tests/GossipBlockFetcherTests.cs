@@ -60,6 +60,51 @@ public class GossipBlockFetcherTests
     }
 
     [Fact]
+    public async Task Fast_Hosts_Get_Most_Of_The_Requests()
+    {
+        var served = new System.Collections.Concurrent.ConcurrentDictionary<string, int>();
+        var fetcher = CreateFetcher(
+            async (request, token) =>
+            {
+                var host = request.RequestUri!.Host;
+                served.AddOrUpdate(host, 1, static (_, n) => n + 1);
+                await Task.Delay(host == "slow.test" ? 80 : 5, token);
+                return Ok(Chain.Encode(7, []));
+            },
+            hosts: ["http://slow.test:4160", "http://fast.test:4160"]);
+
+        for (var i = 0; i < 80; i++)
+        {
+            await fetcher.FetchBlockAsync(7, CancellationToken.None);
+        }
+
+        Assert.True(served["fast.test"] >= 60, $"fast {served["fast.test"]}, slow {served.GetValueOrDefault("slow.test")}");
+    }
+
+    [Fact]
+    public async Task A_Host_Without_The_Block_Is_Not_Preferred_Because_It_Answers_Quickly()
+    {
+        var served = new System.Collections.Concurrent.ConcurrentDictionary<string, int>();
+        var fetcher = CreateFetcher(
+            async (request, token) =>
+            {
+                var host = request.RequestUri!.Host;
+                served.AddOrUpdate(host, 1, static (_, n) => n + 1);
+                await Task.Delay(host == "empty.test" ? 0 : 30, token);
+                return host == "empty.test" ? new HttpResponseMessage(HttpStatusCode.NotFound) : Ok(Chain.Encode(7, []));
+            },
+            hosts: ["http://empty.test:4160", "http://full.test:4160"]);
+
+        for (var i = 0; i < 60; i++)
+        {
+            await fetcher.FetchBlockAsync(7, CancellationToken.None);
+        }
+
+        Assert.True(served["full.test"] >= 60);
+        Assert.True(served.GetValueOrDefault("empty.test") <= 24, $"empty {served.GetValueOrDefault("empty.test")}");
+    }
+
+    [Fact]
     public async Task Fails_Over_To_Another_Host_When_One_Has_No_Block()
     {
         var served = new List<string>();

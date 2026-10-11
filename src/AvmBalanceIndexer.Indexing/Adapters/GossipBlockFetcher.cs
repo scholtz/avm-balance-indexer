@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Net;
 using Algorand.Gossip;
 using Microsoft.Extensions.Logging;
@@ -21,6 +22,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
     private readonly ILogger<GossipBlockFetcher> _logger;
     private readonly TimeProvider _time;
     private readonly ConcurrentDictionary<string, DateTimeOffset> _cooldownUntil = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, HostLatency> _latency = new(StringComparer.OrdinalIgnoreCase);
 
     public GossipBlockFetcher(
         HttpClient http,
@@ -68,7 +70,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
             var host = hosts[attempt % hosts.Length];
             try
             {
-                var payload = await DownloadAsync(host, round, cancellationToken).ConfigureAwait(false);
+                var payload = await DownloadTimedAsync(host, round, cancellationToken).ConfigureAwait(false);
                 var block = BlockDecoder.Decode(payload, round, _profile, _expectedGenesisHash);
                 _cooldownUntil.TryRemove(host, out _);
                 return block;
@@ -116,22 +118,152 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
     }
 
     /// <summary>
-    /// A random rotation of the hosts with the ones that are not cooling down first. Attempt N of a fetch uses the
+    /// The hosts in the order a fetch tries them: healthy hosts first, picked at random with a weight of one over the square of
+    /// their expected response time (so a host that answers in 50 ms gets about 100 times the requests of one that needs 500 ms
+    /// and the requests in flight to it count against it), then the hosts that are cooling down. Attempt N of a fetch uses the
     /// Nth host, so every host is tried once before any is repeated.
     /// </summary>
     private string[] OrderHosts(IReadOnlyList<string> hosts)
     {
         var now = _time.GetUtcNow();
-        var start = Random.Shared.Next(hosts.Count);
-        var rotated = Enumerable.Range(0, hosts.Count).Select(i => hosts[(start + i) % hosts.Count]).ToArray();
-        bool Healthy(string host) => !_cooldownUntil.TryGetValue(host, out var until) || until <= now;
-        return [.. rotated.Where(Healthy), .. rotated.Where(h => !Healthy(h))];
+        var healthy = new List<(string Host, double Weight)>(hosts.Count);
+        var cooling = new List<string>();
+        foreach (var host in hosts)
+        {
+            if (_cooldownUntil.TryGetValue(host, out var until) && until > now)
+            {
+                cooling.Add(host);
+                continue;
+            }
+
+            var score = _latency.GetOrAdd(host, static _ => new HostLatency()).Score;
+            healthy.Add((host, 1.0 / (score * score)));
+        }
+
+        var ordered = new List<string>(hosts.Count);
+        var total = 0.0;
+        foreach (var (_, weight) in healthy)
+        {
+            total += weight;
+        }
+
+        while (healthy.Count > 0)
+        {
+            var pick = Random.Shared.NextDouble() * total;
+            var index = 0;
+            for (; index < healthy.Count - 1; index++)
+            {
+                pick -= healthy[index].Weight;
+                if (pick <= 0)
+                {
+                    break;
+                }
+            }
+
+            ordered.Add(healthy[index].Host);
+            total -= healthy[index].Weight;
+            healthy.RemoveAt(index);
+        }
+
+        var offset = cooling.Count == 0 ? 0 : Random.Shared.Next(cooling.Count);
+        ordered.AddRange(cooling.Skip(offset).Concat(cooling.Take(offset)));
+        return [.. ordered];
+    }
+
+    private enum HostOutcome
+    {
+        /// <summary>The host delivered the bytes.</summary>
+        Answered,
+
+        /// <summary>The request failed, timed out, or the host said it does not have the block.</summary>
+        Failed,
+
+        /// <summary>The caller gave up; nothing is learned.</summary>
+        Ignored,
+    }
+
+    /// <summary>Smoothed response time of one host and the number of requests currently waiting for it.</summary>
+    private sealed class HostLatency
+    {
+        // Unknown hosts start in the middle of what public archival nodes deliver, so they are tried soon.
+        private const double InitialMilliseconds = 250;
+        private const double Smoothing = 0.2;
+        private const double PenaltyMilliseconds = 2_000;
+        private readonly object _gate = new();
+        private double _milliseconds = InitialMilliseconds;
+        private long _updated = Stopwatch.GetTimestamp();
+        private int _inFlight;
+
+        /// <summary>
+        /// Expected response time scaled by the queue in front of it. What was learned fades back to the initial guess within
+        /// minutes, so a host that was slow (or lacked blocks of one range) is tried again later.
+        /// </summary>
+        public double Score
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    var idle = Stopwatch.GetElapsedTime(_updated).TotalSeconds;
+                    var learned = InitialMilliseconds + ((_milliseconds - InitialMilliseconds) * Math.Exp(-idle / 120));
+                    return Math.Max(1, learned) * (1 + (0.25 * _inFlight));
+                }
+            }
+        }
+
+        public void Begin()
+        {
+            lock (_gate)
+            {
+                _inFlight++;
+            }
+        }
+
+        public void End(TimeSpan elapsed, HostOutcome outcome)
+        {
+            lock (_gate)
+            {
+                _inFlight--;
+                if (outcome == HostOutcome.Ignored)
+                {
+                    return;
+                }
+
+                var sample = outcome == HostOutcome.Answered ? elapsed.TotalMilliseconds : Math.Max(PenaltyMilliseconds, elapsed.TotalMilliseconds);
+                _milliseconds = ((1 - Smoothing) * _milliseconds) + (Smoothing * sample);
+                _updated = Stopwatch.GetTimestamp();
+            }
+        }
     }
 
     private TimeSpan BackoffDelay(int attempt)
     {
         var ceiling = Math.Min(_options.MaxRetryDelay.TotalMilliseconds, _options.BaseRetryDelay.TotalMilliseconds * Math.Pow(2, attempt));
         return TimeSpan.FromMilliseconds(Random.Shared.NextDouble() * ceiling);
+    }
+
+    /// <summary>Downloads a block and records how long the host took (transport only, not decoding); cancellation says nothing about the host.</summary>
+    private async Task<byte[]> DownloadTimedAsync(string host, ulong round, CancellationToken cancellationToken)
+    {
+        var latency = _latency.GetOrAdd(host, static _ => new HostLatency());
+        latency.Begin();
+        var started = Stopwatch.GetTimestamp();
+        var outcome = HostOutcome.Failed;
+        try
+        {
+            var payload = await DownloadAsync(host, round, cancellationToken).ConfigureAwait(false);
+            outcome = HostOutcome.Answered;
+            return payload;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            outcome = HostOutcome.Ignored;
+            throw;
+        }
+        finally
+        {
+            latency.End(Stopwatch.GetElapsedTime(started), outcome);
+        }
     }
 
     private async Task<byte[]> DownloadAsync(string host, ulong round, CancellationToken cancellationToken)
