@@ -40,7 +40,7 @@ public sealed class ReferenceNode : IDisposable
             var url = $"{_indexer}/v2/transactions?max-round={maxRound}&limit=1000" + (next is null ? string.Empty : $"&next={Uri.EscapeDataString(next)}");
             using var json = await GetJsonAsync(url).ConfigureAwait(false);
             var root = json.RootElement;
-            result.AddRange(root.GetProperty("transactions").EnumerateArray().Select(ReferenceTransaction.From));
+            result.AddRange(root.GetProperty("transactions").EnumerateArray().Select(static t => ReferenceTransaction.From(t)));
             next = root.TryGetProperty("next-token", out var token) && token.ValueKind == JsonValueKind.String ? token.GetString() : null;
         }
         while (next is not null);
@@ -73,14 +73,14 @@ public sealed class ReferenceNode : IDisposable
         return result;
     }
 
-    private static void Flatten(JsonElement transaction, List<ReferenceTransaction> into)
+    private static void Flatten(JsonElement transaction, List<ReferenceTransaction> into, bool inner = false)
     {
-        into.Add(ReferenceTransaction.From(transaction));
-        if (transaction.TryGetProperty("inner-txns", out var inner))
+        into.Add(ReferenceTransaction.From(transaction, inner));
+        if (transaction.TryGetProperty("inner-txns", out var children))
         {
-            foreach (var child in inner.EnumerateArray())
+            foreach (var child in children.EnumerateArray())
             {
-                Flatten(child, into);
+                Flatten(child, into, inner: true);
             }
         }
     }
@@ -177,6 +177,7 @@ public sealed class ReferenceNode : IDisposable
 }
 
 /// <summary>The balance-relevant fields of a payment-like transaction as reported by the indexer.</summary>
+/// <remarks>Inner transactions have no id and no confirmed round in the indexer response.</remarks>
 public sealed record ReferenceTransaction(
     string Id,
     string Type,
@@ -191,7 +192,7 @@ public sealed record ReferenceTransaction(
     ulong ReceiverRewards,
     ulong CloseRewards)
 {
-    public static ReferenceTransaction From(JsonElement tx)
+    public static ReferenceTransaction From(JsonElement tx, bool inner = false)
     {
         static Address Parse(string text) => new(new Algorand.Address(text).Bytes);
 
@@ -209,9 +210,9 @@ public sealed record ReferenceTransaction(
         }
 
         return new ReferenceTransaction(
-            tx.TryGetProperty("id", out var id) ? id.GetString()! : string.Empty,
+            inner ? string.Empty : tx.GetProperty("id").GetString()!,
             type,
-            tx.TryGetProperty("confirmed-round", out var round) ? round.GetUInt64() : 0,
+            inner ? 0 : tx.GetProperty("confirmed-round").GetUInt64(),
             Parse(tx.GetProperty("sender").GetString()!),
             Number(tx, "fee"),
             receiver,

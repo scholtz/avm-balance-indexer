@@ -15,7 +15,7 @@ Full design: [PRODUCT-DESCRIPTION.md](PRODUCT-DESCRIPTION.md). Decisions: [docs/
 | Cassandra provider | Done: schema, idempotent round writer with compare-and-set publication, current and historical balances, holders, history. Runs the same contract suite as PostgreSQL. |
 | ASA, ARC-20, ARC-200 effects | Not started. |
 | Read API | Done: status, holdings, balance at a round, holders, history, token metadata. |
-| Voi | Genesis pinned and verified; first 1000 rounds indexed (no balance-moving transactions) and a 2500-round recent window with payments and inner transactions checked against the public indexer (`VoiRecentRoundsTests`). Voi serves no ledger deltas, so a proposer-payout or hidden-rewards check as on Algorand is not possible. |
+| Voi | Genesis pinned and verified; first 1000 rounds indexed (no balance-moving transactions) and a 2500-round recent window with real payments checked against the public indexer (`VoiRecentRoundsTests`). Voi serves no ledger deltas, so a proposer-payout or hidden-rewards check as on Algorand is not possible. |
 
 ## How indexing works
 

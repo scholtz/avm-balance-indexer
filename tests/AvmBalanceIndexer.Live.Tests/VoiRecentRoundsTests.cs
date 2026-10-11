@@ -9,9 +9,9 @@ using Xunit.Abstractions;
 namespace AvmBalanceIndexer.Live.Tests;
 
 /// <summary>
-/// Voi publishes no ledger deltas, so a window of recent rounds (which has real payments, application calls and inner
-/// payments, unlike its first 1000 rounds) is checked against what the public indexer reports for the same rounds: per
-/// account, the native effects of transactions must equal the net of the indexer's transactions.
+/// Voi publishes no ledger deltas, so a window of recent rounds (which has real payments and application calls, unlike its
+/// first 1000 rounds) is checked against what the public indexer reports for the same rounds: per account, the native
+/// effects of transactions, inner ones included when present, must equal the net of the indexer's transactions.
 /// It also exercises archival host failover, since many Voi gossip hosts lack blocks.
 /// </summary>
 public class VoiRecentRoundsTests(ITestOutputHelper output)
@@ -71,7 +71,7 @@ public class VoiRecentRoundsTests(ITestOutputHelper output)
         var topLevelIds = new HashSet<string>(StringComparer.Ordinal);
         foreach (var t in transactions)
         {
-            if (t.Id.Length > 0 && (t.Fee > 0 || t.Amount > 0 || t.ClosingAmount > 0))
+            if (t.Id.Length > 0 && (t.Fee > 0 || t.Amount > 0 || t.ClosingAmount > 0 || t.SenderRewards > 0 || t.ReceiverRewards > 0 || t.CloseRewards > 0))
             {
                 topLevelIds.Add(t.Id);
             }
@@ -89,12 +89,17 @@ public class VoiRecentRoundsTests(ITestOutputHelper output)
         }
 
         // The indexer does not list the fee sink credit, so add it from the fees to compare like with like.
-        var feeSink = new Address(blocks[1].Block.FeeSink!.Bytes);
+        var feeSinks = blocks.Skip(1).Select(static b => new Address(b.Block.FeeSink!.Bytes)).Distinct().ToArray();
+        Assert.Single(feeSinks);
+        var feeSink = feeSinks[0];
         Add(theirs, feeSink, transactions.Aggregate(BigInteger.Zero, static (sum, t) => sum + t.Fee));
 
         var payments = transactions.Count(static t => t.Amount > 0);
-        output.WriteLine($"voi rounds {first}-{last}: {transactions.Count} indexer transactions, {payments} payments, {ours.Count} accounts with effects");
+        var innerPayments = transactions.Count(static t => t.Id.Length == 0 && t.Amount > 0);
+        var payouts = blocks.Skip(1).Count(static b => b.Block.ProposerPayout is > 0);
+        output.WriteLine($"voi rounds {first}-{last}: {transactions.Count} indexer transactions, {payments} payments ({innerPayments} inner), {payouts} proposer payouts, {ours.Count} accounts with effects");
         Assert.True(payments > 0, "The window has no payments, so it proves nothing.");
+        Assert.Equal(0, payouts);
 
         var problems = new List<string>();
         foreach (var account in ours.Keys.Union(theirs.Keys))
