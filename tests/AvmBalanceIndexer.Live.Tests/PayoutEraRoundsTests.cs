@@ -11,6 +11,8 @@ namespace AvmBalanceIndexer.Live.Tests;
 /// Checks the normalizer on a window of recent rounds, where proposer payouts and other implicit balance movements exist.
 /// Starting balances are unknown mid-chain, so the oracle is relative: between two rounds in which the ledger reports the
 /// same account, the ledger balance difference must equal the sum of our effects for that account in the rounds between.
+/// An account's first appearance in the window has no baseline and is not checked, so a payout is only verified for a proposer
+/// the ledger reported earlier in the window (the fee sink, debited by every payout, is always verified).
 /// </summary>
 public class PayoutEraRoundsTests(ITestOutputHelper output)
 {
@@ -56,6 +58,7 @@ public class PayoutEraRoundsTests(ITestOutputHelper output)
 
         var lastSeen = new Dictionary<Address, (ulong Round, ulong Balance)>();
         var proposers = 0;
+        var checkedPayouts = 0;
         var problems = new List<string>();
         for (var round = first; round <= last; round++)
         {
@@ -70,6 +73,11 @@ public class PayoutEraRoundsTests(ITestOutputHelper output)
                     var between = Enumerable.Range(1, (int)(round - seen.Round - 1)).Select(i => seen.Round + (ulong)i)
                         .Aggregate(BigInteger.Zero, (a, r) => a + effectSums[r].GetValueOrDefault(account));
                     missing -= between;
+                    if (blocks[round].Block.Proposer is { } proposer && new Address(proposer.Bytes) == account && blocks[round].Block.ProposerPayout is > 0)
+                    {
+                        checkedPayouts++;
+                    }
+
                     if (!missing.IsZero)
                     {
                         problems.Add($"round {round} {ReferenceNode.Encode(account)}: ledger differs from our effects by {missing} (proposer={blocks[round].Block.Proposer?.EncodeAsString()})");
@@ -85,13 +93,13 @@ public class PayoutEraRoundsTests(ITestOutputHelper output)
             }
         }
 
-        output.WriteLine($"{chain}: rounds {first}-{last}, {proposers} proposer payouts, {problems.Count} problems");
+        output.WriteLine($"{chain}: rounds {first}-{last}, {proposers} proposer payouts ({checkedPayouts} to proposers the ledger reported earlier in the window), {problems.Count} problems");
         foreach (var problem in problems)
         {
             output.WriteLine(problem);
         }
 
-        Assert.True(!expectPayouts || proposers > 0, "The window contains no proposer payout, so it proves nothing about them.");
+        Assert.True(!expectPayouts || checkedPayouts > 0, "No proposer payout could be checked, so the window proves nothing about them.");
         Assert.True(problems.Count == 0, string.Join(Environment.NewLine, problems.Take(20)));
     }
 }

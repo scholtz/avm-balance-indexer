@@ -61,7 +61,7 @@ public sealed class ReferenceNode : IDisposable
         foreach (var account in json.RootElement.GetProperty("Accts").GetProperty("Accts").EnumerateArray())
         {
             var address = new Address(Convert.FromBase64String(account.GetProperty("Addr").GetString()!));
-            result[address] = account.TryGetProperty("MicroAlgos", out var micro) ? micro.GetUInt64() : 0;
+            result[address] = account.GetProperty("MicroAlgos").GetUInt64();
         }
 
         return result;
