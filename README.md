@@ -13,7 +13,7 @@ Full design: [PRODUCT-DESCRIPTION.md](PRODUCT-DESCRIPTION.md). Decisions: [docs/
 | Native token (ALGO/VOI) indexing from archival nodes | Done. Verified against the ledger for the first 1000 rounds of TestNet and MainNet, and against the public indexer for Voi. |
 | PostgreSQL provider | Done: schema, atomic round writer, current and historical balances, holders, history. |
 | Cassandra provider | Done: schema, idempotent round writer with compare-and-set publication, current and historical balances, holders, history. Runs the same contract suite as PostgreSQL. |
-| ASA, ARC-20, ARC-200 effects | Not started. |
+| ASA effects (transfer, opt-in/out, close-to, clawback, create, destroy) | Done, verified against the ledger holdings of recent MainNet rounds (`AssetRoundsTests`). ARC-20 metadata is #34, ARC-200 transfers are #33. |
 | Read API | Done: status, holdings, balance at a round, holders, history, token metadata. |
 | Voi | Genesis pinned and verified; first 1000 rounds indexed (no balance-moving transactions) and a 2500-round recent window with real payments checked against the public indexer (`VoiRecentRoundsTests`). Voi serves no ledger deltas, so a proposer-payout or hidden-rewards check as on Algorand is not possible. |
 
@@ -139,7 +139,7 @@ another chain, 503 while nothing is indexed yet. A walk over the holders of the 
   certificate signatures are not verified (ADR 0004). A host serving a whole fabricated chain is not detected: run your
   own archival nodes.
 - Proposer payouts are verified against recent MainNet rounds (see `docs/ledger-facts.md`).
-- Transaction effects other than native payments, fees, rewards and closes (assets, applications) are not indexed.
+- A database indexed before ASA support (#18) holds no asset history: rebuild it from genesis, otherwise the first transfer of an older asset fails with a negative balance. ARC-200 transfers (#33) and ARC-20 classification (#34) are not indexed yet; ASA balances are. Application-driven native movements are only seen through inner payments.
 
 ## License
 

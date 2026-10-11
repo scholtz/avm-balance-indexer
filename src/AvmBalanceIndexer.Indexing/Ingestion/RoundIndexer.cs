@@ -237,8 +237,15 @@ public sealed partial class RoundIndexer(
                 $"Round {block.Round} does not link to the published round {previous.IndexedRound}. The database must be rebuilt.");
         }
 
-        var deltas = normalizer.Normalize(block, previousRewards);
-        var round = await tracker.ApplyAsync(deltas, cancellationToken).ConfigureAwait(false);
+        var normalized = normalizer.NormalizeBlock(block, previousRewards, await LoadDestroyedAssetsAsync(block, cancellationToken).ConfigureAwait(false));
+        var round = await tracker.ApplyAsync(normalized.Deltas, cancellationToken).ConfigureAwait(false);
+
+        // Token records are written before the round is published: a crash in between only leaves rows that replaying the
+        // round overwrites with the same values, whereas writing them afterwards could lose them for good.
+        foreach (var token in normalized.TokenChanges)
+        {
+            await storage.UpsertAsync(token, cancellationToken).ConfigureAwait(false);
+        }
 
         var state = targetRound - block.Round <= (ulong)_options.FollowingThresholdRounds ? IngestionState.Following : IngestionState.Backfilling;
         var status = new ChainStatus(chain, block.Round, block.Hash, targetRound, state, _time.GetUtcNow());
@@ -251,6 +258,26 @@ public sealed partial class RoundIndexer(
 
         tracker.Commit(round);
         return (status, round.Effects.Count);
+    }
+
+    private async Task<AssetDirectory> LoadDestroyedAssetsAsync(BlockData block, CancellationToken cancellationToken)
+    {
+        var destroyed = AssetScanner.DestroyedAssets(block);
+        if (destroyed.Count == 0)
+        {
+            return AssetDirectory.Empty;
+        }
+
+        var records = new List<TokenInfo>(destroyed.Count);
+        foreach (var assetId in destroyed)
+        {
+            if (await storage.GetAsync(TokenKey.Asa(assetId), cancellationToken).ConfigureAwait(false) is { } record)
+            {
+                records.Add(record);
+            }
+        }
+
+        return new AssetDirectory(records);
     }
 
     [LoggerMessage(EventId = 1200, Level = LogLevel.Information, Message = "{Chain}: indexed round {Round} of {Target}")]

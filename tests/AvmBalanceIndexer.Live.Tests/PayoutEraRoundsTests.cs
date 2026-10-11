@@ -1,5 +1,6 @@
 using System.Numerics;
 using AvmBalanceIndexer.Domain.Chains;
+using AvmBalanceIndexer.Domain.Tokens;
 using AvmBalanceIndexer.Indexing.Adapters;
 using AvmBalanceIndexer.Indexing.Normalization;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -51,7 +52,8 @@ public class PayoutEraRoundsTests(ITestOutputHelper output)
         var effectSums = new Dictionary<ulong, Dictionary<Address, BigInteger>>();
         for (var round = first; round <= last; round++)
         {
-            effectSums[round] = normalizer.Normalize(blocks[round], RewardsState.FromHeader(blocks[round - 1].Block))
+            effectSums[round] = normalizer.NormalizeBlock(blocks[round], RewardsState.FromHeader(blocks[round - 1].Block), await LiveAssetDirectory.LoadAsync(reference, adapter, blocks[round])).Deltas
+                .Where(static e => e.Token == TokenKey.Native)
                 .GroupBy(static e => e.Account)
                 .ToDictionary(static g => g.Key, static g => g.Aggregate(BigInteger.Zero, static (a, e) => a + e.Delta));
         }

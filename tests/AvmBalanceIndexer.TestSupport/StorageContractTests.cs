@@ -602,4 +602,52 @@ public abstract class StorageContractTests
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => CreateIndexer(storage, Adapter()).RunAsync(LastRound, cts.Token));
     }
+
+    [Fact]
+    public async Task An_Asset_Lifecycle_Keeps_Balances_Opt_Ins_And_The_Token_Record()
+    {
+        const ulong asset = 100;
+        var key = TokenKey.Asa(asset);
+        var chain = new TestChain();
+        var storage = await CreateStorageAsync();
+        var blocks = new[]
+        {
+            chain.Block(1, [new TestPayment(Alice, Alice, 0, Asset: TestAsset.Creation(asset, 1_000, decimals: 2, unit: "TST", name: "Test asset"))], rewards: RewardsAt(1)),
+            chain.Block(2, [new TestPayment(Bob, Bob, 0, Asset: TestAsset.OptIn(asset))], rewards: RewardsAt(2)),
+            chain.Block(3, [new TestPayment(Alice, Bob, 0, Asset: TestAsset.Transfer(asset, 300))], rewards: RewardsAt(3)),
+            chain.Block(4, [new TestPayment(Bob, Alice, 0, Asset: TestAsset.Transfer(asset, 50))], rewards: RewardsAt(4)),
+            chain.Block(5, [new TestPayment(Bob, Bob, 0, Asset: TestAsset.CloseOut(asset, Alice, closingAmount: 250))], rewards: RewardsAt(5)),
+            chain.Block(6, [new TestPayment(Alice, Alice, 0, Asset: TestAsset.Destroy(asset))], rewards: RewardsAt(6)),
+        };
+
+        await CreateIndexer(storage, Adapter(blocks)).RunAsync(6, CancellationToken.None);
+
+        // The historical holders report OptedIn = true after an opt-out (issue #35), so only balances are checked here.
+        async Task<ulong?> HolderAsync(Address account, ulong round)
+        {
+            var page = await storage.GetHoldersAtRoundAsync(key, round, true, null, 10, CancellationToken.None);
+            return page.Items.Where(h => h.Account == account).Select(static h => (ulong?)(ulong)h.Amount.Value).SingleOrDefault();
+        }
+
+        Assert.Null(await HolderAsync(Alice, 0));
+        Assert.Equal(1_000UL, await HolderAsync(Alice, 1));
+        Assert.Equal(0UL, await HolderAsync(Bob, 2));
+        Assert.Equal(700UL, await HolderAsync(Alice, 3));
+        Assert.Equal(300UL, await HolderAsync(Bob, 3));
+        Assert.Equal(250UL, await HolderAsync(Bob, 4));
+        Assert.Equal(750UL, await HolderAsync(Alice, 4));
+        Assert.Equal(1_000UL, await HolderAsync(Alice, 5));
+        Assert.Equal(0UL, await HolderAsync(Bob, 5));
+        Assert.Equal(0UL, await HolderAsync(Alice, 6));
+
+        var current = Assert.Single((await storage.GetHoldingsAsync(Bob, true, null, 10, CancellationToken.None)).Items, h => h.Token == key);
+        Assert.False(current.OptedIn);
+        Assert.True(current.Amount.IsZero);
+        Assert.True(Assert.Single((await storage.GetHoldingsAsync(Alice, true, null, 10, CancellationToken.None)).Items, h => h.Token == key).Amount.IsZero);
+        Assert.Equal(1_000UL, (ulong)(await storage.GetBalanceAtRoundAsync(Alice, key, 5, CancellationToken.None)).Value);
+
+        var token = await storage.GetAsync(key, CancellationToken.None);
+        Assert.NotNull(token);
+        Assert.Equal((Alice, "TST", "Test asset", 2, 1UL, 6UL), (token.Creator, token.Symbol, token.Name, token.Decimals, token.CreatedRound, token.DeletedRound));
+    }
 }
