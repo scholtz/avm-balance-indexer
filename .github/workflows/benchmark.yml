@@ -10,6 +10,11 @@ name: Nightly benchmark
 on:
   schedule:
     - cron: "17 2 * * *"
+  # A change to the benchmark or this workflow runs a short version (500 rounds) to prove the pipeline works; it publishes nothing.
+  pull_request:
+    paths:
+      - .github/workflows/benchmark.yml
+      - tools/AvmBalanceIndexer.Benchmark/**
   workflow_dispatch:
     inputs:
       rounds:
@@ -22,7 +27,7 @@ permissions:
 env:
   DOTNET_NOLOGO: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
-  ROUNDS: ${{ inputs.rounds || '10000' }}
+  ROUNDS: ${{ inputs.rounds || (github.event_name == 'pull_request' && '500') || '10000' }}
 
 jobs:
   postgres:
@@ -116,6 +121,7 @@ jobs:
             results/bench-cassandra/bench-cassandra.json results/bench-postgres/bench-postgres.json --out comparison.md > /dev/null
           cat comparison.md >> "$GITHUB_STEP_SUMMARY"
       - name: Commit to the benchmark-results branch
+        if: github.event_name != 'pull_request'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
