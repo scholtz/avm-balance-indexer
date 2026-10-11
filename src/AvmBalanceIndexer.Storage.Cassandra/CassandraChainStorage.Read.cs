@@ -220,16 +220,21 @@ public sealed partial class CassandraChainStorage
 
         // The accounts that ever touched the token are spread over TokenShards partitions, each sorted by account. Every shard
         // is scanned lazily and the shards are merged by account, so the cost follows the page size and not the holder count.
-        var chunk = Math.Clamp(2 * (pageSize + 1) / TokenShards, 8, 256);
+        // One gate bounds the lookups of all shards together.
+        var chunk = Math.Clamp(2 * (pageSize + 1) / TokenShards, 2, 256);
+        using var gate = new SemaphoreSlim(MaxInFlight);
         var shards = new List<IAsyncEnumerator<Holding>>(TokenShards);
+        var starting = new List<Task<bool>>(TokenShards);
         try
         {
             for (var shard = 0; shard < TokenShards; shard++)
             {
-                shards.Add(ScanShardAsync(token, (short)shard, round, includeZero, after, chunk, cancellationToken).GetAsyncEnumerator(cancellationToken));
+                var scan = ScanShardAsync(token, (short)shard, round, includeZero, after, chunk, gate, cancellationToken).GetAsyncEnumerator(cancellationToken);
+                shards.Add(scan);
+                starting.Add(scan.MoveNextAsync().AsTask());
             }
 
-            var heads = await Task.WhenAll(shards.Select(static s => s.MoveNextAsync().AsTask())).ConfigureAwait(false);
+            var heads = await Task.WhenAll(starting).ConfigureAwait(false);
             var items = new List<Holding>();
             while (items.Count <= pageSize)
             {
@@ -255,6 +260,19 @@ public sealed partial class CassandraChainStorage
         }
         finally
         {
+            // An iterator must not be disposed while a MoveNext is still running, which is the case when another shard faulted.
+            foreach (var pending in starting)
+            {
+                try
+                {
+                    await pending.ConfigureAwait(false);
+                }
+                catch (Exception)
+                {
+                    // The first failure is already propagating.
+                }
+            }
+
             foreach (var shard in shards)
             {
                 await shard.DisposeAsync().ConfigureAwait(false);
@@ -269,6 +287,7 @@ public sealed partial class CassandraChainStorage
         bool includeZero,
         byte[] after,
         int chunk,
+        SemaphoreSlim gate,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var cursor = after;
@@ -295,7 +314,8 @@ public sealed partial class CassandraChainStorage
             var latest = await RunBoundedAsync(
                 candidates,
                 candidate => LatestEffectAtOrBeforeAsync(candidate.Account, token, round, cancellationToken),
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken,
+                gate).ConfigureAwait(false);
             for (var i = 0; i < candidates.Length; i++)
             {
                 var balance = latest[i]?.Balance ?? Amount.Zero;

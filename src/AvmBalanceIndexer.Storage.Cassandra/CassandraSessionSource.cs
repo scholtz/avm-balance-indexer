@@ -35,9 +35,19 @@ public sealed class CassandraSessionSource : IAsyncDisposable
                 return raced;
             }
 
-            _cluster ??= Build(_options);
-            _session = await _cluster.ConnectAsync().WaitAsync(cancellationToken).ConfigureAwait(false);
-            return _session;
+            var cluster = _cluster ??= Build(_options);
+            try
+            {
+                _session = await cluster.ConnectAsync().WaitAsync(cancellationToken).ConfigureAwait(false);
+                return _session;
+            }
+            catch
+            {
+                // A cluster that failed to initialise is thrown away so the next call starts clean.
+                _cluster = null;
+                await cluster.ShutdownAsync().ConfigureAwait(false);
+                throw;
+            }
         }
         finally
         {

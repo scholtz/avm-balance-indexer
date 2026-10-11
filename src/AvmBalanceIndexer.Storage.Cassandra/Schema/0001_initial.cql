@@ -85,8 +85,8 @@ CREATE TABLE IF NOT EXISTS effects_by_token_bucket (
   transaction_id text,
   effect_type text,
   delta text,
-  PRIMARY KEY ((token_kind, token_id, bucket, shard), round, intra_round_order, ordinal)
-) WITH CLUSTERING ORDER BY (round DESC, intra_round_order DESC, ordinal DESC);
+  PRIMARY KEY ((token_kind, token_id, bucket, shard), round, intra_round_order, ordinal, account)
+) WITH CLUSTERING ORDER BY (round DESC, intra_round_order DESC, ordinal DESC, account ASC);
 
 -- Every account that ever changed a token, with the round of its first effect. Sharded by account.
 CREATE TABLE IF NOT EXISTS accounts_touched_by_token (

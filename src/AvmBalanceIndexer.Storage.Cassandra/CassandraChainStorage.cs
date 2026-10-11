@@ -81,11 +81,16 @@ public sealed partial class CassandraChainStorage : IChainStorage
         return await session.ExecuteAsync(statement).WaitAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Runs <paramref name="work"/> for every item with a bounded number of requests in flight; results keep the input order.</summary>
+    /// <summary>
+    /// Runs <paramref name="work"/> for every item with a bounded number of requests in flight; results keep the input order.
+    /// After the first failure no further item is started, and the method only returns once nothing it started is still running.
+    /// A caller that runs several of these at once passes one shared <paramref name="gate"/> to bound them together.
+    /// </summary>
     private static async Task<TResult[]> RunBoundedAsync<TItem, TResult>(
         IReadOnlyCollection<TItem> items,
         Func<TItem, Task<TResult>> work,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        SemaphoreSlim? gate = null)
     {
         var results = new TResult[items.Count];
         if (items.Count == 0)
@@ -93,17 +98,37 @@ public sealed partial class CassandraChainStorage : IChainStorage
             return results;
         }
 
-        using var gate = new SemaphoreSlim(MaxInFlight);
+        var ownGate = gate is null ? new SemaphoreSlim(MaxInFlight) : null;
+        var limit = gate ?? ownGate!;
+        Exception? failure = null;
         var index = 0;
         var tasks = new List<Task>(items.Count);
-        foreach (var item in items)
+        try
         {
-            var slot = index++;
-            await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-            tasks.Add(RunOneAsync(item, slot));
+            foreach (var item in items)
+            {
+                var slot = index++;
+                await limit.WaitAsync(cancellationToken).ConfigureAwait(false);
+                if (Volatile.Read(ref failure) is not null)
+                {
+                    limit.Release();
+                    break;
+                }
+
+                tasks.Add(RunOneAsync(item, slot));
+            }
+        }
+        finally
+        {
+            await Task.WhenAll(tasks).ConfigureAwait(false);
+            ownGate?.Dispose();
         }
 
-        await Task.WhenAll(tasks).ConfigureAwait(false);
+        if (failure is not null)
+        {
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
+        }
+
         return results;
 
         async Task RunOneAsync(TItem item, int slot)
@@ -112,9 +137,13 @@ public sealed partial class CassandraChainStorage : IChainStorage
             {
                 results[slot] = await work(item).ConfigureAwait(false);
             }
+            catch (Exception ex)
+            {
+                Interlocked.CompareExchange(ref failure, ex, null);
+            }
             finally
             {
-                gate.Release();
+                limit.Release();
             }
         }
     }

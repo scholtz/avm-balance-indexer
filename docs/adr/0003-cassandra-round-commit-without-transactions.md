@@ -45,6 +45,9 @@ the same contract suite (`StorageContractTests`) as PostgreSQL.
 
 - Current-holdings and effect rows of an unpublished round can exist for a short time or after a crash; they are
   invisible to every read except as described for holdings above.
+- Replay convergence assumes the round is derived deterministically. If the normalizer changes between a crash and the replay
+  so that a round yields a different effect set, rows of the crashed attempt that the new set does not overwrite stay
+  visible after publication. Such a change requires reindexing into a fresh keyspace (it changes balances anyway).
 - `GetHoldingsAsync` filters zero balances in the client (amounts are text), so a page can cost several partition reads
   for an account with many zero-balance opt-ins.
 - Fee sink and rewards pool remain hot partitions (see ADR 0002); the 100,000-round bucket and the shard count need
