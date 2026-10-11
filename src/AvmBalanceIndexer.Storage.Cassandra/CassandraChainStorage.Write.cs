@@ -269,7 +269,18 @@ public sealed partial class CassandraChainStorage
         }
 
         statement.SetSerialConsistencyLevel(ConsistencyLevel.LocalSerial);
-        var result = await ExecuteAsync(statement, cancellationToken).ConfigureAwait(false);
+        RowSet result;
+        try
+        {
+            result = await ExecuteAsync(statement, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            // The outcome is unknown (a CAS timeout may well have been applied): the next attempt must read the cursor.
+            LastPublished = null;
+            throw;
+        }
+
         if (!result.First().GetValue<bool>("[applied]"))
         {
             LastPublished = null;
