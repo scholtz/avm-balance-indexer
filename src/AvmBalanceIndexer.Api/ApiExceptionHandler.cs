@@ -28,6 +28,7 @@ public sealed class ApiExceptionHandler : IExceptionHandler
     {
         ChainNotStartedException e => (StatusCodes.Status503ServiceUnavailable, new { error = "The chain has not been indexed yet.", chain = e.Chain }),
         RoundNotIndexedException e => (StatusCodes.Status404NotFound, new { error = "The round is not indexed yet.", requestedRound = e.RequestedRound, indexedRound = e.IndexedRound }),
+        BadHttpRequestException => (StatusCodes.Status400BadRequest, new { error = "The request could not be understood; check the query parameters." }),
         ArgumentException { ParamName: "cursor" } => (StatusCodes.Status400BadRequest, new { error = "The cursor is not valid." }),
         ArgumentOutOfRangeException { ParamName: "tokenId" } => (StatusCodes.Status400BadRequest, new { error = "The token id is not supported." }),
         _ => null,

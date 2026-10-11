@@ -266,15 +266,27 @@ public class InMemoryChainStorage(ChainContext context) : IChainStorage
     private static int CompareHolding(Holding holding, string cursor)
     {
         var parts = cursor.Split(':');
+        if (parts.Length != 2 || !ulong.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var id))
+        {
+            throw new ArgumentException("Invalid cursor.", nameof(cursor));
+        }
+
         var kindOrder = string.CompareOrdinal(holding.Token.Kind.ToStorageName(), parts[0]);
-        return kindOrder != 0 ? kindOrder : holding.Token.TokenId.CompareTo(ulong.Parse(parts[1], CultureInfo.InvariantCulture));
+        return kindOrder != 0 ? kindOrder : holding.Token.TokenId.CompareTo(id);
     }
 
     private static int CompareEffect(TokenEffect effect, string cursor)
     {
         var parts = cursor.Split(':');
-        var key = (effect.Id.Round, effect.Id.IntraRoundOrder, effect.Id.Ordinal);
-        return key.CompareTo((ulong.Parse(parts[0], CultureInfo.InvariantCulture), int.Parse(parts[1], CultureInfo.InvariantCulture), int.Parse(parts[2], CultureInfo.InvariantCulture)));
+        if (parts.Length != 3
+            || !ulong.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out var round)
+            || !int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var order)
+            || !int.TryParse(parts[2], NumberStyles.None, CultureInfo.InvariantCulture, out var ordinal))
+        {
+            throw new ArgumentException("Invalid cursor.", nameof(cursor));
+        }
+
+        return (effect.Id.Round, effect.Id.IntraRoundOrder, effect.Id.Ordinal).CompareTo((round, order, ordinal));
     }
 
     private static Page<T> ToPage<T>(List<T> fetched, int pageSize, ulong indexed, Func<T, string> cursorOf)

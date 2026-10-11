@@ -57,6 +57,8 @@ v1.MapGet(
     })
     .WithName("GetChainStatus");
 
+v1.MapReadEndpoints();
+
 app.Run();
 
 public partial class Program;
