@@ -9,6 +9,9 @@ namespace AvmBalanceIndexer.Indexing.Adapters;
 /// </summary>
 public static class ApplyDataReader
 {
+    // The only logs kept are ARC-200 transfer events (see Arc200Events); every other log is skipped without copying it.
+    private const int Arc200TransferLogLength = 100;
+
     /// <summary>Returns the apply data of all top-level transactions of the block in block order.</summary>
     public static IReadOnlyList<TxnApplyData> ReadBlockTransactions(ReadOnlyMemory<byte> payload)
     {
@@ -159,7 +162,11 @@ public static class ApplyDataReader
         var count = reader.ReadArrayHeader();
         for (var i = 0; i < count; i++)
         {
-            logs.Add(reader.ReadBytes()?.ToArray() ?? []);
+            // Only 100-byte logs can be ARC-200 transfers; keeping the others would allocate for nothing.
+            if (reader.ReadBytes() is { Length: Arc200TransferLogLength } log)
+            {
+                logs.Add(log.ToArray());
+            }
         }
 
         return logs;

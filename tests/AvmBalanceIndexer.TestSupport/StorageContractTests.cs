@@ -682,7 +682,7 @@ public abstract class StorageContractTests
         var holders = await storage.GetHoldersAtRoundAsync(key, 3, false, null, 10, CancellationToken.None);
         var holder = Assert.Single(holders.Items);
         Assert.Equal((Alice, supply - 5), (holder.Account, holder.Amount.Value));
-        Assert.Equal((supply - 5, 2), ((await storage.GetHoldingsAsync(Alice, false, null, 10, CancellationToken.None)).Items.Single(h => h.Token == key).Amount.Value, 2));
+        Assert.Equal(supply - 5, (await storage.GetHoldingsAsync(Alice, false, null, 10, CancellationToken.None)).Items.Single(h => h.Token == key).Amount.Value);
 
         var token = await storage.GetAsync(key, CancellationToken.None);
         Assert.NotNull(token);
