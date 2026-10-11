@@ -19,6 +19,9 @@ public sealed class PostgreSqlOptions
     /// <summary>Fixed hash partition count for effects_by_account_token; chosen once per deployment.</summary>
     public int AccountHashPartitions { get; set; } = 64;
 
+    /// <summary>How often the writer lease session is checked (a dead session loses the lease).</summary>
+    public int LeaseHeartbeatSeconds { get; set; } = 5;
+
     /// <summary>Longest a read may run (statement timeout), so one request cannot hold a snapshot and scan for minutes.</summary>
     public int ReadTimeoutSeconds { get; set; } = 30;
 }
@@ -28,6 +31,9 @@ public sealed class CassandraOptions
     public string[] ContactPoints { get; set; } = [];
 
     public int Port { get; set; } = 9042;
+
+    /// <summary>Lifetime of the writer lease row; failover takes at most this long. A Paxos round must fit well inside it.</summary>
+    public int LeaseTtlSeconds { get; set; } = 30;
 
     /// <summary>Longest any single request (read, write or schema change) may take before the driver gives up.</summary>
     public int ReadTimeoutSeconds { get; set; } = 30;

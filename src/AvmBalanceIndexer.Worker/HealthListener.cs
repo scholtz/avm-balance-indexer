@@ -58,7 +58,15 @@ public sealed partial class HealthListener(IOptions<WorkerOptions> options, Work
                 }
 
                 // A single aborted accept must not switch the probes off for the rest of the process lifetime.
-                await Task.Delay(100, stoppingToken).ConfigureAwait(false);
+                try
+                {
+                    await Task.Delay(100, stoppingToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+
                 continue;
             }
 
@@ -66,9 +74,10 @@ public sealed partial class HealthListener(IOptions<WorkerOptions> options, Work
             {
                 Respond(context);
             }
-            catch (Exception ex) when (ex is HttpListenerException or IOException or ObjectDisposedException)
+            catch (Exception ex)
             {
-                // The prober went away mid-response.
+                // Whatever goes wrong with one probe must never reach the host: the indexer matters more than its probes.
+                LogProbeFailed(logger, ex);
             }
         }
     }
@@ -93,6 +102,9 @@ public sealed partial class HealthListener(IOptions<WorkerOptions> options, Work
             context.Response.Close();
         }
     }
+
+    [LoggerMessage(EventId = 1311, Level = LogLevel.Debug, Message = "A health probe could not be answered")]
+    private static partial void LogProbeFailed(ILogger logger, Exception exception);
 
     [LoggerMessage(EventId = 1310, Level = LogLevel.Warning, Message = "Health endpoints are off: cannot listen on port {Port}")]
     private static partial void LogCannotListen(ILogger logger, Exception exception, int port);

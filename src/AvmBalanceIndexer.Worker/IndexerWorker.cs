@@ -1,4 +1,3 @@
-using System.Data.Common;
 using AvmBalanceIndexer.Domain.Chains;
 using AvmBalanceIndexer.Domain.Storage;
 using AvmBalanceIndexer.Indexing.Adapters;
@@ -101,7 +100,8 @@ public sealed partial class IndexerWorker(
                 {
                     await FollowAsync(term.Token).ConfigureAwait(false);
                 }
-                catch (Exception) when (lease.Lost.IsCancellationRequested && !stoppingToken.IsCancellationRequested)
+                catch (Exception ex) when (lease.Lost.IsCancellationRequested && !stoppingToken.IsCancellationRequested
+                    && (ex is OperationCanceledException or ChainDivergenceException || IsTransient(ex, stoppingToken)))
                 {
                     // A commit of a writer that has just lost the lease fails against the new writer's cursor (divergence): that
                     // is the safety net working, not a data problem.
@@ -182,7 +182,6 @@ public sealed partial class IndexerWorker(
         exception is BlockFetchException or HttpRequestException or TimeoutException or IOException
         || exception is Algorand.ApiException { StatusCode: >= 500 or 408 or 429 }
         || (exception is TaskCanceledException && !stoppingToken.IsCancellationRequested)
-        || exception is DbException { IsTransient: true }
         || exception is StorageTimeoutException
         || failures.IsTransient(exception);
 

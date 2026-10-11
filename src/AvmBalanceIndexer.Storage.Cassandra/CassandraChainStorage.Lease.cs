@@ -48,9 +48,11 @@ public sealed partial class CassandraChainStorage : IWriterLeaseProvider
             // The lease is reported lost when 80% of the TTL passed without a confirmed renewal, whatever the renewal task is doing
             // (hung, failing, slow): a timer that is pushed back by every successful renewal.
             _expiryRegistration = _expiry.Token.Register(() => _lost.Cancel());
-            _expiry.CancelAfter(Remaining(acquireRequested));
+            _expiry.CancelAfter(Clamp(Remaining(acquireRequested)));
             _renewal = RenewAsync(acquireRequested);
         }
+
+        private static TimeSpan Clamp(TimeSpan remaining) => remaining < TimeSpan.Zero ? TimeSpan.Zero : remaining;
 
         private TimeSpan Remaining(long sentAt) => _safe - System.Diagnostics.Stopwatch.GetElapsedTime(sentAt);
 
@@ -121,7 +123,7 @@ public sealed partial class CassandraChainStorage : IWriterLeaseProvider
                         }
 
                         lastRenewalSent = sent;
-                        _expiry.CancelAfter(Remaining(sent));
+                        _expiry.CancelAfter(Clamp(Remaining(sent)));
                     }
                     catch (Exception) when (!_stop.IsCancellationRequested)
                     {

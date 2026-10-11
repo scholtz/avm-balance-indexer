@@ -36,7 +36,8 @@ public static class PostgreSqlStorageExtensions
             provider.GetRequiredService<NpgsqlDataSource>(),
             provider.GetRequiredService<ChainContext>(),
             provider.GetRequiredService<IOptions<StorageOptions>>().Value.PostgreSql.AccountHashPartitions,
-            TimeSpan.FromSeconds(provider.GetRequiredService<IOptions<StorageOptions>>().Value.PostgreSql.ReadTimeoutSeconds)));
+            TimeSpan.FromSeconds(provider.GetRequiredService<IOptions<StorageOptions>>().Value.PostgreSql.ReadTimeoutSeconds),
+            TimeSpan.FromSeconds(provider.GetRequiredService<IOptions<StorageOptions>>().Value.PostgreSql.LeaseHeartbeatSeconds)));
         services.AddSingleton<IChainStorage>(static provider => provider.GetRequiredService<PostgreSqlChainStorage>());
         services.AddSingleton<IStorageFailureClassifier, PostgreSqlFailureClassifier>();
         services.AddSingleton<IWriterLeaseProvider>(static provider => provider.GetRequiredService<PostgreSqlChainStorage>());
@@ -56,6 +57,11 @@ public static class PostgreSqlStorageExtensions
             if (string.IsNullOrWhiteSpace(settings.ConnectionString))
             {
                 return ValidateOptionsResult.Fail("Storage:PostgreSql:ConnectionString is required when Storage:Provider is PostgreSql.");
+            }
+
+            if (settings.LeaseHeartbeatSeconds is < 1 or > 60)
+            {
+                return ValidateOptionsResult.Fail("Storage:PostgreSql:LeaseHeartbeatSeconds must be between 1 and 60.");
             }
 
             if (settings.ReadTimeoutSeconds is < 1 or > 600)

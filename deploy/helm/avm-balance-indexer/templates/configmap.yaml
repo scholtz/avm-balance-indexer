@@ -11,6 +11,8 @@ data:
   Storage__Cassandra__UseTls: {{ .Values.storage.cassandra.useTls | quote }}
   Storage__PostgreSql__ReadTimeoutSeconds: {{ .Values.storage.postgreSql.readTimeoutSeconds | quote }}
   Storage__Cassandra__ReadTimeoutSeconds: {{ .Values.storage.cassandra.readTimeoutSeconds | quote }}
+  Storage__PostgreSql__LeaseHeartbeatSeconds: {{ .Values.storage.postgreSql.leaseHeartbeatSeconds | quote }}
+  Storage__Cassandra__LeaseTtlSeconds: {{ .Values.storage.cassandra.leaseTtlSeconds | quote }}
   Storage__Cassandra__Port: {{ .Values.storage.cassandra.port | quote }}
   Storage__Cassandra__CreateKeyspace: {{ .Values.storage.cassandra.createKeyspace | quote }}
   Storage__Cassandra__ReplicationFactor: {{ .Values.storage.cassandra.replicationFactor | quote }}

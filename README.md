@@ -83,6 +83,7 @@ curl http://localhost:5000/v1/algorand-testnet/status
 | `Storage:PostgreSql:ConnectionString` | Required for PostgreSQL. Keep it in a secret. |
 | `Storage:PostgreSql:AccountHashPartitions` | Hash partitions of the account effect table, 1 to 1024. Fixed per database. |
 | `Storage:PostgreSql:ReadTimeoutSeconds` / `Storage:Cassandra:ReadTimeoutSeconds` | Default 30. PostgreSQL: `statement_timeout` of each read query. Cassandra: deadline of a whole read and driver timeout of every request (at least 5). A slower read fails with HTTP 503 instead of holding a snapshot. |
+| `Storage:Cassandra:LeaseTtlSeconds` / `Storage:PostgreSql:LeaseHeartbeatSeconds` | Writer lease tuning (default 30 / 5): the Cassandra lease row TTL bounds failover time; the PostgreSQL heartbeat detects a dead lease session. |
 | `Storage:Cassandra:ContactPoints` / `Port` | Required for Cassandra: hosts and native-protocol port (default 9042). |
 | `Storage:Cassandra:Keyspace` / `LocalDatacenter` | One keyspace per chain deployment; the datacenter the driver routes to. Reads and writes use `LOCAL_QUORUM`. |
 | `Storage:Cassandra:CreateKeyspace` / `ReplicationFactor` | Let the worker create the keyspace (`NetworkTopologyStrategy`, default 3 replicas). Use `ReplicationFactor` 1 on a single-node dev cluster (reads and writes need a `LOCAL_QUORUM`). Set `CreateKeyspace` to false when the operator manages it. |
@@ -133,7 +134,7 @@ another chain, 503 while nothing is indexed yet. A walk over the holders of the 
   (HTTP 503). Asynchronous scans are planned (#30).
 - Indexing speed is about 60 rounds per second with default settings, which is far too slow to backfill MainNet in a
   reasonable time. Batching and fetch tuning are follow-up work.
-- Several workers may run per chain: one holds the writer lease (PostgreSQL advisory lock on a dedicated session, Cassandra TTL row) and indexes, the others stand by. Failover takes up to the lease TTL (30 s) on Cassandra and until PostgreSQL notices the dead session (TCP keepalive) on PostgreSQL.
+- Several workers may run per chain: one holds the writer lease (PostgreSQL advisory lock on a dedicated session, Cassandra TTL row) and indexes, the others stand by. Failover takes up to the lease TTL (30 s) on Cassandra and about 30 s (TCP keepalives of the lease session) on PostgreSQL. Worker metrics are published on the `AvmBalanceIndexer.Worker` meter; no exporter is bundled yet.
 - Block headers are hash-checked against their certificate digest and transactions against the header commitments, but
   certificate signatures are not verified (ADR 0004). A host serving a whole fabricated chain is not detected: run your
   own archival nodes.

@@ -14,19 +14,17 @@ public sealed partial class PostgreSqlChainStorage : IWriterLeaseProvider
         var connection = await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            // The server only notices a dead client (and releases the lock) through TCP keepalives, whose default is hours. Probe a
-            // silent lease session every ~15 s and give up after three misses; the settings end with the session.
-            await using (var keepalive = new NpgsqlCommand(
-                "SET tcp_keepalives_idle = 15; SET tcp_keepalives_interval = 5; SET tcp_keepalives_count = 3", connection))
-            {
-                await keepalive.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-            }
-
             // The key differs from the transaction-scoped writer lock of WriteRoundAsync (seed 1).
             await using var command = new NpgsqlCommand("SELECT pg_try_advisory_lock(hashtextextended(@chain, 2))", connection);
             command.Parameters.AddWithValue("chain", _chain);
             if (await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is true)
             {
+                // The server only notices a dead client (and releases the lock) through TCP keepalives, whose default is hours. Probe a
+                // silent lease session every ~15 s and give up after three misses; the settings end with the session. Only the
+                // winner pays for this: standbys poll without any extra round trip.
+                await using var keepalive = new NpgsqlCommand(
+                    "SET tcp_keepalives_idle = 15; SET tcp_keepalives_interval = 5; SET tcp_keepalives_count = 3", connection);
+                await keepalive.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
                 return new Lease(connection, _chain, _leaseHeartbeat);
             }
 
