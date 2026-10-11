@@ -19,15 +19,20 @@ public sealed partial class StatusSampler(
     {
         var interval = TimeSpan.FromSeconds(Math.Max(1, options.Value.StatusSampleSeconds));
         using var timer = new PeriodicTimer(interval);
+        var failing = false;
         do
         {
             try
             {
                 health.ReportChainStatus(await storage.GetAsync(chain.Chain, stoppingToken).ConfigureAwait(false));
+                failing = false;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                LogSampleFailed(logger, ex);
+                // The previous sample stays (and the counter rises); only the first failure of a streak is a warning.
+                health.ReportSampleFailure();
+                LogSampleFailed(logger, ex, failing ? LogLevel.Debug : LogLevel.Warning);
+                failing = true;
             }
         }
         while (await WaitAsync(timer, stoppingToken).ConfigureAwait(false));
@@ -45,6 +50,6 @@ public sealed partial class StatusSampler(
         }
     }
 
-    [LoggerMessage(EventId = 1320, Level = LogLevel.Debug, Message = "The chain status could not be sampled")]
-    private static partial void LogSampleFailed(ILogger logger, Exception exception);
+    [LoggerMessage(EventId = 1320, Message = "The chain status could not be sampled; the indexer metrics keep their last values")]
+    private static partial void LogSampleFailed(ILogger logger, Exception exception, LogLevel level);
 }

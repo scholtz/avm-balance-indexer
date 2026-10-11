@@ -9,9 +9,10 @@ namespace AvmBalanceIndexer.Hosting;
 public static class TelemetryExtensions
 {
     public const string EndpointVariable = "OTEL_EXPORTER_OTLP_ENDPOINT";
+    public const string MetricsEndpointVariable = "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT";
 
     /// <summary>Meters of the ASP.NET Core runtime that describe request volume, latency and connections.</summary>
-    public static readonly string[] AspNetCoreMeters =
+    public static IReadOnlyList<string> AspNetCoreMeters { get; } =
     [
         "Microsoft.AspNetCore.Hosting",
         "Microsoft.AspNetCore.Server.Kestrel",
@@ -19,19 +20,22 @@ public static class TelemetryExtensions
         "Microsoft.AspNetCore.Diagnostics",
     ];
 
+    /// <summary>Meters of the clients every process uses: outgoing HTTP (algod, archival nodes) and the PostgreSQL driver.</summary>
+    public static IReadOnlyList<string> ClientMeters { get; } = ["System.Net.Http", "Npgsql"];
+
     /// <summary>
     /// Publishes the given meters and the .NET runtime metrics over OTLP (any OpenTelemetry collector, or Prometheus with its OTLP
     /// receiver). Off unless an OTLP endpoint is configured (<c>OTEL_EXPORTER_OTLP_ENDPOINT</c>, which also selects protocol, headers and
     /// interval through the standard <c>OTEL_*</c> variables) or <c>Telemetry:Enabled</c> is true; nothing is started otherwise.
     /// </summary>
-    public static IServiceCollection AddAvmTelemetry(this IServiceCollection services, IConfiguration configuration, string serviceName, params string[] meters)
+    public static IServiceCollection AddAvmTelemetry(this IServiceCollection services, IConfiguration configuration, string serviceName, params IEnumerable<string> meters)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentException.ThrowIfNullOrWhiteSpace(serviceName);
 
         var enabled = configuration.GetValue<bool?>("Telemetry:Enabled")
-            ?? !string.IsNullOrWhiteSpace(configuration[EndpointVariable]);
+            ?? (!string.IsNullOrWhiteSpace(configuration[EndpointVariable]) || !string.IsNullOrWhiteSpace(configuration[MetricsEndpointVariable]));
         if (!enabled)
         {
             return services;
@@ -49,7 +53,7 @@ public static class TelemetryExtensions
             })
             .WithMetrics(metrics =>
             {
-                metrics.AddMeter(meters).AddRuntimeInstrumentation().AddOtlpExporter();
+                metrics.AddMeter([.. meters, .. ClientMeters]).AddRuntimeInstrumentation().AddOtlpExporter();
             });
         return services;
     }

@@ -58,21 +58,13 @@ public class HostingExtensionsTests
     [Fact]
     public void Telemetry_Is_Off_Unless_An_Endpoint_Or_The_Switch_Is_Configured()
     {
-        var off = new ServiceCollection().AddAvmTelemetry(Config(("Chain", ChainId.Voi)), "avm-test");
-        using var offProvider = off.BuildServiceProvider();
-        Assert.Null(offProvider.GetService<OpenTelemetry.Metrics.MeterProvider>());
+        // Only the registrations are inspected: building a provider would start an exporter that tries to reach the endpoint.
+        static bool Registers(IServiceCollection services) => services.Any(static d => d.ServiceType == typeof(OpenTelemetry.Metrics.MeterProvider));
 
-        var viaEndpoint = new ServiceCollection().AddAvmTelemetry(Config(("Chain", ChainId.Voi), (TelemetryExtensions.EndpointVariable, "http://localhost:4317")), "avm-test", "Some.Meter");
-        using var endpointProvider = viaEndpoint.BuildServiceProvider();
-        Assert.NotNull(endpointProvider.GetService<OpenTelemetry.Metrics.MeterProvider>());
-
-        var viaSwitch = new ServiceCollection().AddAvmTelemetry(Config(("Telemetry:Enabled", "true")), "avm-test");
-        using var switchProvider = viaSwitch.BuildServiceProvider();
-        Assert.NotNull(switchProvider.GetService<OpenTelemetry.Metrics.MeterProvider>());
-
-        var forcedOff = new ServiceCollection().AddAvmTelemetry(Config(("Telemetry:Enabled", "false"), (TelemetryExtensions.EndpointVariable, "http://localhost:4317")), "avm-test");
-        using var forcedOffProvider = forcedOff.BuildServiceProvider();
-        Assert.Null(forcedOffProvider.GetService<OpenTelemetry.Metrics.MeterProvider>());
+        Assert.False(Registers(new ServiceCollection().AddAvmTelemetry(Config(("Chain", ChainId.Voi)), "avm-test")));
+        Assert.True(Registers(new ServiceCollection().AddAvmTelemetry(Config(("Chain", ChainId.Voi), (TelemetryExtensions.EndpointVariable, "http://localhost:4317")), "avm-test", "Some.Meter")));
+        Assert.True(Registers(new ServiceCollection().AddAvmTelemetry(Config(("Telemetry:Enabled", "true")), "avm-test")));
+        Assert.False(Registers(new ServiceCollection().AddAvmTelemetry(Config(("Telemetry:Enabled", "false"), (TelemetryExtensions.EndpointVariable, "http://localhost:4317")), "avm-test")));
     }
 
     [Fact]

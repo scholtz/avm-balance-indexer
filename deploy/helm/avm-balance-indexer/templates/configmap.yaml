@@ -7,6 +7,11 @@ data:
   Chain: {{ .Values.chain | quote }}
   {{- if .Values.telemetry.otlpEndpoint }}
   OTEL_EXPORTER_OTLP_ENDPOINT: {{ .Values.telemetry.otlpEndpoint | quote }}
+  {{- end }}
+  {{- if .Values.telemetry.otlpMetricsEndpoint }}
+  OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: {{ .Values.telemetry.otlpMetricsEndpoint | quote }}
+  {{- end }}
+  {{- if or .Values.telemetry.otlpEndpoint .Values.telemetry.otlpMetricsEndpoint }}
   OTEL_EXPORTER_OTLP_PROTOCOL: {{ .Values.telemetry.otlpProtocol | quote }}
   {{- end }}
   Worker__HealthPort: {{ .Values.worker.healthPort | quote }}

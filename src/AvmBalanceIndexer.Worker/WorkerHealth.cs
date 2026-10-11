@@ -28,6 +28,7 @@ public sealed class WorkerHealth : IDisposable
     private long _leasesAcquired;
     private long _leasesLost;
     private long _transientFailures;
+    private long _sampleFailures;
     private Func<long> _roundsCommitted = static () => 0;
     private ChainStatus? _chainStatus;
     private Func<DateTimeOffset> _now = static () => DateTimeOffset.UtcNow;
@@ -39,13 +40,14 @@ public sealed class WorkerHealth : IDisposable
         _meter.CreateObservableGauge("avm.worker.is_leader", () => State == WorkerState.Leader ? 1 : 0, description: "1 while this replica holds the writer lease");
         _meter.CreateObservableCounter("avm.worker.leases_acquired", () => Interlocked.Read(ref _leasesAcquired), description: "Times this replica became the writer");
         _meter.CreateObservableCounter("avm.worker.leases_lost", () => Interlocked.Read(ref _leasesLost), description: "Times the writer lease was lost while indexing");
+        _meter.CreateObservableCounter("avm.indexer.status_sample_failures", () => Interlocked.Read(ref _sampleFailures), description: "Failed reads of the published status; while they rise the avm.indexer gauges are stale");
         _meter.CreateObservableCounter("avm.worker.transient_failures", () => Interlocked.Read(ref _transientFailures), description: "Retried indexing failures");
         _meter.CreateObservableCounter("avm.worker.rounds_committed", () => _roundsCommitted(), description: "Rounds this process committed");
 
         // What the database says, sampled by StatusSampler: the same numbers the API reports, as time series.
         _meter.CreateObservableGauge("avm.indexer.indexed_round", () => Measure(static s => (long)s.IndexedRound), description: "Published round");
         _meter.CreateObservableGauge("avm.indexer.target_round", () => Measure(static s => s.TargetRound is { } t ? (long)t : null), description: "Latest round of the chain as last seen by the indexer");
-        _meter.CreateObservableGauge("avm.indexer.lag_rounds", () => Measure(static s => (long)s.Lag), description: "Rounds between the chain tip and the published round");
+        _meter.CreateObservableGauge("avm.indexer.lag_rounds", () => Measure(static s => s.TargetRound is null ? null : (long)s.Lag), description: "Rounds between the chain tip and the published round");
         _meter.CreateObservableGauge(
             "avm.indexer.status_age_seconds",
             () => Measure(s => (long)Math.Max(0, (_now() - s.UpdatedAt).TotalSeconds)),
@@ -95,6 +97,8 @@ public sealed class WorkerHealth : IDisposable
         Interlocked.Increment(ref _leasesLost);
         State = WorkerState.Standby;
     }
+
+    public void ReportSampleFailure() => Interlocked.Increment(ref _sampleFailures);
 
     public void ReportTransientFailure() => Interlocked.Increment(ref _transientFailures);
 

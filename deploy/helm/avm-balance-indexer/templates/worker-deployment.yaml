@@ -16,6 +16,9 @@ spec:
     matchLabels: {{- include "avm.selectorLabels" (merge (dict "component" "worker") .) | nindent 6 }}
   template:
     metadata:
+      annotations:
+        # New configuration (for example the telemetry endpoint) restarts the pods.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
       labels: {{- include "avm.labels" . | nindent 8 }}
         app.kubernetes.io/component: worker
     spec:
