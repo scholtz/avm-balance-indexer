@@ -77,8 +77,9 @@ public sealed partial class RoundIndexer(
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var latest = await adapter.GetLatestRoundAsync(cancellationToken).ConfigureAwait(false);
-            var target = stopAfterRound is { } stop ? stop : latest;
+            // A bounded run knows its target and does not need algod at all.
+            var latest = stopAfterRound ?? await adapter.GetLatestRoundAsync(cancellationToken).ConfigureAwait(false);
+            var target = latest;
 
             if (next > target)
             {

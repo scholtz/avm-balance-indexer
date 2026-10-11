@@ -133,6 +133,7 @@ public sealed class ApiTests : IDisposable
     {
         Assert.Equal(404, ApiExceptionHandler.Map(new RoundNotIndexedException(10, 7))!.Value.Status);
         Assert.Equal(400, ApiExceptionHandler.Map(new ArgumentException("Invalid cursor.", "cursor"))!.Value.Status);
+        Assert.Equal(400, ApiExceptionHandler.Map(new ArgumentOutOfRangeException("tokenId", 1UL << 63, "too large"))!.Value.Status);
         Assert.Null(ApiExceptionHandler.Map(new ArgumentException("something else", "other")));
         Assert.Null(ApiExceptionHandler.Map(new InvalidOperationException("boom")));
     }

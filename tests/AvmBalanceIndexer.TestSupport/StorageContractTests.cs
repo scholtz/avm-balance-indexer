@@ -218,6 +218,16 @@ public abstract class StorageContractTests
     }
 
     [Fact]
+    public async Task A_From_Round_Beyond_Every_Indexed_Round_Matches_Nothing()
+    {
+        var storage = await IndexedAsync();
+
+        var page = await storage.GetEffectsAsync(Alice, Native, ulong.MaxValue, null, null, 50, CancellationToken.None);
+
+        Assert.Empty(page.Items);
+    }
+
+    [Fact]
     public async Task Account_History_Honours_The_Round_Range()
     {
         var storage = await IndexedAsync();
@@ -399,6 +409,18 @@ public abstract class StorageContractTests
         await Assert.ThrowsAsync<ChainDivergenceException>(() => CreateIndexer(storage, Adapter(blocks)).RunAsync(5, CancellationToken.None));
 
         Assert.Equal(3UL, (await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!.IndexedRound);
+    }
+
+    [Fact]
+    public async Task A_Bounded_Run_Does_Not_Need_Algod()
+    {
+        var storage = await CreateStorageAsync();
+        var adapter = Adapter();
+        adapter.AlgodDown = true;
+
+        var result = await CreateIndexer(storage, adapter).RunAsync(3, CancellationToken.None);
+
+        Assert.Equal(3UL, result.LastRound);
     }
 
     [Fact]

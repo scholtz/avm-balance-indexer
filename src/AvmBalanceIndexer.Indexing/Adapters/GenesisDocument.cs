@@ -74,6 +74,9 @@ public sealed record GenesisDocument(string SchemaId, string Network, IReadOnlyL
     /// <summary>
     /// SHA-512/256 over <c>"GE"</c> and the canonical msgpack of the genesis document: object keys sorted, minimal integer
     /// encodings, base64 key material as binary. Reproduces the pinned hashes of Algorand MainNet, TestNet and Voi.
+    /// Every key present in the JSON is encoded, including empty strings and zeros: genesis files are written by the same
+    /// codec that hashes them, so a field is in the file exactly when it is in the hashed encoding (MainNet only hashes
+    /// correctly with its explicit empty comments kept).
     /// </summary>
     private static byte[] ComputeHash(JsonElement root)
     {

@@ -54,7 +54,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
 
         if (discovered.Count == 0)
         {
-            throw new BlockFetchException("No archival gossip nodes are configured or discoverable.", round);
+            throw new BlockFetchException("No archival gossip nodes are available: none are configured, or DNS discovery is failing. Retrying.", round);
         }
 
         var hosts = OrderHosts(discovered);

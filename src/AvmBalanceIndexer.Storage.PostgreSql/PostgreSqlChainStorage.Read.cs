@@ -300,7 +300,8 @@ public sealed partial class PostgreSqlChainStorage
         command.Parameters.AddWithValue("account", account.ToArray());
         command.Parameters.AddWithValue("kind", token.Kind.ToStorageName());
         command.Parameters.AddWithValue("id", StorageId(token.TokenId));
-        command.Parameters.AddWithValue("from", unchecked((long)(fromRound ?? 0)));
+        // A start beyond the signed column range lies past every indexed round, so it matches nothing.
+        command.Parameters.AddWithValue("from", (long)Math.Min(fromRound ?? 0, long.MaxValue));
         command.Parameters.AddWithValue("to", unchecked((long)Math.Min(toRound ?? indexed, indexed)));
         command.Parameters.AddWithValue("cr", cursorRound);
         command.Parameters.AddWithValue("co", cursorOrder);

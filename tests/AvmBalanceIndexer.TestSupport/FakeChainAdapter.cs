@@ -15,6 +15,9 @@ public sealed class FakeChainAdapter(ChainProfile profile, GenesisDocument genes
     /// <summary>The round reported as latest; defaults to the highest added block.</summary>
     public ulong? Latest { get; set; }
 
+    /// <summary>When true, asking for the latest round fails like an unreachable algod would.</summary>
+    public bool AlgodDown { get; set; }
+
     /// <summary>Number of block fetches served.</summary>
     public int FetchCount => Volatile.Read(ref _fetchCount);
 
@@ -25,7 +28,9 @@ public sealed class FakeChainAdapter(ChainProfile profile, GenesisDocument genes
     }
 
     public Task<ulong> GetLatestRoundAsync(CancellationToken cancellationToken) =>
-        Task.FromResult(Latest ?? (_blocks.Count == 0 ? 0UL : _blocks.Keys.Max()));
+        AlgodDown
+            ? Task.FromException<ulong>(new HttpRequestException("algod is unreachable"))
+            : Task.FromResult(Latest ?? (_blocks.Count == 0 ? 0UL : _blocks.Keys.Max()));
 
     public Task<GenesisDocument> GetGenesisAsync(CancellationToken cancellationToken) => Task.FromResult(genesis);
 
