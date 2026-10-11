@@ -50,6 +50,11 @@ public sealed class PostgresFixture : IAsyncLifetime
 
     public async Task DisposeAsync()
     {
+        foreach (var dataSource in _dataSources.Values)
+        {
+            await dataSource.DisposeAsync().ConfigureAwait(false);
+        }
+
         if (_container is not null)
         {
             await _container.DisposeAsync().ConfigureAwait(false);
@@ -71,7 +76,7 @@ public sealed class PostgresFixture : IAsyncLifetime
             await create.ExecuteNonQueryAsync().ConfigureAwait(false);
         }
 
-        var connectionString = new NpgsqlConnectionStringBuilder(_adminConnectionString) { Database = name, Pooling = true, MaxPoolSize = 8 }.ConnectionString;
+        var connectionString = new NpgsqlConnectionStringBuilder(_adminConnectionString) { Database = name, Pooling = true, MaxPoolSize = 8, ConnectionIdleLifetime = 1, ConnectionPruningInterval = 1 }.ConnectionString;
         var dataSource = NpgsqlDataSource.Create(connectionString);
         var storage = new PostgreSqlChainStorage(dataSource, new ChainContext(chain), accountPartitions, readTimeout, leaseHeartbeat);
         _dataSources[storage] = dataSource;
