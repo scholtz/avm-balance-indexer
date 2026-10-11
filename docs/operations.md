@@ -25,7 +25,7 @@ These cannot change without indexing into a fresh database or keyspace:
 | `Storage:PostgreSql:AccountHashPartitions` | PostgreSQL | Hash partitions of the account effect table (1 to 1024, default 64). The worker refuses to start when it differs from the existing database. |
 | Round bucket size (100,000 rounds) | both | Bounds partition growth; compiled in (`RoundBuckets.Size`). |
 | Token shards (16) | Cassandra | Spreads token-oriented tables; compiled in. |
-| `Storage:Cassandra:Keyspace`, `LocalDatacenter`, `ReplicationFactor` | Cassandra | Keyspace name, datacenter the driver routes to, replicas per datacenter (default 3). Use 1 only on a single-node development cluster; reads and writes need a `LOCAL_QUORUM`. |
+| `Storage:Cassandra:Keyspace`, `Storage:Cassandra:LocalDatacenter`, `Storage:Cassandra:ReplicationFactor` | Cassandra | Keyspace name, datacenter the driver routes to, replicas per datacenter (default 3). Use 1 only on a single-node development cluster; reads and writes need a `LOCAL_QUORUM`. |
 
 Notes that matter for capacity:
 
@@ -53,10 +53,13 @@ expose the worker health port outside the cluster.
 
 Rules that every release has to respect (they come from the ADRs):
 
-1. **Upgrade the worker first.** Schema changes are applied by the worker when it starts (ADR 0005 migrations, ADR 0012 scan tables). The API must not be upgraded before a new
-   worker has applied the schema: newer queries select new columns.
-2. **No writer of the previous version may run while a migration is applied.** The chart rolls workers with `maxUnavailable: 0`, so an old replica can hold the writer lease while
-   a new one applies the schema. For a release that contains a migration, scale the worker to one replica, upgrade it, then scale back up.
+1. **Upgrade the worker first.** Every worker replica applies pending schema changes when it starts (ADR 0005 migrations, ADR 0012 scan tables). The API must not be upgraded
+   before a new worker has applied the schema: newer queries select new columns. Do it in two steps with the per-component image tags:
+   `helm upgrade ... --set image.workerTag=<new>` (the API keeps `image.tag`, which still holds the old version), wait until the new workers are ready, then
+   `helm upgrade ... --set image.tag=<new> --set image.workerTag=` (or set `image.apiTag`).
+2. **No writer of the previous version may run while a migration is applied.** With the default `worker.strategy: RollingUpdate` an old replica can keep the writer lease while a
+   new pod applies the schema, whatever the replica count. For a release that contains a migration (the release notes say so) set `worker.strategy=Recreate`, or scale the worker to 0 before
+   the upgrade and back afterwards, so that the old writer is gone first.
 3. **Replaying is the only way to change layout settings** (partitions, buckets, shards) and to fix history after a normalizer change (ADR 0003): index into a fresh database or
    keyspace, compare, then switch the release to it.
 4. Never edit `holdings_by_account` or `holdings_by_token` by hand on Cassandra: the rows carry the round as their timestamp and a manual write would win over every later round.
@@ -65,10 +68,13 @@ Rules that every release has to respect (they come from the ADRs):
 
 - **PostgreSQL:** regular base backups plus WAL archiving (point-in-time recovery) through the operator. A restore is consistent because every round commits atomically; the worker
   resumes from the restored cursor and re-indexes the missing rounds from the archive.
-- **Cassandra:** snapshots of the keyspace on every node (operator-managed) and, for a full restore, the same snapshot on all nodes. A cursor ahead of the restored data is not
-  possible because publication is the last step of a round; rows beyond the cursor are overwritten when the round is indexed again.
+- **Cassandra:** snapshots of the keyspace on every node (operator-managed). Snapshots of different nodes are taken at slightly different moments, so a restored cluster can
+  hold a cursor that is ahead of effect rows on a node restored from an earlier moment. After a restore run a repair, then compare balances with the chain (below); when in doubt reindex.
+  Within a live cluster publication is the last step of a round and rows beyond the cursor are overwritten when the round is indexed again.
 - **Reindex:** the data is derived from the chain, so the safest "restore" is a fresh deployment indexing from round 0. Run it next to the live one with its own database and switch
-  the release when the lag is 0 and the live comparison tests (`dotnet test tests/AvmBalanceIndexer.Live.Tests`) pass against the chain.
+  when its lag is 0 and it agrees with the live one: pick a round R that both have published and compare `GET /v1/{chain}/tokens/algo/0/holders?round=R` (sum the amounts, count the
+  holders) and a sample of `.../accounts/{address}/tokens/algo/0/balance?round=R`. The first 1000 rounds of the real chains are proven against the ledger by
+  `dotnet test tests/AvmBalanceIndexer.Live.Tests`; that test does not read a deployment.
 - Scan results are temporary (`Scans:Retention`) and are not worth backing up.
 
 ## Monitoring and alerts
@@ -94,7 +100,7 @@ Also watch the database itself: disk, replication, connections, vacuum and bloat
 
 | Symptom | Cause | What to do |
 |---|---|---|
-| Worker exits with a *chain divergence* | A block does not link to the stored cursor (archive served another chain, or the database holds a different history). Indexing stopped on purpose, nothing is written on top (ADR 0002). | Check `Algorand:GossipHosts` and `Algorand:ExpectedGenesisHash` and the node. If the database is wrong, reindex into a fresh one. |
+| Worker exits with a *chain divergence* | A block does not link to the stored cursor (archive served another chain, or the database holds a different history). Indexing stopped on purpose, nothing is written on top (ADR 0002). A message that another writer moved the cursor first means two writers raced; when it follows a lost lease the replica simply goes back to standby and does not exit. | Check `Algorand:GossipHosts` and `Algorand:ExpectedGenesisHash` and the node. If the database is wrong, reindex into a fresh one. If it names another writer, look for a second deployment on the same database. |
 | Worker exits after many transient failures | `Indexer:MaxConsecutiveFailures` consecutive failures without progress (archive or algod unreachable, or a block the archive never serves). | Fix the source; the orchestrator restarts the pod and indexing resumes from the cursor. |
 | `avm.worker.is_leader` is 0 on all replicas | Database unreachable, or a lease that has not expired yet. PostgreSQL releases the lease when the dead session is dropped (about 30 s with the lease session keepalives); Cassandra after `Storage:Cassandra:LeaseTtlSeconds`. | Wait one TTL; check database reachability. |
 | Repeated lease losses | Cassandra timeouts or an unstable PostgreSQL connection. | Raise `Storage:Cassandra:LeaseTtlSeconds` (a lease renewal must fit well inside it) or fix the network; check `ReadTimeoutSeconds` is not set below what the cluster can do. |

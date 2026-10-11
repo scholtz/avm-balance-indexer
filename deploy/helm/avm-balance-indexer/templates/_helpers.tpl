@@ -22,5 +22,5 @@ avm.scholtz.sk/chain: {{ .Values.chain }}
 {{- end -}}
 
 {{- define "avm.image" -}}
-{{ .Values.image.repository }}/{{ .component }}:{{ .Values.image.tag | default .Chart.AppVersion }}
+{{ .Values.image.repository }}/{{ .component }}:{{ index .Values.image (printf "%sTag" .component) | default .Values.image.tag | default .Chart.AppVersion }}
 {{- end -}}

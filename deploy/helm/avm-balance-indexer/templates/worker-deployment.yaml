@@ -8,10 +8,14 @@ spec:
   replicas: {{ .Values.worker.replicaCount }}
   # Several replicas may run: the writer lease keeps exactly one of them indexing, the others stand by.
   strategy:
+    {{- if eq .Values.worker.strategy "Recreate" }}
+    type: Recreate   # no old writer next to a new pod that applies a migration
+    {{- else }}
     type: RollingUpdate
     rollingUpdate:
       maxUnavailable: 0
       maxSurge: 1
+    {{- end }}
   selector:
     matchLabels: {{- include "avm.selectorLabels" (merge (dict "component" "worker") .) | nindent 6 }}
   template:
