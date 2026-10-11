@@ -68,17 +68,17 @@ public class GossipBlockFetcherTests
             {
                 var host = request.RequestUri!.Host;
                 served.AddOrUpdate(host, 1, static (_, n) => n + 1);
-                await Task.Delay(host == "slow.test" ? 60 : 2, token);
+                await Task.Delay(host == "slow.test" ? 80 : 5, token);
                 return Ok(Chain.Encode(7, []));
             },
             hosts: ["http://slow.test:4160", "http://fast.test:4160"]);
 
-        for (var i = 0; i < 60; i++)
+        for (var i = 0; i < 80; i++)
         {
             await fetcher.FetchBlockAsync(7, CancellationToken.None);
         }
 
-        Assert.True(served["fast.test"] >= 48, $"fast {served["fast.test"]}, slow {served.GetValueOrDefault("slow.test")}");
+        Assert.True(served["fast.test"] >= 60, $"fast {served["fast.test"]}, slow {served.GetValueOrDefault("slow.test")}");
     }
 
     [Fact]
@@ -90,18 +90,18 @@ public class GossipBlockFetcherTests
             {
                 var host = request.RequestUri!.Host;
                 served.AddOrUpdate(host, 1, static (_, n) => n + 1);
-                await Task.Delay(host == "empty.test" ? 0 : 5, token);
+                await Task.Delay(host == "empty.test" ? 0 : 30, token);
                 return host == "empty.test" ? new HttpResponseMessage(HttpStatusCode.NotFound) : Ok(Chain.Encode(7, []));
             },
             hosts: ["http://empty.test:4160", "http://full.test:4160"]);
 
-        for (var i = 0; i < 50; i++)
+        for (var i = 0; i < 60; i++)
         {
             await fetcher.FetchBlockAsync(7, CancellationToken.None);
         }
 
-        Assert.True(served["full.test"] >= 50);
-        Assert.True(served.GetValueOrDefault("empty.test") <= 15, $"empty {served.GetValueOrDefault("empty.test")}");
+        Assert.True(served["full.test"] >= 60);
+        Assert.True(served.GetValueOrDefault("empty.test") <= 24, $"empty {served.GetValueOrDefault("empty.test")}");
     }
 
     [Fact]

@@ -68,16 +68,11 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
         for (var attempt = 0; attempt < _options.MaxAttempts; attempt++)
         {
             var host = hosts[attempt % hosts.Length];
-            var latency = _latency.GetOrAdd(host, static _ => new HostLatency());
-            latency.Begin();
-            var started = Stopwatch.GetTimestamp();
-            var succeeded = false;
             try
             {
-                var payload = await DownloadAsync(host, round, cancellationToken).ConfigureAwait(false);
+                var payload = await DownloadTimedAsync(host, round, cancellationToken).ConfigureAwait(false);
                 var block = BlockDecoder.Decode(payload, round, _profile, _expectedGenesisHash);
                 _cooldownUntil.TryRemove(host, out _);
-                succeeded = true;
                 return block;
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -104,11 +99,6 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
 
                 _cooldownUntil[host] = _time.GetUtcNow() + _options.HostCooldown;
                 LogAttemptFailed(_logger, ex, round, host, attempt + 1, _options.MaxAttempts);
-            }
-
-            finally
-            {
-                latency.End(Stopwatch.GetElapsedTime(started), succeeded);
             }
 
             if (attempt + 1 < _options.MaxAttempts)
@@ -151,9 +141,15 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
         }
 
         var ordered = new List<string>(hosts.Count);
+        var total = 0.0;
+        foreach (var (_, weight) in healthy)
+        {
+            total += weight;
+        }
+
         while (healthy.Count > 0)
         {
-            var pick = Random.Shared.NextDouble() * healthy.Sum(static h => h.Weight);
+            var pick = Random.Shared.NextDouble() * total;
             var index = 0;
             for (; index < healthy.Count - 1; index++)
             {
@@ -165,12 +161,25 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
             }
 
             ordered.Add(healthy[index].Host);
+            total -= healthy[index].Weight;
             healthy.RemoveAt(index);
         }
 
         var offset = cooling.Count == 0 ? 0 : Random.Shared.Next(cooling.Count);
         ordered.AddRange(cooling.Skip(offset).Concat(cooling.Take(offset)));
         return [.. ordered];
+    }
+
+    private enum HostOutcome
+    {
+        /// <summary>The host delivered the bytes.</summary>
+        Answered,
+
+        /// <summary>The request failed, timed out, or the host said it does not have the block.</summary>
+        Failed,
+
+        /// <summary>The caller gave up; nothing is learned.</summary>
+        Ignored,
     }
 
     /// <summary>Smoothed response time of one host and the number of requests currently waiting for it.</summary>
@@ -210,12 +219,17 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
             }
         }
 
-        public void End(TimeSpan elapsed, bool succeeded)
+        public void End(TimeSpan elapsed, HostOutcome outcome)
         {
             lock (_gate)
             {
                 _inFlight--;
-                var sample = succeeded ? elapsed.TotalMilliseconds : Math.Max(PenaltyMilliseconds, elapsed.TotalMilliseconds);
+                if (outcome == HostOutcome.Ignored)
+                {
+                    return;
+                }
+
+                var sample = outcome == HostOutcome.Answered ? elapsed.TotalMilliseconds : Math.Max(PenaltyMilliseconds, elapsed.TotalMilliseconds);
                 _milliseconds = ((1 - Smoothing) * _milliseconds) + (Smoothing * sample);
                 _updated = Stopwatch.GetTimestamp();
             }
@@ -226,6 +240,30 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
     {
         var ceiling = Math.Min(_options.MaxRetryDelay.TotalMilliseconds, _options.BaseRetryDelay.TotalMilliseconds * Math.Pow(2, attempt));
         return TimeSpan.FromMilliseconds(Random.Shared.NextDouble() * ceiling);
+    }
+
+    /// <summary>Downloads a block and records how long the host took (transport only, not decoding); cancellation says nothing about the host.</summary>
+    private async Task<byte[]> DownloadTimedAsync(string host, ulong round, CancellationToken cancellationToken)
+    {
+        var latency = _latency.GetOrAdd(host, static _ => new HostLatency());
+        latency.Begin();
+        var started = Stopwatch.GetTimestamp();
+        var outcome = HostOutcome.Failed;
+        try
+        {
+            var payload = await DownloadAsync(host, round, cancellationToken).ConfigureAwait(false);
+            outcome = HostOutcome.Answered;
+            return payload;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            outcome = HostOutcome.Ignored;
+            throw;
+        }
+        finally
+        {
+            latency.End(Stopwatch.GetElapsedTime(started), outcome);
+        }
     }
 
     private async Task<byte[]> DownloadAsync(string host, ulong round, CancellationToken cancellationToken)
