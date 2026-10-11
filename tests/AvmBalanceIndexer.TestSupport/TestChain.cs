@@ -98,9 +98,12 @@ public sealed class TestChain
         var previous = round == 1 ? GenesisBlockHash : _hashes.GetValueOrDefault(round - 1) ?? FakeHash(round - 1);
 
         // The certificate digest must be the real header hash, which does not depend on the certificate itself.
-        var hash = BlockHashCalculator.Compute(Write(round, payments, proposerPayout, rewards, protocol, previous, new byte[32]));
+        // The header commits to the payset, which in turn is only known from the encoded transactions.
+        var draft = Write(round, payments, proposerPayout, rewards, protocol, previous, new byte[32], new byte[32]);
+        var txn = PaysetCommitment.ComputeTxn(draft, ApplyDataReader.ReadBlockTransactions(draft), GenesisHash, Profile.GenesisId);
+        var hash = BlockHashCalculator.Compute(Write(round, payments, proposerPayout, rewards, protocol, previous, new byte[32], txn));
         _hashes[round] = hash;
-        return Write(round, payments, proposerPayout, rewards, protocol, previous, hash);
+        return Write(round, payments, proposerPayout, rewards, protocol, previous, hash, txn);
     }
 
     private byte[] Write(
@@ -110,14 +113,15 @@ public sealed class TestChain
         RewardsState? rewards,
         string protocol,
         byte[] previous,
-        byte[] digest)
+        byte[] digest,
+        byte[] txn)
     {
         var buffer = new ArrayBufferWriter<byte>();
         var writer = new MessagePackWriter(buffer);
         writer.WriteMapHeader(2);
 
         writer.Write("block");
-        writer.WriteMapHeader(8 + (IncludeRewardsPool ? 1 : 0) + (proposerPayout > 0 ? 1 + (IncludeProposer ? 1 : 0) : 0) + (rewards is not null ? 3 : 0));
+        writer.WriteMapHeader(9 + (IncludeRewardsPool ? 1 : 0) + (proposerPayout > 0 ? 1 + (IncludeProposer ? 1 : 0) : 0) + (rewards is not null ? 3 : 0));
         writer.Write("fees");
         writer.Write(FeeSink.ToArray());
         writer.Write("gen");
@@ -138,6 +142,8 @@ public sealed class TestChain
 
         writer.Write("ts");
         writer.Write(1_560_000_000UL + round);
+        writer.Write("txn");
+        writer.Write(txn);
         writer.Write("txns");
         writer.WriteArrayHeader(payments.Count);
         foreach (var payment in payments)

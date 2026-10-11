@@ -25,7 +25,8 @@ Full design: [PRODUCT-DESCRIPTION.md](PRODUCT-DESCRIPTION.md). Decisions: [docs/
 2. **Effects.** Each block is turned into exact, ordered native balance changes: payments, fees, realized rewards,
    close-outs, inner transactions, proposer payouts, the per-round rewards pool withdrawal and known ledger hotfixes.
 3. **Trust.** The genesis file served by algod must hash to the pinned genesis hash, and every block header must hash to its
-   certificate digest and link to the previous block. The starting balances and the blocks therefore belong to one chain.
+   certificate digest and link to the previous block, and its transactions must reproduce the header payset commitments. The
+   starting balances and the blocks therefore belong to one chain (trust model: [ADR 0004](docs/adr/0004-block-trust-model.md)).
 4. **Storage.** The ordered indexer computes the running balance after each effect and commits a whole round in one
    PostgreSQL transaction together with the publication cursor. A block must link to the previously published block hash.
 5. **Resume.** Restarting continues from the stored cursor and re-checks the cursor block against the archival source.
@@ -129,9 +130,10 @@ another chain, 503 while nothing is indexed yet. A walk over the holders of the 
 - Indexing speed is about 60 rounds per second with default settings, which is far too slow to backfill MainNet in a
   reasonable time. Batching and fetch tuning are follow-up work.
 - Only one worker may run per chain. There is no leader election yet.
-- Block headers are hash-checked against their certificate digest, but certificate signatures and the transaction
-  commitment are not verified (#23). Treat gossip hosts as trusted and run your own archival nodes.
-- Proposer payouts are implemented from the block header but have not been verified against a payout-era chain.
+- Block headers are hash-checked against their certificate digest and transactions against the header commitments, but
+  certificate signatures are not verified (ADR 0004). A host serving a whole fabricated chain is not detected: run your
+  own archival nodes.
+- Proposer payouts are verified against recent MainNet rounds (see `docs/ledger-facts.md`).
 - Transaction effects other than native payments, fees, rewards and closes (assets, applications) are not indexed.
 
 ## License

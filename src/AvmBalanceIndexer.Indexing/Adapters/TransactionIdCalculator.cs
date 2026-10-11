@@ -1,6 +1,5 @@
 using System.Buffers;
 using MessagePack;
-using Org.BouncyCastle.Crypto.Digests;
 
 namespace AvmBalanceIndexer.Indexing.Adapters;
 
@@ -12,7 +11,14 @@ namespace AvmBalanceIndexer.Indexing.Adapters;
 public static class TransactionIdCalculator
 {
     /// <summary>Returns the base32 transaction id of a top-level block transaction.</summary>
-    public static string Compute(TxnApplyData apply, ReadOnlySpan<byte> genesisHash, string genesisId)
+    public static string Compute(TxnApplyData apply, ReadOnlySpan<byte> genesisHash, string genesisId) =>
+        Base32.Encode(ComputeDigest(apply, genesisHash, genesisId, sha256: false));
+
+    /// <summary>
+    /// Returns the raw 32-byte transaction digest: SHA-512/256 (the transaction id) or, for the SHA-256 payset vector
+    /// commitment, SHA-256 over the same <c>"TX"</c> prefixed canonical encoding.
+    /// </summary>
+    public static byte[] ComputeDigest(TxnApplyData apply, ReadOnlySpan<byte> genesisHash, string genesisId, bool sha256)
     {
         ArgumentNullException.ThrowIfNull(apply);
         if (apply.RawTxn.IsEmpty)
@@ -21,12 +27,15 @@ public static class TransactionIdCalculator
         }
 
         var canonical = Canonicalize(apply, genesisHash.ToArray(), genesisId);
-        var digest = new Sha512tDigest(256);
-        digest.BlockUpdate("TX"u8);
-        digest.BlockUpdate(canonical, 0, canonical.Length);
-        var hash = new byte[digest.GetDigestSize()];
-        digest.DoFinal(hash, 0);
-        return Base32.Encode(hash);
+        var input = new byte[2 + canonical.Length];
+        "TX"u8.CopyTo(input);
+        canonical.CopyTo(input, 2);
+        if (sha256)
+        {
+            return System.Security.Cryptography.SHA256.HashData(input);
+        }
+
+        return Sha512t256.Hash(input);
     }
 
     private static byte[] Canonicalize(TxnApplyData apply, byte[] genesisHash, string genesisId)
@@ -42,12 +51,12 @@ public static class TransactionIdCalculator
             entries.Add((key, reader.Sequence.Slice(start, reader.Position).ToArray()));
         }
 
-        if (apply.HasGenesisHash)
+        if (apply.HasGenesisHash && entries.TrueForAll(static e => e.Key != "gh"))
         {
             entries.Add(("gh", EncodeBinary(genesisHash)));
         }
 
-        if (apply.HasGenesisId)
+        if (apply.HasGenesisId && entries.TrueForAll(static e => e.Key != "gen"))
         {
             entries.Add(("gen", EncodeString(genesisId)));
         }
