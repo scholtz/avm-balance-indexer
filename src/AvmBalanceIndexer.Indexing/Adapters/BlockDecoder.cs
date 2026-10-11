@@ -1,5 +1,4 @@
 using Algorand.Algod.Model;
-using Algorand.Algod.Model.Transactions;
 using Algorand.Utils;
 
 namespace AvmBalanceIndexer.Indexing.Adapters;
@@ -33,7 +32,7 @@ public static class BlockDecoder
         byte[] computedHash;
         try
         {
-            certified = Encoder.DecodeFromMsgPack<CertifiedBlock>(payload);
+            certified = Encoder.DecodeFromMsgPack<CertifiedBlock>(BlockPayload.WithoutTransactions(payload));
             apply = ApplyDataReader.ReadBlockTransactions(payload);
             computedHash = BlockHashCalculator.Compute(payload);
         }
@@ -74,7 +73,6 @@ public static class BlockDecoder
             throw new BlockValidationException($"Round {expectedRound}: the block header does not hash to the certified digest.");
         }
 
-        EnsureShapesMatch(block.Transactions ?? [], apply, expectedRound);
         if (ConsensusProtocols.RequiresGenesisHash(block.CurrentProtocol ?? string.Empty))
         {
             apply = [.. apply.Select(static a => a with { HasGenesisHash = true })];
@@ -96,19 +94,4 @@ public static class BlockDecoder
         value is { Length: HashLength }
             ? value
             : throw new BlockValidationException($"Round {round}: {name} is missing or not {HashLength} bytes.");
-
-    private static void EnsureShapesMatch(IEnumerable<SignedTransaction> transactions, IReadOnlyList<TxnApplyData> apply, ulong round)
-    {
-        var txs = transactions.ToArray();
-        if (txs.Length != apply.Count)
-        {
-            throw new BlockValidationException($"Round {round}: {txs.Length} transactions decoded but {apply.Count} apply entries read.");
-        }
-
-        for (var i = 0; i < txs.Length; i++)
-        {
-            var inner = txs[i].Detail?.InnerTxns ?? [];
-            EnsureShapesMatch(inner, apply[i].InnerTxns, round);
-        }
-    }
 }

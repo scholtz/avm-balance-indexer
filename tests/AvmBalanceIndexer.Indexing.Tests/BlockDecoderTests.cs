@@ -27,7 +27,8 @@ public class BlockDecoderTests
         Assert.Equal((5UL, 6UL, 7UL, 8UL), (apply.SenderRewards, apply.ReceiverRewards, apply.CloseRewards, apply.ClosingAmount));
         Assert.True(apply.HasGenesisHash);
         Assert.True(apply.HasGenesisId);
-        Assert.Single(block.Block.Transactions!);
+        Assert.Single(block.ApplyData);
+        Assert.Empty(block.Block.Transactions ?? []);
     }
 
     [Fact]
@@ -37,7 +38,6 @@ public class BlockDecoderTests
         var block = Chain.Block(3, [new TestPayment(Alice, Bob, 2, Inner: [inner, inner])]);
 
         Assert.Equal(2, block.ApplyData[0].InnerTxns.Count);
-        Assert.Equal(2, block.Block.Transactions!.First().Detail!.InnerTxns!.Count);
     }
 
     [Fact]

@@ -53,6 +53,13 @@ public static class ApplyDataReader
         return result;
     }
 
+    /// <summary>Reads one element of the <c>txns</c> array (a signed transaction with its apply data).</summary>
+    public static TxnApplyData ReadTransactionEntry(ReadOnlyMemory<byte> entry)
+    {
+        var reader = new MessagePackReader(entry);
+        return ReadTransaction(ref reader);
+    }
+
     private static List<TxnApplyData> ReadTransactions(ref MessagePackReader reader)
     {
         var result = new List<TxnApplyData>();

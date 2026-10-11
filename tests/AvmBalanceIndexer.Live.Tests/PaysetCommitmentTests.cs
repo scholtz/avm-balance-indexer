@@ -35,10 +35,10 @@ public class PaysetCommitmentTests(ITestOutputHelper output)
             var block = await adapter.FetchBlockAsync(round, CancellationToken.None);
             verified++;
             var header = block.Block;
-            var populated = header.Transactions?.Count > 0;
+            var populated = block.ApplyData.Count > 0;
             flat |= populated && ConsensusProtocols.UsesFlatPaysetCommitment(header.CurrentProtocol!);
             merkle |= populated && !ConsensusProtocols.UsesFlatPaysetCommitment(header.CurrentProtocol!) && !ConsensusProtocols.HasNoPaysetCommitment(header.CurrentProtocol!);
-            output.WriteLine($"{chain} round {round}: {header.Transactions?.Count ?? 0} txns, protocol {header.CurrentProtocol}");
+            output.WriteLine($"{chain} round {round}: {block.ApplyData.Count} txns, protocol {header.CurrentProtocol}");
         }
 
         Assert.True(verified >= 10);

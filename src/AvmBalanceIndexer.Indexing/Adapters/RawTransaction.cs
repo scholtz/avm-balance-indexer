@@ -41,6 +41,11 @@ public sealed record RawAssetParams(
 /// <param name="ConfigAssetId">Asset reconfigured or destroyed by an asset configuration (<c>caid</c>), zero when it creates one.</param>
 /// <param name="Params">Asset parameters (<c>apar</c>), null for a destroy.</param>
 /// <param name="ApplicationId">Application called (<c>apid</c>), zero for an application creation.</param>
+/// <param name="Sender">Sending account (<c>snd</c>).</param>
+/// <param name="Fee">Fee paid by the sender (<c>fee</c>), zero when omitted.</param>
+/// <param name="Receiver">Payment receiver (<c>rcv</c>); the field is omitted for the zero address, which reads as null.</param>
+/// <param name="Amount">Payment amount (<c>amt</c>), zero when omitted.</param>
+/// <param name="CloseTo">Payment close-remainder-to (<c>close</c>), null when absent.</param>
 public sealed record RawTransaction(
     string Type,
     ulong TransferAssetId,
@@ -50,7 +55,12 @@ public sealed record RawTransaction(
     byte[]? AssetCloseTo,
     ulong ConfigAssetId,
     RawAssetParams? Params,
-    ulong ApplicationId = 0)
+    ulong ApplicationId = 0,
+    byte[]? Sender = null,
+    ulong Fee = 0,
+    byte[]? Receiver = null,
+    ulong Amount = 0,
+    byte[]? CloseTo = null)
 {
     private const int AddressLength = 32;
 
@@ -60,7 +70,8 @@ public sealed record RawTransaction(
     {
         var reader = new MessagePackReader(raw);
         var type = string.Empty;
-        ulong xaid = 0, aamt = 0, caid = 0, apid = 0;
+        ulong xaid = 0, aamt = 0, caid = 0, apid = 0, fee = 0, amt = 0;
+        byte[]? snd = null, rcv = null, close = null;
         byte[]? asnd = null, arcv = null, aclose = null;
         RawAssetParams? parameters = null;
 
@@ -93,6 +104,21 @@ public sealed record RawTransaction(
                 case "apid":
                     apid = reader.ReadUInt64();
                     break;
+                case "snd":
+                    snd = ReadAddress(ref reader);
+                    break;
+                case "fee":
+                    fee = reader.ReadUInt64();
+                    break;
+                case "rcv":
+                    rcv = ReadAddress(ref reader);
+                    break;
+                case "amt":
+                    amt = reader.ReadUInt64();
+                    break;
+                case "close":
+                    close = ReadAddress(ref reader);
+                    break;
                 case "apar":
                     parameters = ReadParams(ref reader);
                     break;
@@ -102,7 +128,7 @@ public sealed record RawTransaction(
             }
         }
 
-        return new RawTransaction(type, xaid, aamt, asnd, arcv, aclose, caid, parameters, apid);
+        return new RawTransaction(type, xaid, aamt, asnd, arcv, aclose, caid, parameters, apid, snd, fee, rcv, amt, close);
     }
 
     private static byte[] ReadAddress(ref MessagePackReader reader)
