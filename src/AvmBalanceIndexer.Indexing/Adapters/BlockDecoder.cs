@@ -19,8 +19,8 @@ public static class BlockDecoder
     /// <param name="expectedGenesisHash">Genesis hash the header must carry, or null to skip the check.</param>
     /// <remarks>
     /// The block hash is recomputed from the header and must equal the certificate proposal digest, so the hash used for
-    /// chain linking is the real block hash. Certificate signatures and the transaction root are not verified; the archival
-    /// source remains trusted for the transactions it serves.
+    /// chain linking is the real block hash. The transactions are verified against the header commitments (see PaysetCommitment).
+    /// Certificate signatures are not verified; the archival source remains trusted for the chain it serves (issue #23).
     /// </remarks>
     /// <exception cref="BlockValidationException">The response is not the expected block.</exception>
     public static BlockData Decode(byte[] payload, ulong expectedRound, ChainProfile profile, byte[]? expectedGenesisHash)
@@ -75,6 +75,12 @@ public static class BlockDecoder
         }
 
         EnsureShapesMatch(block.Transactions ?? [], apply, expectedRound);
+        if (ConsensusProtocols.RequiresGenesisHash(block.CurrentProtocol ?? string.Empty))
+        {
+            apply = [.. apply.Select(static a => a with { HasGenesisHash = true })];
+        }
+
+        PaysetCommitment.Verify(payload, apply, genesisHash, profile.GenesisId, expectedRound);
         return new BlockData(expectedRound, hash, previous, genesisHash, profile.GenesisId, block, apply);
     }
 

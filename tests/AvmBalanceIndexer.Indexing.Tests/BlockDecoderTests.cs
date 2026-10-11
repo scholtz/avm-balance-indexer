@@ -94,7 +94,7 @@ public class BlockDecoderTests
     }
 
     [Fact]
-    public void The_Header_Hash_Ignores_The_Payset_And_Covers_Every_Header_Field()
+    public void The_Header_Hash_Covers_Every_Header_Field_And_Commits_To_The_Payset_Through_Txn()
     {
         var chain = new TestChain();
         var empty = BlockHashCalculator.Compute(chain.Encode(7, []));
@@ -102,9 +102,34 @@ public class BlockDecoderTests
         var otherRound = BlockHashCalculator.Compute(chain.Encode(8, []));
 
         Assert.Equal(32, empty.Length);
-        Assert.Equal(empty, withTransactions);
+        Assert.NotEqual(empty, withTransactions);
         Assert.NotEqual(empty, otherRound);
         Assert.Throws<InvalidDataException>(() => BlockHashCalculator.Compute(new byte[] { 0x80 }));
+    }
+
+    [Fact]
+    public void Altered_Transaction_Bytes_Are_Rejected_By_The_Payset_Commitment()
+    {
+        var bytes = Chain.Encode(10, [new TestPayment(Alice, Bob, 1_000_000)]);
+        var amountKey = new byte[] { 0xA3, (byte)'a', (byte)'m', (byte)'t' };
+        var at = bytes.AsSpan().IndexOf(amountKey);
+        Assert.True(at > 0);
+        bytes[at + amountKey.Length + 2] ^= 0x01;
+
+        var error = Assert.Throws<BlockValidationException>(() => BlockDecoder.Decode(bytes, 10, Chain.Profile, Chain.GenesisHash));
+
+        Assert.Contains("commitment", error.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("v11")]
+    [InlineData("v7")]
+    [InlineData("https://github.com/algorandfoundation/specs/tree/bea19289bf41217d2c0af30522fa222ef1366466")]
+    public void Every_Commitment_Scheme_Round_Trips(string protocol)
+    {
+        var block = Chain.Block(10, [new TestPayment(Alice, Bob, 5), new TestPayment(Bob, Alice, 1)], protocol: protocol);
+
+        Assert.Equal(2, block.ApplyData.Count);
     }
 
     [Theory]
