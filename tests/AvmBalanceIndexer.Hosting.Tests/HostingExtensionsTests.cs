@@ -2,6 +2,7 @@ using AvmBalanceIndexer.Domain.Chains;
 using AvmBalanceIndexer.Domain.Storage;
 using AvmBalanceIndexer.Indexing.Adapters;
 using AvmBalanceIndexer.Indexing.Ingestion;
+using AvmBalanceIndexer.Storage.Cassandra;
 using AvmBalanceIndexer.Storage.PostgreSql;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -55,12 +56,44 @@ public class HostingExtensionsTests
     }
 
     [Fact]
-    public void Cassandra_Fails_Fast_Because_It_Is_Not_Implemented_Yet()
+    public async Task Cassandra_Registers_One_Storage_For_The_Configured_Chain_Without_Connecting()
     {
-        var error = Assert.Throws<NotSupportedException>(
-            () => new ServiceCollection().AddChainStorage(Config(("Chain", ChainId.Voi), ("Storage:Provider", "Cassandra"))));
+        await using var provider = Build(Config(
+            ("Chain", ChainId.Voi),
+            ("Storage:Provider", "Cassandra"),
+            ("Storage:Cassandra:ContactPoints:0", "cassandra-0.cassandra"),
+            ("Storage:Cassandra:Keyspace", "avm_voi")));
 
-        Assert.Contains("PostgreSql", error.Message, StringComparison.Ordinal);
+        Assert.IsType<CassandraChainStorage>(provider.GetRequiredService<IChainStorage>());
+        Assert.Same(provider.GetRequiredService<IChainStorage>(), provider.GetRequiredService<IChainStorage>());
+        Assert.Equal(ChainId.Voi, provider.GetRequiredService<ChainContext>().Chain);
+    }
+
+    [Fact]
+    public void Cassandra_Without_Contact_Points_Fails_Validation()
+    {
+        using var provider = Build(Config(("Chain", ChainId.Voi), ("Storage:Provider", "Cassandra")));
+
+        var error = Assert.Throws<OptionsValidationException>(() => provider.GetRequiredService<IOptions<StorageOptions>>().Value);
+
+        Assert.Contains("ContactPoints", error.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("Keyspace", "bad-name; DROP")]
+    [InlineData("Keyspace", "1leading_digit")]
+    [InlineData("LocalDatacenter", "dc'1")]
+    [InlineData("ReplicationFactor", "0")]
+    [InlineData("Port", "70000")]
+    public void Cassandra_Settings_That_End_Up_In_Statements_Are_Validated(string key, string value)
+    {
+        using var provider = Build(Config(
+            ("Chain", ChainId.Voi),
+            ("Storage:Provider", "Cassandra"),
+            ("Storage:Cassandra:ContactPoints:0", "cassandra-0"),
+            ($"Storage:Cassandra:{key}", value)));
+
+        Assert.Throws<OptionsValidationException>(() => provider.GetRequiredService<IOptions<StorageOptions>>().Value);
     }
 
     [Fact]

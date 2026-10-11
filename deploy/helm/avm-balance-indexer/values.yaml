@@ -15,8 +15,12 @@ storage:
     existingSecret: ""
   cassandra:
     contactPoints: []
+    port: 9042
     keyspace: avm_indexer
     localDatacenter: dc1
+    # Let the worker create the keyspace (NetworkTopologyStrategy, replicationFactor replicas in localDatacenter).
+    createKeyspace: true
+    replicationFactor: 3
     # Secret with keys "username" and "password"
     existingSecret: ""
 

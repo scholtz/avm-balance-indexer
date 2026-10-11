@@ -7,6 +7,7 @@
 
   <ItemGroup>
     <PackageReference Include="Testcontainers.PostgreSql" />
+    <PackageReference Include="Testcontainers.Cassandra" />
     <PackageReference Include="xunit" />
   </ItemGroup>
 
@@ -14,6 +15,7 @@
     <ProjectReference Include="..\..\src\AvmBalanceIndexer.Domain\AvmBalanceIndexer.Domain.csproj" />
     <ProjectReference Include="..\..\src\AvmBalanceIndexer.Indexing\AvmBalanceIndexer.Indexing.csproj" />
     <ProjectReference Include="..\..\src\AvmBalanceIndexer.Storage.PostgreSql\AvmBalanceIndexer.Storage.PostgreSql.csproj" />
+    <ProjectReference Include="..\..\src\AvmBalanceIndexer.Storage.Cassandra\AvmBalanceIndexer.Storage.Cassandra.csproj" />
   </ItemGroup>
 
 </Project>

@@ -7,6 +7,9 @@ data:
   Chain: {{ .Values.chain | quote }}
   Storage__Provider: {{ .Values.storage.provider | quote }}
   Storage__PostgreSql__AccountHashPartitions: {{ .Values.storage.postgreSql.accountHashPartitions | quote }}
+  Storage__Cassandra__Port: {{ .Values.storage.cassandra.port | quote }}
+  Storage__Cassandra__CreateKeyspace: {{ .Values.storage.cassandra.createKeyspace | quote }}
+  Storage__Cassandra__ReplicationFactor: {{ .Values.storage.cassandra.replicationFactor | quote }}
   Storage__Cassandra__Keyspace: {{ .Values.storage.cassandra.keyspace | quote }}
   Storage__Cassandra__LocalDatacenter: {{ .Values.storage.cassandra.localDatacenter | quote }}
   {{- range $i, $cp := .Values.storage.cassandra.contactPoints }}

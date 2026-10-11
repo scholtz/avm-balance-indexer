@@ -24,7 +24,15 @@ public sealed class CassandraOptions
 {
     public string[] ContactPoints { get; set; } = [];
 
+    public int Port { get; set; } = 9042;
+
     public string Keyspace { get; set; } = "avm_indexer";
+
+    /// <summary>Let the schema manager create the keyspace (NetworkTopologyStrategy with <see cref="ReplicationFactor"/> replicas in <see cref="LocalDatacenter"/>).</summary>
+    public bool CreateKeyspace { get; set; } = true;
+
+    /// <summary>Replicas in the local datacenter for a keyspace created by the schema manager. Reads and writes use LOCAL_QUORUM.</summary>
+    public int ReplicationFactor { get; set; } = 3;
 
     public string LocalDatacenter { get; set; } = "dc1";
 

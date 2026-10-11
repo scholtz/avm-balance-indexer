@@ -12,7 +12,7 @@ Full design: [PRODUCT-DESCRIPTION.md](PRODUCT-DESCRIPTION.md). Decisions: [docs/
 |---|---|
 | Native token (ALGO/VOI) indexing from archival nodes | Done. Verified against the ledger for the first 1000 rounds of TestNet and MainNet, and against the public indexer for Voi. |
 | PostgreSQL provider | Done: schema, atomic round writer, current and historical balances, holders, history. |
-| Cassandra provider | Schema only. Selecting it fails at startup. |
+| Cassandra provider | Done: schema, idempotent round writer with compare-and-set publication, current and historical balances, holders, history. Runs the same contract suite as PostgreSQL. |
 | ASA, ARC-20, ARC-200 effects | Not started. |
 | Read API | `/v1/{chain}/status` only. |
 | Voi | Genesis pinned and verified; first 1000 rounds indexed (they contain no balance-moving transactions). |
@@ -37,7 +37,7 @@ src/
   AvmBalanceIndexer.Domain/              token/effect model, exact Amount, storage contract interfaces
   AvmBalanceIndexer.Indexing/            gossip block fetcher, block decoding, effect normalization, round indexer
   AvmBalanceIndexer.Storage.PostgreSql/  provider + Schema/*.sql
-  AvmBalanceIndexer.Storage.Cassandra/   schema only (provider not implemented)
+  AvmBalanceIndexer.Storage.Cassandra/   provider + Schema/*.cql
   AvmBalanceIndexer.Hosting/             shared DI and configuration wiring
   AvmBalanceIndexer.Api/                 ASP.NET Core /v1/{chain} read API
   AvmBalanceIndexer.Worker/              indexer worker (single ordered writer per chain)
@@ -78,9 +78,13 @@ curl http://localhost:5000/v1/algorand-testnet/status
 | Key | Meaning |
 |---|---|
 | `Chain` | `algorand-mainnet`, `algorand-testnet` or `voi`. One process serves one chain. |
-| `Storage:Provider` | `PostgreSql` (Cassandra is not implemented yet). Only the selected provider is opened. |
+| `Storage:Provider` | `PostgreSql` or `Cassandra`. Only the selected provider is opened. |
 | `Storage:PostgreSql:ConnectionString` | Required for PostgreSQL. Keep it in a secret. |
 | `Storage:PostgreSql:AccountHashPartitions` | Hash partitions of the account effect table, 1 to 1024. Fixed per database. |
+| `Storage:Cassandra:ContactPoints` / `Port` | Required for Cassandra: hosts and native-protocol port (default 9042). |
+| `Storage:Cassandra:Keyspace` / `LocalDatacenter` | One keyspace per chain deployment; the datacenter the driver routes to. Reads and writes use `LOCAL_QUORUM`. |
+| `Storage:Cassandra:CreateKeyspace` / `ReplicationFactor` | Let the worker create the keyspace (`NetworkTopologyStrategy`, default 3 replicas). Set `CreateKeyspace` to false when the operator manages it. |
+| `Storage:Cassandra:Username` / `Password` | Optional credentials. Keep them in a secret. |
 | `Algorand:AlgodUrl` / `AlgodToken` | Algod node for the latest round and genesis. Defaults to a public endpoint. |
 | `Algorand:GossipHosts` | Archival gossip node URLs. Empty discovers them through DNS SRV. Use your own nodes in production. |
 | `Algorand:ExpectedGenesisHash` | Base64 genesis hash. Pinned for Algorand MainNet, TestNet and Voi; set it only for another network. |
@@ -89,9 +93,10 @@ curl http://localhost:5000/v1/algorand-testnet/status
 ## Tests
 
 ```sh
-dotnet test AvmBalanceIndexer.slnx                    # everything; PostgreSQL runs in a Testcontainers container
+dotnet test AvmBalanceIndexer.slnx                    # everything; PostgreSQL and Cassandra run in Testcontainers containers (Cassandra takes about a minute to start)
 AVM_SKIP_LIVE_TESTS=1 dotnet test AvmBalanceIndexer.slnx   # without the network tests
 AVM_TEST_POSTGRES="Host=...;Database=...;Username=...;Password=..." dotnet test ...   # use an existing server instead
+AVM_TEST_CASSANDRA=localhost:9042 AVM_TEST_CASSANDRA_DC=dc1 dotnet test ...             # same for Cassandra
 ```
 
 The live tests fetch the first 1000 rounds of TestNet, MainNet and Voi from public archival nodes and index them. For
