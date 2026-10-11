@@ -52,7 +52,7 @@ live-network, docker builds, helm lint; all must be green to merge.
 - **Never commit or push to `main` directly**; every change, including docs and instruction files, goes through an
   issue -> branch -> PR -> review -> squash-merge.
 - **Every commit title and every PR title contains the issue id**: `feat(storage): add Cassandra writer (#14)`. The PR
-  body has `Closes #<n>`. Create an issue first even for small chores.
+  body has `Closes #<n>`. Create an issue first even for small chores. Only Dependabot PRs are exempt.
 - Commit trailer and PR footer follow the attribution lines given by the harness.
 
 ## Team assignments
@@ -73,26 +73,28 @@ PR comments when #18 (normalizer) needs storage contract members that #14/#22 ch
    If none is assigned to your team, look for an **unclaimed** open issue (no `team:*` label), preferring those on the
    critical path of `PRODUCT-DESCRIPTION.md`.
    **Claim it immediately** by adding your label, then re-read the issue labels; if another team's label is also there,
-   the earlier label (see the issue timeline) keeps it; the other team **removes its own label** and picks another
+   the lower team letter keeps it; the other team **removes its own label** and picks another
    issue. Dependabot PRs without a team label can be taken the same way, only when no feature issue is available; they
-   are exempt from the issue-id/TDD rules (a version bump needs only green CI; keep the Dependabot title).
+   are exempt from the issue-id/TDD rules (a version bump needs only green CI; keep the Dependabot title). Never
+   push to `dependabot/*` branches; comment `@dependabot rebase` instead.
 3. **If no issue exists**: create one (see "Creating issues"), label it with your team, then take it.
 4. **Implement with TDD**: write a failing test first (smallest scope that proves the behaviour), see it fail for the
    right reason, make it pass, refactor. Every behaviour change needs tests: unit, shared contract test for storage,
-   live test when balance logic changes, Helm lint for chart changes. No untested code paths in the PR.
+   live test when balance logic, hashing, adapters or normalization change, Helm lint for chart changes. No untested code paths in the PR.
 5. **Before the PR**: `git fetch && git rebase origin/main`, full build + tests (`AVM_SKIP_LIVE_TESTS=1` unless balance
-   logic changed), update docs/ADR if a decision changed. Push (after any rebase: `git push --force-with-lease`), open the PR with `Closes #<n>`, the team label, and the
+   logic, hashing, adapters or normalization changed; CI runs the live job regardless), update docs/ADR if a decision changed. Push (after any rebase: `git push --force-with-lease`), open the PR with `Closes #<n>`, the team label, and the
    repo PR template.
 6. **Code review loop**: run the `code-review` skill on the PR (use `high` or higher). Fix every real finding (with a
    test where the finding is a bug), push, rebase if main moved, review again. Repeat until a round returns nothing to
    change. A finding you reject gets a short PR comment explaining why and counts as resolved. If round 4 still
    produces only speculative or style findings, stop and note it in the PR; real bugs are never skipped.
-7. **Merge**: rebase on latest main, wait for green CI (`gh pr checks <n> --watch`), then
+7. **Merge**: if main moved and conflicts with you, rebase and force-push (CI restarts); otherwise just wait for green CI
+   (`gh pr checks <n> --watch`), then
    `gh pr merge <n> --squash --delete-branch`. Confirm the issue is closed (`gh issue view <n>`); if not, close it with
    a comment linking the PR.
 8. **Retrospective**: note what cost time (CI failures, review findings, merge conflicts, tooling quirks, wrong
    assumptions). If the lesson will make future work faster or safer, add it to the right place: repo-wide lessons in the
-   "Lessons learned" section below (small PR or part of the current one), machine/tool quirks in memory. One line each,
+   "Lessons learned" section below (tiny separate PR), machine/tool quirks in memory. One line each,
    no duplicates, delete entries that became wrong.
 9. Go to step 0.
 
@@ -108,7 +110,8 @@ prove it), size it to one PR, and add `enhancement` plus your team label. Cite s
 
 - Small, focused PRs; merge quickly. Rebase often, never merge main into a branch.
 - Hot files that collide: `Directory.Packages.props`, `StorageContractTests.cs`, `HostingExtensions.cs`, `Program.cs`,
-  `AvmBalanceIndexer.slnx`, `ci.yml`. Keep edits there minimal and rebase right before pushing.
+  `AvmBalanceIndexer.slnx`, `ci.yml`, and the end of the "Lessons learned" list below
+  (add lessons in a tiny separate PR, not inside feature PRs). Keep edits there minimal and rebase right before pushing.
 - After a rebase conflict, re-run tests: a clean textual merge can still break behaviour.
 - `git push --force-with-lease` only on your own feature branch, never on main, never on another team's branch.
 - Do not edit another team's open PR or branch; comment on it instead.
