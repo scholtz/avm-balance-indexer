@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Collections.Concurrent;
+using System.Numerics;
 using System.Security.Cryptography;
 using System.Text;
 using AvmBalanceIndexer.Domain.Chains;
@@ -21,7 +22,14 @@ public sealed record TestPayment(
     ulong ReceiverRewards = 0,
     ulong CloseRewards = 0,
     IReadOnlyList<TestPayment>? Inner = null,
-    TestAsset? Asset = null);
+    TestAsset? Asset = null,
+    TestApplication? Application = null);
+
+/// <summary>An application call placed in a synthetic block in the place of a payment (the payment's sender and fee are used).</summary>
+/// <param name="ApplicationId">Application called; zero for a creation.</param>
+/// <param name="Logs">Logs the call emitted.</param>
+/// <param name="CreatedApplicationId">Id the ledger assigned to a created application (<c>apid</c> in the apply data).</param>
+public sealed record TestApplication(ulong ApplicationId, IReadOnlyList<byte[]>? Logs = null, ulong CreatedApplicationId = 0);
 
 /// <summary>
 /// An asset transaction placed in a synthetic block in the place of a payment: the payment's sender, receiver (the asset
@@ -241,7 +249,8 @@ public sealed class TestChain
         entries += payment.Asset is { AssetClosingAmount: > 0 } ? 1 : 0;
         entries += payment.Asset is { CreatedAssetId: > 0 } ? 1 : 0;
         entries += topLevel ? 2 : 0;
-        entries += payment.Inner is { Count: > 0 } ? 1 : 0;
+        entries += payment.Inner is { Count: > 0 } || payment.Application is { Logs.Count: > 0 } ? 1 : 0;
+        entries += payment.Application is { CreatedApplicationId: > 0 } ? 1 : 0;
         writer.WriteMapHeader(entries);
 
         if (payment.Asset is { AssetClosingAmount: > 0 } asset)
@@ -262,15 +271,35 @@ public sealed class TestChain
             writer.Write(created.CreatedAssetId);
         }
 
-        if (payment.Inner is { Count: > 0 } inner)
+        if (payment.Application is { CreatedApplicationId: > 0 } createdApp)
+        {
+            writer.Write("apid");
+            writer.Write(createdApp.CreatedApplicationId);
+        }
+
+        var logs = payment.Application?.Logs;
+        if (payment.Inner is { Count: > 0 } || logs is { Count: > 0 })
         {
             writer.Write("dt");
-            writer.WriteMapHeader(1);
-            writer.Write("itx");
-            writer.WriteArrayHeader(inner.Count);
-            foreach (var child in inner)
+            writer.WriteMapHeader((payment.Inner is { Count: > 0 } ? 1 : 0) + (logs is { Count: > 0 } ? 1 : 0));
+            if (payment.Inner is { Count: > 0 } inner)
             {
-                WriteTransaction(ref writer, child, topLevel: false);
+                writer.Write("itx");
+                writer.WriteArrayHeader(inner.Count);
+                foreach (var child in inner)
+                {
+                    WriteTransaction(ref writer, child, topLevel: false);
+                }
+            }
+
+            if (logs is { Count: > 0 })
+            {
+                writer.Write("lg");
+                writer.WriteArrayHeader(logs.Count);
+                foreach (var log in logs)
+                {
+                    writer.Write(log);
+                }
             }
         }
 
@@ -383,8 +412,52 @@ public sealed class TestChain
         }
     }
 
+    private static void WriteApplicationBody(ref MessagePackWriter writer, TestPayment payment, TestApplication application)
+    {
+        var entries = 4 + (payment.Fee > 0 ? 1 : 0) + (application.ApplicationId > 0 ? 1 : 0);
+        writer.WriteMapHeader(entries);
+        if (application.ApplicationId > 0)
+        {
+            writer.Write("apid");
+            writer.Write(application.ApplicationId);
+        }
+
+        if (payment.Fee > 0)
+        {
+            writer.Write("fee");
+            writer.Write(payment.Fee);
+        }
+
+        writer.Write("fv");
+        writer.Write(1UL);
+        writer.Write("lv");
+        writer.Write(1001UL);
+        writer.Write("snd");
+        writer.Write(payment.Sender.ToArray());
+        writer.Write("type");
+        writer.Write("appl");
+    }
+
+    /// <summary>An ARC-200 transfer log: selector, sender, receiver and the amount as a big-endian uint256.</summary>
+    public static byte[] Arc200TransferLog(Address from, Address to, BigInteger amount)
+    {
+        var log = new byte[100];
+        Arc200Events.TransferSelector.CopyTo(log);
+        from.ToArray().CopyTo(log, 4);
+        to.ToArray().CopyTo(log, 36);
+        var bytes = amount.ToByteArray(isUnsigned: true, isBigEndian: true);
+        bytes.CopyTo(log, 100 - bytes.Length);
+        return log;
+    }
+
     private static void WritePaymentBody(ref MessagePackWriter writer, TestPayment payment)
     {
+        if (payment.Application is { } application)
+        {
+            WriteApplicationBody(ref writer, payment, application);
+            return;
+        }
+
         if (payment.Asset is { } asset)
         {
             WriteAssetBody(ref writer, payment, asset);

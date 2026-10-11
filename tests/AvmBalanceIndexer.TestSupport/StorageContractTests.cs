@@ -650,4 +650,43 @@ public abstract class StorageContractTests
         Assert.NotNull(token);
         Assert.Equal((Alice, "TST", "Test asset", 2, 1UL, 6UL), (token.Creator, token.Symbol, token.Name, token.Decimals, token.CreatedRound, token.DeletedRound));
     }
+
+    [Fact]
+    public async Task Arc200_Balances_Beyond_Uint64_Round_Trip_And_Unknown_Debits_Are_Limited_To_The_Balance()
+    {
+        const ulong application = 55;
+        var key = TokenKey.Arc200(application);
+        var supply = System.Numerics.BigInteger.Pow(10, 40);
+        var chain = new TestChain();
+        var storage = await CreateStorageAsync();
+        var zero = new Address(new byte[Address.Length]);
+        TestPayment Call(Address sender, params byte[][] logs) => new(sender, sender, 0, Application: new TestApplication(application, logs));
+        var blocks = new[]
+        {
+            chain.Block(1, [Call(Alice, TestChain.Arc200TransferLog(zero, Alice, supply))], rewards: RewardsAt(1)),
+            chain.Block(2, [Call(Alice, TestChain.Arc200TransferLog(Alice, Bob, supply / 4))], rewards: RewardsAt(2)),
+            chain.Block(3, [Call(Bob, TestChain.Arc200TransferLog(Bob, zero, 5), TestChain.Arc200TransferLog(Bob, Alice, supply))], rewards: RewardsAt(3)),
+        };
+
+        await CreateIndexer(storage, Adapter(blocks)).RunAsync(3, CancellationToken.None);
+
+        var bob = supply / 4;
+        Assert.Equal(supply, (await storage.GetBalanceAtRoundAsync(Alice, key, 1, CancellationToken.None)).Value);
+        Assert.Equal(supply - bob, (await storage.GetBalanceAtRoundAsync(Alice, key, 2, CancellationToken.None)).Value);
+        Assert.Equal(bob, (await storage.GetBalanceAtRoundAsync(Bob, key, 2, CancellationToken.None)).Value);
+
+        // Bob burns 5 and then tries to send more than he holds: only what he held is moved, so the supply stays consistent.
+        Assert.True((await storage.GetBalanceAtRoundAsync(Bob, key, 3, CancellationToken.None)).IsZero);
+        Assert.Equal(supply - 5, (await storage.GetBalanceAtRoundAsync(Alice, key, 3, CancellationToken.None)).Value);
+
+        var holders = await storage.GetHoldersAtRoundAsync(key, 3, false, null, 10, CancellationToken.None);
+        var holder = Assert.Single(holders.Items);
+        Assert.Equal((Alice, supply - 5), (holder.Account, holder.Amount.Value));
+        Assert.Equal(supply - 5, (await storage.GetHoldingsAsync(Alice, false, null, 10, CancellationToken.None)).Items.Single(h => h.Token == key).Amount.Value);
+
+        var token = await storage.GetAsync(key, CancellationToken.None);
+        Assert.NotNull(token);
+        Assert.Equal((TokenStandard.Arc200, false, 1UL), (token.Standard, token.StandardVerified, token.CreatedRound));
+    }
 }
+

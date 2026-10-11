@@ -1,4 +1,4 @@
-# ADR 0005: ASA effects and token records
+# ADR 0007: ASA effects and token records
 
 - Status: accepted
 - Date: 2026-10-11

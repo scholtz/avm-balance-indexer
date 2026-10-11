@@ -44,6 +44,27 @@ public class PostgreSqlSpecificTests(PostgresFixture postgres)
     }
 
     [Fact]
+    public async Task A_Database_With_Uint64_Sized_Amounts_Is_Widened_For_Uint256_Balances()
+    {
+        var storage = await postgres.CreateStorageAsync();
+        await using (var connection = await postgres.DataSourceOf(storage).OpenConnectionAsync())
+        {
+            await using var narrow = new NpgsqlCommand(
+                "ALTER TABLE holdings_by_account ALTER COLUMN amount TYPE numeric(20,0); ALTER TABLE holdings_by_token ALTER COLUMN amount TYPE numeric(20,0); ALTER TABLE effects_by_account_token ALTER COLUMN delta TYPE numeric(20,0), ALTER COLUMN balance_after TYPE numeric(20,0); ALTER TABLE effects_by_token_bucket ALTER COLUMN delta TYPE numeric(20,0);",
+                connection);
+            await narrow.ExecuteNonQueryAsync();
+        }
+
+        await storage.EnsureSchemaAsync(CancellationToken.None);
+
+        await using var check = await postgres.DataSourceOf(storage).OpenConnectionAsync();
+        await using var query = new NpgsqlCommand(
+            "SELECT count(*) FROM information_schema.columns WHERE table_schema = current_schema() AND numeric_precision = 78 AND ((table_name IN ('holdings_by_account', 'holdings_by_token') AND column_name = 'amount') OR (table_name = 'effects_by_account_token' AND column_name IN ('delta', 'balance_after')) OR (table_name = 'effects_by_token_bucket' AND column_name = 'delta'))",
+            check);
+        Assert.Equal(5L, await query.ExecuteScalarAsync());
+    }
+
+    [Fact]
     public async Task A_Database_Without_A_Schema_Reports_Nothing_Indexed_Instead_Of_Failing()
     {
         var storage = await postgres.CreateStorageAsync(applySchema: false);

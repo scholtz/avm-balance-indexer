@@ -27,6 +27,7 @@ public sealed partial class RoundIndexer(
     TimeProvider? timeProvider = null)
 {
     private readonly IndexerOptions _options = options.Value;
+    private readonly HashSet<ulong> _knownArc200 = [];
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
     private long _roundsCommitted;
 
@@ -244,7 +245,16 @@ public sealed partial class RoundIndexer(
         // round overwrites with the same values, whereas writing them afterwards could lose them for good.
         foreach (var token in normalized.TokenChanges)
         {
+            if (token.Key.Kind == TokenKind.Arc200 && !await IsNewArc200Async(token, cancellationToken).ConfigureAwait(false))
+            {
+                continue;
+            }
+
             await storage.UpsertAsync(token, cancellationToken).ConfigureAwait(false);
+            if (token.Key.Kind == TokenKind.Arc200)
+            {
+                _knownArc200.Add(token.Key.TokenId);
+            }
         }
 
         var state = targetRound - block.Round <= (ulong)_options.FollowingThresholdRounds ? IngestionState.Following : IngestionState.Backfilling;
@@ -258,6 +268,23 @@ public sealed partial class RoundIndexer(
 
         tracker.Commit(round);
         return (status, round.Effects.Count);
+    }
+
+    /// <summary>ARC-200 records are only written the first time a token is seen, so busy tokens cost no write per block.</summary>
+    private async Task<bool> IsNewArc200Async(TokenInfo token, CancellationToken cancellationToken)
+    {
+        if (_knownArc200.Contains(token.Key.TokenId))
+        {
+            return false;
+        }
+
+        if (await storage.GetAsync(token.Key, cancellationToken).ConfigureAwait(false) is null)
+        {
+            return true;
+        }
+
+        _knownArc200.Add(token.Key.TokenId);
+        return false;
     }
 
     private async Task<AssetDirectory> LoadDestroyedAssetsAsync(BlockData block, CancellationToken cancellationToken)

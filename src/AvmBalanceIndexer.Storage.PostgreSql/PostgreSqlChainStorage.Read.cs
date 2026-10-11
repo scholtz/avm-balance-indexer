@@ -225,8 +225,8 @@ public sealed partial class PostgreSqlChainStorage
         command.Parameters.AddWithValue("kind", token.Kind.ToStorageName());
         command.Parameters.AddWithValue("id", StorageId(token.TokenId));
         command.Parameters.AddWithValue("round", unchecked((long)round));
-        var value = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
-        return value is decimal balance ? ToAmount(balance) : Amount.Zero;
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        return await reader.ReadAsync(cancellationToken).ConfigureAwait(false) ? ToAmount(reader.GetFieldValue<BigInteger>(0)) : Amount.Zero;
     }
 
     public Task<Page<Holding>> GetHoldersAtRoundAsync(TokenKey token, ulong round, bool includeZero, string? cursor, int limit, CancellationToken cancellationToken) =>
@@ -283,7 +283,7 @@ public sealed partial class PostgreSqlChainStorage
         {
             while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             {
-                items.Add(new Holding(new Address((byte[])reader[0]), token, ToAmount(reader.GetDecimal(1)), true, (ulong)reader.GetInt64(2)));
+                items.Add(new Holding(new Address((byte[])reader[0]), token, ToAmount(reader.GetFieldValue<BigInteger>(1)), true, (ulong)reader.GetInt64(2)));
             }
         }
 
@@ -337,8 +337,8 @@ public sealed partial class PostgreSqlChainStorage
                     account,
                     token,
                     Enum.Parse<EffectType>(reader.GetString(5)),
-                    new BigInteger(reader.GetDecimal(6)),
-                    ToAmount(reader.GetDecimal(7)),
+                    reader.GetFieldValue<BigInteger>(6),
+                    ToAmount(reader.GetFieldValue<BigInteger>(7)),
                     reader.IsDBNull(8) ? null : new Address((byte[])reader[8])));
             }
         }
@@ -381,7 +381,7 @@ public sealed partial class PostgreSqlChainStorage
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
-            items.Add(new Holding(new Address((byte[])reader[0]), token, ToAmount(reader.GetDecimal(1)), true, (ulong)reader.GetInt64(2)));
+            items.Add(new Holding(new Address((byte[])reader[0]), token, ToAmount(reader.GetFieldValue<BigInteger>(1)), true, (ulong)reader.GetInt64(2)));
         }
 
         return ToPage(items, pageSize, indexed, static h => Convert.ToHexString(h.Account.Bytes));
@@ -398,12 +398,12 @@ public sealed partial class PostgreSqlChainStorage
         return new Holding(
             new Address((byte[])reader[0]),
             new TokenKey(kind, (ulong)reader.GetInt64(2)),
-            ToAmount(reader.GetDecimal(3)),
+            ToAmount(reader.GetFieldValue<BigInteger>(3)),
             reader.GetBoolean(4),
             (ulong)reader.GetInt64(5));
     }
 
-    private static Amount ToAmount(decimal value) => new(new BigInteger(value));
+    private static Amount ToAmount(BigInteger value) => new(value);
 
     private static int ClampLimit(int limit) => limit < 1 ? 1 : Math.Min(limit, MaxPageSize);
 

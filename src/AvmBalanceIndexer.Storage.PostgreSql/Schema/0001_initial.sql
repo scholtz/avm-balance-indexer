@@ -1,5 +1,5 @@
 -- PostgreSQL schema for one chain database. Applied idempotently by PostgreSqlChainStorage.EnsureSchemaAsync.
--- Amounts use numeric(20,0) so uint64 values never overflow a signed bigint.
+-- Amounts started as numeric(20,0) so uint64 values never overflow a signed bigint; 0003_wide_amounts.sql widens them to uint256.
 --
 -- This is the first released schema, so there is nothing to migrate from. Later changes need numbered migration scripts
 -- (0002_*.sql, ...) because every statement here is CREATE ... IF NOT EXISTS and would not alter existing tables.

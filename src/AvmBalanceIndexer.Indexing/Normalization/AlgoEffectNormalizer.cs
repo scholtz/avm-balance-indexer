@@ -153,6 +153,53 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
             case "acfg":
                 ApplyAssetConfiguration(round, sender, raw, apply, path);
                 break;
+            case "appl":
+                ApplyApplicationLogs(round, raw, apply, path);
+                break;
+        }
+    }
+
+    private static void ApplyApplicationLogs(RoundBuilder round, RawTransaction raw, TxnApplyData apply, int[] path)
+    {
+        if (apply.Logs is not { Count: > 0 } logs)
+        {
+            return;
+        }
+
+        // The application that ran is the one called, or the one this call created.
+        var application = raw.ApplicationId != 0 ? raw.ApplicationId : apply.CreatedApplicationId;
+        if (application == 0)
+        {
+            return;
+        }
+
+        var token = TokenKey.Arc200(application);
+        foreach (var log in logs)
+        {
+            if (!Arc200Events.TryParseTransfer(log.Span, out var fromBytes, out var toBytes, out var amount) || amount.IsZero)
+            {
+                continue;
+            }
+
+            var from = new DomainAddress(fromBytes);
+            var to = new DomainAddress(toBytes);
+            var minted = from == ZeroAddress;
+            var burned = to == ZeroAddress;
+            if (minted && burned)
+            {
+                continue;
+            }
+
+            round.RecordArc200(application);
+            if (!minted)
+            {
+                round.Add(from, -amount, token, burned ? EffectType.Arc200Burn : EffectType.Arc200Transfer, burned ? null : to, path);
+            }
+
+            if (!burned)
+            {
+                round.Add(to, amount, token, minted ? EffectType.Arc200Mint : EffectType.Arc200Transfer, minted ? null : from, path);
+            }
         }
     }
 
@@ -227,6 +274,7 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
         private readonly List<BalanceDelta> _deltas = [];
         private readonly List<TokenInfo> _tokenChanges = [];
         private readonly Dictionary<ulong, TokenInfo> _assets = [];
+        private readonly HashSet<ulong> _arc200 = [];
         private int _transactionIndex;
         private string _transactionId = string.Empty;
 
@@ -245,6 +293,15 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
         }
 
         public TokenInfo? FindAsset(ulong assetId) => _assets.TryGetValue(assetId, out var info) ? info : assets.Find(assetId);
+
+        public void RecordArc200(ulong applicationId)
+        {
+            if (_arc200.Add(applicationId))
+            {
+                // Detection is by event shape only, so the standard is not verified.
+                _tokenChanges.Add(new TokenInfo(TokenKey.Arc200(applicationId), null, null, null, null, TokenStandard.Arc200, false, null, Round, null, null));
+            }
+        }
 
         public void Record(TokenInfo info)
         {

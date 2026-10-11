@@ -129,4 +129,45 @@ public class BalanceTrackerTests
         // Had her stale cached 90 survived the large round, the result would have been 85.
         Assert.Equal(65UL, (ulong)next.Effects[0].BalanceAfter.Value);
     }
+
+    private static BalanceDelta Arc200(int ordinal, Address account, long amount, EffectType type = EffectType.Arc200Transfer, Address? counterparty = null) =>
+        new(new EffectId(1, 0, "tx", [], ordinal), account, TokenKey.Arc200(9), type, new BigInteger(amount), counterparty);
+
+    [Fact]
+    public async Task An_Arc200_Debit_Beyond_The_Known_Balance_Is_Limited_Together_With_Its_Credit()
+    {
+        var tracker = new BalanceTracker(await SeededAsync(), 1000);
+
+        var round = await tracker.ApplyAsync(
+            [Arc200(0, Alice, 40, EffectType.Arc200Mint), Arc200(1, Alice, -100, counterparty: Bob), Arc200(2, Bob, 100, counterparty: Alice)],
+            CancellationToken.None);
+
+        Assert.Equal([40L, -40L, 40L], round.Effects.Select(static e => (long)e.Delta));
+        Assert.Equal([40UL, 0UL, 40UL], round.Effects.Select(static e => (ulong)e.BalanceAfter.Value));
+    }
+
+    [Fact]
+    public async Task An_Arc200_Debit_From_An_Empty_Account_Leaves_No_Effect()
+    {
+        var tracker = new BalanceTracker(await SeededAsync(), 1000);
+
+        var round = await tracker.ApplyAsync([Arc200(0, Alice, -5, counterparty: Bob), Arc200(1, Bob, 5, counterparty: Alice), Arc200(2, Bob, -1, EffectType.Arc200Burn)], CancellationToken.None);
+
+        Assert.Empty(round.Effects);
+    }
+
+    [Fact]
+    public async Task An_Arc200_Balance_Is_Capped_At_Uint256_So_The_Database_Can_Always_Hold_It()
+    {
+        var tracker = new BalanceTracker(await SeededAsync(), 1000);
+        var max = (BigInteger.One << 256) - 1;
+        BalanceDelta Mint(int ordinal, BigInteger amount) =>
+            new(new EffectId(1, 0, "tx", [], ordinal), Alice, TokenKey.Arc200(9), EffectType.Arc200Mint, amount, null);
+
+        var round = await tracker.ApplyAsync([Mint(0, max), Mint(1, max), Mint(2, 5)], CancellationToken.None);
+
+        var effect = Assert.Single(round.Effects);
+        Assert.Equal(max, effect.BalanceAfter.Value);
+    }
 }
+

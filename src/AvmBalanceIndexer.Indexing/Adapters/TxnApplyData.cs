@@ -13,6 +13,8 @@ namespace AvmBalanceIndexer.Indexing.Adapters;
 /// <param name="HasGenesisHash">The genesis hash was stripped from the stored transaction (<c>hgh</c>).</param>
 /// <param name="HasGenesisId">The genesis id was stripped from the stored transaction (<c>hgi</c>).</param>
 /// <param name="InnerTxns">Apply data of inner transactions in execution order.</param>
+/// <param name="CreatedApplicationId">Id of the application created by this application call (<c>apid</c> in the apply data), else zero.</param>
+/// <param name="Logs">Log messages the transaction emitted (<c>dt.lg</c>), in order.</param>
 public sealed record TxnApplyData(
     ReadOnlyMemory<byte> RawTxn,
     ulong SenderRewards,
@@ -23,4 +25,6 @@ public sealed record TxnApplyData(
     ulong CreatedAssetId,
     bool HasGenesisHash,
     bool HasGenesisId,
-    IReadOnlyList<TxnApplyData> InnerTxns);
+    IReadOnlyList<TxnApplyData> InnerTxns,
+    ulong CreatedApplicationId = 0,
+    IReadOnlyList<ReadOnlyMemory<byte>>? Logs = null);
