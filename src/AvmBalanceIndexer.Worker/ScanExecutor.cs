@@ -78,12 +78,41 @@ public sealed partial class ScanExecutor(
         LogStarted(logger, job.Id, job.Token, job.Round, job.HoldersFound);
         var cursor = job.Cursor;
         var retries = 0;
+        var resync = false;
         try
         {
             while (true)
             {
                 try
                 {
+                    if (clock.GetUtcNow() >= job.ExpiresAt)
+                    {
+                        // The sweeper deletes the job and its result any moment now.
+                        LogReleased(logger, job.Id);
+                        return;
+                    }
+
+                    if (resync)
+                    {
+                        // Where did the last step really get to? The job row says; it also tells whether it is still ours.
+                        if (await jobs.GetJobAsync(job.Id, stoppingToken).ConfigureAwait(false) is not { State: ScanState.Running } current)
+                        {
+                            LogReleased(logger, job.Id);
+                            return;
+                        }
+
+                        cursor = current.Cursor;
+
+                        // A heartbeat, so that long retries do not make the scan look abandoned. Rejected when another replica took it over.
+                        if (!await jobs.AppendAsync(job.Id, _owner, [], cursor, clock.GetUtcNow(), stoppingToken).ConfigureAwait(false))
+                        {
+                            LogReleased(logger, job.Id);
+                            return;
+                        }
+
+                        resync = false;
+                    }
+
                     if (cursor != ScanJob.EndOfList)
                     {
                         var page = await storage.GetHoldersAtRoundAsync(job.Token, job.Round, job.IncludeZero, cursor, settings.PageSize, stoppingToken).ConfigureAwait(false);
@@ -114,27 +143,20 @@ public sealed partial class ScanExecutor(
                 {
                     if (++retries > settings.MaxStepRetries)
                     {
-                        throw;
+                        if (ex is StorageTimeoutException)
+                        {
+                            // The same step keeps being too slow: retrying elsewhere would not change that.
+                            throw;
+                        }
+
+                        // An outage, not a verdict on the scan: leave it running; it is resumed after StaleAfter.
+                        LogGaveUp(logger, ex, job.Id);
+                        return;
                     }
 
                     LogStepRetry(logger, ex, job.Id, retries);
+                    resync = true;
                     await Task.Delay(settings.RetryDelay, stoppingToken).ConfigureAwait(false);
-
-                    // Where did the last step really get to? The job row says; it also tells whether it is still ours.
-                    if (await jobs.GetJobAsync(job.Id, stoppingToken).ConfigureAwait(false) is not { State: ScanState.Running } current)
-                    {
-                        LogReleased(logger, job.Id);
-                        return;
-                    }
-
-                    cursor = current.Cursor;
-
-                    // A heartbeat, so that long retries do not make the scan look abandoned. Rejected when another replica took it over.
-                    if (!await jobs.AppendAsync(job.Id, _owner, [], cursor, clock.GetUtcNow(), stoppingToken).ConfigureAwait(false))
-                    {
-                        LogReleased(logger, job.Id);
-                        return;
-                    }
                 }
             }
         }
@@ -179,6 +201,9 @@ public sealed partial class ScanExecutor(
 
     [LoggerMessage(EventId = 1333, Level = LogLevel.Warning, Message = "Scan {JobId} step failed transiently (retry {Retry})")]
     private static partial void LogStepRetry(ILogger logger, Exception exception, Guid jobId, int retry);
+
+    [LoggerMessage(EventId = 1337, Level = LogLevel.Warning, Message = "Scan {JobId} is paused: the storage stayed unavailable; another replica resumes it later")]
+    private static partial void LogGaveUp(ILogger logger, Exception exception, Guid jobId);
 
     [LoggerMessage(EventId = 1334, Level = LogLevel.Error, Message = "Scan {JobId} failed")]
     private static partial void LogFailed(ILogger logger, Exception exception, Guid jobId);

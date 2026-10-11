@@ -124,7 +124,27 @@ public sealed partial class CassandraChainStorage : IScanJobStore
             id,
             owner,
             first).ConfigureAwait(false);
-        return await ExecuteConditionalAsync(statement, cancellationToken).ConfigureAwait(false);
+        if (await ExecuteConditionalAsync(statement, cancellationToken).ConfigureAwait(false))
+        {
+            return true;
+        }
+
+        // Not the owner any more (cancelled, expired, taken over): the rows just written belong to nobody. Another owner may have
+        // written the same keys already, so only take back what lies beyond the stored count.
+        if (await ReadJobAsync(id, cancellationToken).ConfigureAwait(false) is null)
+        {
+            await RunBoundedAsync(
+                rows,
+                row => ExecuteAsync(
+                    $"DELETE FROM {Table("scan_result")} WHERE job_id = ? AND bucket = ? AND seq = ?",
+                    cancellationToken,
+                    id,
+                    checked((int)(row.Seq / ScanBucketSize)),
+                    row.Seq),
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        return false;
     }
 
     public Task<bool> CompleteAsync(Guid id, string owner, DateTimeOffset now, CancellationToken cancellationToken) =>
@@ -173,9 +193,15 @@ public sealed partial class CassandraChainStorage : IScanJobStore
             return new Page<Holding>([], null, 0);
         }
 
+        if (after >= current.Job.HoldersFound - 1)
+        {
+            // Nothing past this position yet (or a position far beyond anything stored): a reader following a running scan keeps its cursor.
+            return new Page<Holding>([], after >= 0 && !current.Job.IsFinished ? after.ToString(CultureInfo.InvariantCulture) : null, current.Job.Round);
+        }
+
         var items = new List<Holding>();
         var seqs = new List<long>();
-        for (var bucket = checked((int)((after + 1) / ScanBucketSize)); (long)bucket * ScanBucketSize < current.Job.HoldersFound && items.Count <= pageSize; bucket++)
+        for (var bucket = (int)((after + 1) / ScanBucketSize); (long)bucket * ScanBucketSize < current.Job.HoldersFound && items.Count <= pageSize; bucket++)
         {
             var rows = await ExecuteAsync(
                 $"SELECT seq, account, amount, opted_in, last_changed_round FROM {Table("scan_result")} WHERE job_id = ? AND bucket = ? AND seq > ? LIMIT ?",
@@ -306,10 +332,10 @@ public sealed partial class CassandraChainStorage : IScanJobStore
     /// </summary>
     private async Task<List<(ScanJob Job, string? Owner)>> ReadActiveJobsAsync(CancellationToken cancellationToken)
     {
-        var ids = (await ExecuteAsync($"SELECT id FROM {Table("scan_active")} WHERE chain = ?", cancellationToken, _chain).ConfigureAwait(false))
-            .Select(static row => row.GetValue<Guid>("id"))
+        var markers = (await ExecuteAsync($"SELECT id, created_at FROM {Table("scan_active")} WHERE chain = ?", cancellationToken, _chain).ConfigureAwait(false))
+            .Select(static row => (Id: row.GetValue<Guid>("id"), CreatedAt: row.GetValue<DateTimeOffset>("created_at")))
             .ToArray();
-        var jobs = await RunBoundedAsync(ids, id => ReadJobAsync(id, cancellationToken), cancellationToken).ConfigureAwait(false);
+        var jobs = await RunBoundedAsync(markers, marker => ReadJobAsync(marker.Id, cancellationToken), cancellationToken).ConfigureAwait(false);
         var active = new List<(ScanJob Job, string? Owner)>(jobs.Length);
         for (var i = 0; i < jobs.Length; i++)
         {
@@ -317,9 +343,11 @@ public sealed partial class CassandraChainStorage : IScanJobStore
             {
                 active.Add(job);
             }
-            else
+            else if (jobs[i] is not null || DateTimeOffset.UtcNow - markers[i].CreatedAt > OrphanGrace)
             {
-                await ExecuteAsync($"DELETE FROM {Table("scan_active")} WHERE chain = ? AND id = ?", cancellationToken, _chain, ids[i]).ConfigureAwait(false);
+                // Finished jobs lose their marker. A marker without a job may belong to a creation that is still in progress (the marker
+                // is written first), so it is only removed once it is too old for that.
+                await ForgetActiveAsync(markers[i].Id, cancellationToken).ConfigureAwait(false);
             }
         }
 

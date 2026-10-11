@@ -1,4 +1,4 @@
-# ADR 0011: Asynchronous holder scans
+# ADR 0012: Asynchronous holder scans
 
 - Status: accepted
 - Date: 2026-10-11

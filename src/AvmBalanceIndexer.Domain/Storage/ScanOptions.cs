@@ -3,7 +3,7 @@ using System.ComponentModel.DataAnnotations;
 namespace AvmBalanceIndexer.Domain.Storage;
 
 /// <summary>Bound from the Scans configuration section; used by the API (admission, retention) and by the worker (execution).</summary>
-public sealed class ScanOptions
+public sealed class ScanOptions : IValidatableObject
 {
     public const string SectionName = "Scans";
 
@@ -20,7 +20,7 @@ public sealed class ScanOptions
     public TimeSpan PollInterval { get; set; } = TimeSpan.FromSeconds(5);
 
     /// <summary>A running scan whose owner has not checkpointed for this long is taken over by another replica.</summary>
-    [Range(typeof(TimeSpan), "00:00:01", "01:00:00")]
+    [Range(typeof(TimeSpan), "00:00:10", "01:00:00")]
     public TimeSpan StaleAfter { get; set; } = TimeSpan.FromMinutes(2);
 
     /// <summary>Holders read and stored per step; the memory a scan needs.</summary>
@@ -34,4 +34,13 @@ public sealed class ScanOptions
     /// <summary>Wait between retries of one step.</summary>
     [Range(typeof(TimeSpan), "00:00:00.001", "00:10:00")]
     public TimeSpan RetryDelay { get; set; } = TimeSpan.FromSeconds(5);
+
+    public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+    {
+        // The owner checkpoints at least once per retry; if a scan could look abandoned in between, two replicas would fight over it.
+        if (StaleAfter <= RetryDelay * 2)
+        {
+            yield return new ValidationResult("Scans:StaleAfter must be more than twice Scans:RetryDelay.", [nameof(StaleAfter)]);
+        }
+    }
 }

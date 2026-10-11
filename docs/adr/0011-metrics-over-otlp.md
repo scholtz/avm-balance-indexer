@@ -1,4 +1,4 @@
-# ADR 0010: Metrics are exported over OTLP
+# ADR 0011: Metrics are exported over OTLP
 
 - Status: accepted
 - Date: 2026-10-11

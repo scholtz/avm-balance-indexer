@@ -416,6 +416,25 @@ public abstract class StorageContractTests
     }
 
     [Theory]
+    [InlineData("0")]
+    [InlineData("99999999999999")]
+    [InlineData("9223372036854775807")]
+    public async Task A_Scan_Result_Cursor_Beyond_The_Stored_Rows_Is_An_Empty_Page(string cursor)
+    {
+        var store = await ScanStoreAsync();
+        var job = NewJob();
+        await store.CreateAsync(job, CancellationToken.None);
+        await store.ClaimNextAsync("a", T0.AddSeconds(1), T0 - TimeSpan.FromMinutes(2), CancellationToken.None);
+        await store.AppendAsync(job.Id, "a", [Row(0)], ScanJob.EndOfList, T0.AddSeconds(2), CancellationToken.None);
+        await store.CompleteAsync(job.Id, "a", T0.AddSeconds(3), CancellationToken.None);
+
+        var page = await store.GetResultAsync(job.Id, cursor, 10, CancellationToken.None);
+
+        Assert.Empty(page.Items);
+        Assert.Null(page.NextCursor);
+    }
+
+    [Theory]
     [InlineData("zz")]
     [InlineData("-1")]
     public async Task A_Malformed_Scan_Result_Cursor_Is_An_Argument_Error(string cursor)

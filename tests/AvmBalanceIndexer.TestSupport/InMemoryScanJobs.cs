@@ -108,6 +108,11 @@ public partial class InMemoryChainStorage : IScanJobStore
             }
 
             var rows = _scanResults[id];
+            if (after >= rows.Count - 1)
+            {
+                return Task.FromResult(new Page<Holding>([], after >= 0 && !entry.Job.IsFinished ? after.ToString(CultureInfo.InvariantCulture) : null, entry.Job.Round));
+            }
+
             var skip = (int)(after + 1);
             var items = rows.Skip(skip).Take(pageSize).ToList();
             var delivered = skip + items.Count - 1;
