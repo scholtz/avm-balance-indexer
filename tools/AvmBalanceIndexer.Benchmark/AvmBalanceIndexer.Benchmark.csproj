@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <Description>Indexes the newest MainNet rounds into PostgreSQL or Cassandra, measures stored size and API latency, and renders the comparison.</Description>
+    <IsPackable>false</IsPackable>
+    <!-- A command line tool: string literals are output, broad catches report and carry on, and it is not a library. -->
+    <NoWarn>$(NoWarn);CA1303;CA2007;CA1031;CA1848;CA1812;CA5394;CA1305;CA1310;CA1307;CA1308;CA2234</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\AvmBalanceIndexer.Hosting\AvmBalanceIndexer.Hosting.csproj" />
+  </ItemGroup>
+
+</Project>

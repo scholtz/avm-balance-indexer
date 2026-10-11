@@ -8,8 +8,12 @@
     <Project Path="src/AvmBalanceIndexer.Storage.PostgreSql/AvmBalanceIndexer.Storage.PostgreSql.csproj" />
     <Project Path="src/AvmBalanceIndexer.Worker/AvmBalanceIndexer.Worker.csproj" />
   </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/AvmBalanceIndexer.Benchmark/AvmBalanceIndexer.Benchmark.csproj" />
+  </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/AvmBalanceIndexer.Api.Tests/AvmBalanceIndexer.Api.Tests.csproj" />
+    <Project Path="tests/AvmBalanceIndexer.Benchmark.Tests/AvmBalanceIndexer.Benchmark.Tests.csproj" />
     <Project Path="tests/AvmBalanceIndexer.Domain.Tests/AvmBalanceIndexer.Domain.Tests.csproj" />
     <Project Path="tests/AvmBalanceIndexer.Hosting.Tests/AvmBalanceIndexer.Hosting.Tests.csproj" />
     <Project Path="tests/AvmBalanceIndexer.Indexing.Tests/AvmBalanceIndexer.Indexing.Tests.csproj" />

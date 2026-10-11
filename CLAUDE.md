@@ -20,6 +20,7 @@ Read first (in this order, skip what you already know): this file, `CONTRIBUTING
 | `tests/...TestSupport` | `StorageContractTests` (shared suite every provider derives from), fakes, `InMemoryChainStorage`, `PostgresFixture` |
 | `tests/...Storage.ContractTests` | One thin class per provider deriving from `StorageContractTests` (`InMemory...`, `PostgreSql...`); a new provider adds its class here and a CI service |
 | `tests/...Live.Tests` | Network tests: first 1000 rounds of TestNet+MainNet vs. ledger deltas |
+| `tools/...Benchmark` | Nightly PostgreSQL vs Cassandra benchmark on the newest MainNet rounds (docs/benchmarks.md) |
 | `deploy/`, `docker/` | Helm chart + per-chain values, Dockerfiles (CI lints/builds them) |
 
 Rules that are easy to break (details in CONTRIBUTING.md):
