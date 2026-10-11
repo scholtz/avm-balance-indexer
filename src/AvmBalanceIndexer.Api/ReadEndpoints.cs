@@ -58,11 +58,45 @@ public static class ReadEndpoints
     {
         ArgumentNullException.ThrowIfNull(v1);
 
-        v1.MapGet("/accounts/{address}/tokens", GetHoldings).WithName("GetAccountTokens");
-        v1.MapGet("/accounts/{address}/tokens/{kind}/{tokenId}/balance", GetBalance).WithName("GetTokenBalance");
-        v1.MapGet("/accounts/{address}/tokens/{kind}/{tokenId}/transactions", GetHistory).WithName("GetTokenHistory");
-        v1.MapGet("/tokens/{kind}/{tokenId}/holders", GetHolders).WithName("GetTokenHolders");
-        v1.MapGet("/tokens/{kind}/{tokenId}", GetToken).WithName("GetToken");
+        v1.MapGet("/accounts/{address}/tokens", GetHoldings)
+            .WithName("GetAccountTokens")
+            .WithTags("Balances")
+            .WithSummary("Current token holdings of an account")
+            .WithDescription("Holdings ordered by token kind and id. Zero balances (opt-ins) are listed with includeZero=true. Page with nextCursor.")
+            .Produces<HoldingsResponse>()
+            .WithErrors(StatusCodes.Status400BadRequest)
+            .WithCommonErrors();
+        v1.MapGet("/accounts/{address}/tokens/{kind}/{tokenId}/balance", GetBalance)
+            .WithName("GetTokenBalance")
+            .WithTags("Balances")
+            .WithSummary("End-of-round balance of an account")
+            .WithDescription("The balance after the last effect at or before the round (default: the latest published round), including rounds without activity. An explicit published round is cacheable.")
+            .Produces<BalanceResponse>()
+            .WithErrors(StatusCodes.Status400BadRequest, StatusCodes.Status404NotFound)
+            .WithCommonErrors();
+        v1.MapGet("/accounts/{address}/tokens/{kind}/{tokenId}/transactions", GetHistory)
+            .WithName("GetTokenHistory")
+            .WithTags("History")
+            .WithSummary("Balance effects of an account and token, newest first")
+            .WithDescription("Every change of the balance with its signed delta, the balance after it and the transaction it came from. Limit the range with fromRound and toRound.")
+            .Produces<HistoryResponse>()
+            .WithErrors(StatusCodes.Status400BadRequest)
+            .WithCommonErrors();
+        v1.MapGet("/tokens/{kind}/{tokenId}/holders", GetHolders)
+            .WithName("GetTokenHolders")
+            .WithTags("Holders")
+            .WithSummary("Holders of a token at the end of a round")
+            .WithDescription("Holders in account order. For a very large token at a past round use an asynchronous scan. Pass the same round while paging.")
+            .Produces<HoldersResponse>()
+            .WithErrors(StatusCodes.Status400BadRequest, StatusCodes.Status404NotFound)
+            .WithCommonErrors();
+        v1.MapGet("/tokens/{kind}/{tokenId}", GetToken)
+            .WithName("GetToken")
+            .WithTags("Tokens")
+            .WithSummary("Token metadata")
+            .Produces<TokenResponse>()
+            .WithErrors(StatusCodes.Status400BadRequest, StatusCodes.Status404NotFound)
+            .WithCommonErrors();
         return v1;
     }
 

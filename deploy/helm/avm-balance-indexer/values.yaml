@@ -35,6 +35,13 @@ storage:
 
 api:
   replicaCount: 2
+  # Requests per client IP and minute on the data endpoints (0 = off) and the longest a data request may take.
+  rateLimitPerMinute: 600
+  requestTimeoutSeconds: 60
+  # Take the client address from X-Forwarded-For. Only when the API is reachable exclusively through your ingress.
+  trustForwardedHeaders: false
+  # Serve the OpenAPI description at /openapi/v1.json.
+  publishOpenApi: true
   resources:
     requests: { cpu: 250m, memory: 256Mi }
     limits: { cpu: "1", memory: 512Mi }

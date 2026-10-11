@@ -15,6 +15,10 @@ data:
   OTEL_EXPORTER_OTLP_PROTOCOL: {{ .Values.telemetry.otlpProtocol | quote }}
   {{- end }}
   Worker__HealthPort: {{ .Values.worker.healthPort | quote }}
+  Api__RateLimitPerMinute: {{ .Values.api.rateLimitPerMinute | quote }}
+  Api__RequestTimeoutSeconds: {{ .Values.api.requestTimeoutSeconds | quote }}
+  Api__TrustForwardedHeaders: {{ .Values.api.trustForwardedHeaders | quote }}
+  Api__PublishOpenApi: {{ .Values.api.publishOpenApi | quote }}
   Scans__MaxActive: {{ .Values.scans.maxActive | quote }}
   Scans__Retention: {{ .Values.scans.retention | quote }}
   Scans__StaleAfter: {{ .Values.scans.staleAfter | quote }}
