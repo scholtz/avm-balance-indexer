@@ -45,7 +45,28 @@ public class RawTransactionTests
 
         var error = Assert.Throws<InvalidDataException>(() => new Normalization.AlgoEffectNormalizer().NormalizeBlock(block, default, Normalization.AssetDirectory.Empty));
 
-        Assert.Contains("Round 5, transaction 0", error.Message, StringComparison.Ordinal);
+        Assert.Contains("of round 5", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Payment_Fields_Cover_Zero_Receiver_Close_Out_And_Non_Payments()
+    {
+        var chain = new TestChain();
+        var alice = TestChain.Account(1);
+        var zero = new Domain.Chains.Address(new byte[Domain.Chains.Address.Length]);
+        var block = chain.Block(
+            5,
+            [
+                new TestPayment(alice, zero, 10),
+                new TestPayment(alice, TestChain.Account(2), 5, CloseTo: TestChain.Account(3), ClosingAmount: 7),
+                new TestPayment(alice, alice, 0, Asset: TestAsset.OptIn(9)),
+            ]);
+
+        var deltas = new Normalization.AlgoEffectNormalizer().Normalize(block, default);
+
+        Assert.Contains(deltas, d => d.Account == zero && d.Type == Domain.Effects.EffectType.Payment && d.Delta == 10);
+        Assert.Contains(deltas, d => d.Account == TestChain.Account(3) && d.Type == Domain.Effects.EffectType.CloseOut && d.Delta == 7);
+        Assert.DoesNotContain(deltas, d => d.Token.Kind == Domain.Tokens.TokenKind.Algo && d.Id.IntraRoundOrder == 3 && d.Type == Domain.Effects.EffectType.Payment);
     }
 
     [Fact]
@@ -60,5 +81,6 @@ public class RawTransactionTests
         Assert.Empty(ApplyDataReader.ReadBlockTransactions(stripped));
         Assert.Equal(BlockHashCalculator.Compute(payload), BlockHashCalculator.Compute(stripped));
         Assert.Throws<InvalidDataException>(() => BlockPayload.WithoutTransactions(new byte[] { 0x80 }));
+        Assert.ThrowsAny<Exception>(() => BlockPayload.WithoutTransactions(ReadOnlyMemory<byte>.Empty));
     }
 }

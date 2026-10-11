@@ -47,7 +47,7 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
         var hasInnerTransactions = block.ApplyData.Any(static a => a.InnerTxns.Count > 0);
         for (var index = 0; index < transactions.Count; index++)
         {
-            var apply = block.ApplyData[index];
+            var apply = transactions[index];
             var transactionId = TransactionIdCalculator.Compute(apply, block.GenesisHash, block.GenesisId);
             round.BeginTransaction(index + 1, transactionId);
             // Blocks of the early protocols do not record the id of a created asset; it is the transaction counter at the transaction.
@@ -56,10 +56,10 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
             {
                 ApplyTransaction(round, apply, [], 0, legacyCreatedId);
             }
-            catch (Exception ex) when (ex is InvalidDataException or EndOfStreamException or MessagePack.MessagePackSerializationException)
+            catch (Exception ex) when (ex is InvalidDataException or EndOfStreamException or ArgumentException or InvalidCastException or OverflowException or MessagePack.MessagePackSerializationException)
             {
                 // Say which transaction made the round fail: a stalled indexer is diagnosed from this message.
-                throw new InvalidDataException($"Round {block.Round}, transaction {index} ({transactionId}): {ex.Message}", ex);
+                throw new InvalidDataException($"Transaction {index} ({transactionId}) of round {block.Round}: {ex.Message}", ex);
             }
         }
 

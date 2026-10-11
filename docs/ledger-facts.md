@@ -6,7 +6,7 @@ hashing or the live tests.
 - The rewards pool is debited every block by `rate + prevResidue - residue` (from headers only); protocols before v31
   use the previous rate in the recalculation round. TestNet has hotfix transfers at rounds 1499995 and 2926564
   (bank to pool, 20,000,000,000).
-- The Algorand5 SDK block model drops apply data (rs, rr, rc, ca) and `GossipHttpClient` ignores HTTP status, so the repo
+- Transactions are read from the raw msgpack (ADR 0010); the Algorand5 SDK only decodes header and certificate. It drops apply data (rs, rr, rc, ca) and `GossipHttpClient` ignores HTTP status, so the repo
   fetches raw bytes itself and reads apply data with a msgpack walk.
 - The genesis hash reproduces from the served genesis JSON: sorted keys, minimal ints, base64 key material as bin,
   prefix "GE", SHA-512/256, keep every key present in the JSON (MainNet needs its explicit empty comments).

@@ -15,7 +15,7 @@ public static class BlockPayload
     public static byte[] WithoutTransactions(ReadOnlyMemory<byte> payload)
     {
         var reader = new MessagePackReader(payload);
-        var buffer = new ArrayBufferWriter<byte>(payload.Length < 4096 ? payload.Length : 4096);
+        var buffer = new ArrayBufferWriter<byte>(Math.Clamp(payload.Length, 256, 4096));
         var writer = new MessagePackWriter(buffer);
         var found = false;
 

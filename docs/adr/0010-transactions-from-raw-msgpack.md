@@ -12,6 +12,8 @@ model drops. MainNet round 64000338 contains a payment authorised by a LogicSig 
 argument that the SDK cannot decode (`MessageTypeException` at the LogicSig), so the indexer stalled there for good. The SDK
 also decoded every transaction a second time.
 
+SDK issue: https://github.com/scholtz/dotnet-algorand-sdk/issues/5
+
 ## Decision
 
 - `BlockDecoder` decodes only the header and certificate with the SDK: the payset (`txns`) is stripped from the payload first
