@@ -9,8 +9,9 @@ public static class BlockDecoder
     private const int HashLength = 32;
 
     /// <summary>
-    /// Decodes the payload with the Algorand5 codec, attaches the apply data, and checks that it is the
-    /// requested round of the expected chain.
+    /// Decodes the header and certificate with the Algorand5 codec, reads the transactions and their apply data straight from
+    /// the msgpack (<see cref="BlockData.ApplyData"/>; <c>Block.Transactions</c> stays empty, ADR 0010), and checks that it is
+    /// the requested round of the expected chain.
     /// </summary>
     /// <param name="payload">Raw msgpack body returned by an archival node.</param>
     /// <param name="expectedRound">Round that was requested.</param>

@@ -52,7 +52,15 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
             round.BeginTransaction(index + 1, transactionId);
             // Blocks of the early protocols do not record the id of a created asset; it is the transaction counter at the transaction.
             var legacyCreatedId = hasInnerTransactions ? 0UL : LegacyCreatedId(header.TxnCounter, transactions.Count, index);
-            ApplyTransaction(round, apply, [], 0, legacyCreatedId);
+            try
+            {
+                ApplyTransaction(round, apply, [], 0, legacyCreatedId);
+            }
+            catch (Exception ex) when (ex is InvalidDataException or EndOfStreamException or MessagePack.MessagePackSerializationException)
+            {
+                // Say which transaction made the round fail: a stalled indexer is diagnosed from this message.
+                throw new InvalidDataException($"Round {block.Round}, transaction {index} ({transactionId}): {ex.Message}", ex);
+            }
         }
 
         if (header.ProposerPayout is > 0)
