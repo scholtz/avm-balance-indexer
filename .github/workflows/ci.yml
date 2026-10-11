@@ -35,7 +35,7 @@ jobs:
       AVM_SKIP_LIVE_TESTS: "1"
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
       - run: dotnet restore AvmBalanceIndexer.slnx
@@ -64,7 +64,7 @@ jobs:
           --health-interval 5s --health-timeout 3s --health-retries 20
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
       # Indexes the first 1000 rounds of Algorand TestNet and MainNet from public archival nodes into PostgreSQL and
