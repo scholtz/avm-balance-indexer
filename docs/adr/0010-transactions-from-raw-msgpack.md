@@ -26,6 +26,6 @@ SDK issue: https://github.com/scholtz/dotnet-algorand-sdk/issues/5
 
 - A transaction shape the SDK model cannot represent no longer matters; only the fields the indexer reads have to be right,
   and they are covered by ledger comparisons on every era.
-- Do not reintroduce SDK transaction decoding on this path.
+- Do not reintroduce SDK transaction decoding on this path. The SDK bug is fixed in Algorand5 5.0.2 (SDK issue 5, guarded by `SdkBlockDecodingTests`), but the raw path stays: it is faster and does not depend on the SDK model covering every transaction shape.
 - The payload is walked several times (strip, apply data, block hash, payset commitment); merging the walks is a possible
   throughput optimisation (#15).
