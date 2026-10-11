@@ -18,12 +18,12 @@ public class PayoutEraRoundsTests(ITestOutputHelper output)
     private const ulong BehindTip = 5000;
 
     [LiveFact]
-    public Task MainNet_Recent_Rounds_Match_The_Ledger() => AssertWindowAsync(ChainId.AlgorandMainnet, ReferenceNode.MainNet());
+    public Task MainNet_Recent_Rounds_Match_The_Ledger() => AssertWindowAsync(ChainId.AlgorandMainnet, ReferenceNode.MainNet(), expectPayouts: true);
 
     [LiveFact]
     public Task TestNet_Recent_Rounds_Match_The_Ledger() => AssertWindowAsync(ChainId.AlgorandTestnet, ReferenceNode.TestNet());
 
-    private async Task AssertWindowAsync(string chain, ReferenceNode reference)
+    private async Task AssertWindowAsync(string chain, ReferenceNode reference, bool expectPayouts = false)
     {
         using var _ = reference;
         var http = AlgorandChainFactory.CreateBlockHttpClient();
@@ -46,14 +46,21 @@ public class PayoutEraRoundsTests(ITestOutputHelper output)
             ledger[round] = await reference.LedgerBalancesAfterAsync(round);
         }
 
+        var effectSums = new Dictionary<ulong, Dictionary<Address, BigInteger>>();
+        for (var round = first; round <= last; round++)
+        {
+            effectSums[round] = normalizer.Normalize(blocks[round], RewardsState.FromHeader(blocks[round - 1].Block))
+                .GroupBy(static e => e.Account)
+                .ToDictionary(static g => g.Key, static g => g.Aggregate(BigInteger.Zero, static (a, e) => a + e.Delta));
+        }
+
         var lastSeen = new Dictionary<Address, (ulong Round, ulong Balance)>();
         var proposers = 0;
         var problems = new List<string>();
         for (var round = first; round <= last; round++)
         {
-            var effects = normalizer.Normalize(blocks[round], RewardsState.FromHeader(blocks[round - 1].Block));
             proposers += blocks[round].Block.ProposerPayout is > 0 ? 1 : 0;
-            var sums = effects.GroupBy(static e => e.Account).ToDictionary(static g => g.Key, static g => g.Aggregate(BigInteger.Zero, static (a, e) => a + e.Delta));
+            var sums = effectSums[round];
 
             foreach (var (account, balance) in ledger[round])
             {
@@ -61,7 +68,7 @@ public class PayoutEraRoundsTests(ITestOutputHelper output)
                 {
                     var missing = (BigInteger)balance - seen.Balance - sums.GetValueOrDefault(account);
                     var between = Enumerable.Range(1, (int)(round - seen.Round - 1)).Select(i => seen.Round + (ulong)i)
-                        .Aggregate(BigInteger.Zero, (a, r) => a + SumFor(normalizer, blocks, r, account));
+                        .Aggregate(BigInteger.Zero, (a, r) => a + effectSums[r].GetValueOrDefault(account));
                     missing -= between;
                     if (!missing.IsZero)
                     {
@@ -84,11 +91,7 @@ public class PayoutEraRoundsTests(ITestOutputHelper output)
             output.WriteLine(problem);
         }
 
+        Assert.True(!expectPayouts || proposers > 0, "The window contains no proposer payout, so it proves nothing about them.");
         Assert.True(problems.Count == 0, string.Join(Environment.NewLine, problems.Take(20)));
     }
-
-    private static BigInteger SumFor(AlgoEffectNormalizer normalizer, Dictionary<ulong, BlockData> blocks, ulong round, Address account) =>
-        normalizer.Normalize(blocks[round], RewardsState.FromHeader(blocks[round - 1].Block))
-            .Where(e => e.Account == account)
-            .Aggregate(BigInteger.Zero, static (a, e) => a + e.Delta);
 }

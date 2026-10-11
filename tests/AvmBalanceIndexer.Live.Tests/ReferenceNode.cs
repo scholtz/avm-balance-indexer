@@ -61,7 +61,7 @@ public sealed class ReferenceNode : IDisposable
         foreach (var account in json.RootElement.GetProperty("Accts").GetProperty("Accts").EnumerateArray())
         {
             var address = new Address(Convert.FromBase64String(account.GetProperty("Addr").GetString()!));
-            result[address] = account.GetProperty("MicroAlgos").GetUInt64();
+            result[address] = account.TryGetProperty("MicroAlgos", out var micro) ? micro.GetUInt64() : 0;
         }
 
         return result;
@@ -73,7 +73,12 @@ public sealed class ReferenceNode : IDisposable
     private static string LeadingAccts(string text)
     {
         var start = text.IndexOf("\"Accts\"", StringComparison.Ordinal);
-        var open = text.IndexOf('{', start);
+        var open = start < 0 ? -1 : text.IndexOf('{', start);
+        if (open < 0)
+        {
+            throw new InvalidDataException("Delta document has no Accts object.");
+        }
+
         var depth = 0;
         var inString = false;
         var escaped = false;
