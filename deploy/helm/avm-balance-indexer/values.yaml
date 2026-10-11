@@ -4,6 +4,9 @@ chain: algorand-testnet
 image:
   repository: ghcr.io/scholtz/avm-balance-indexer
   tag: ""          # defaults to Chart.appVersion
+  # Per-component tags (default: tag). Upgrade the worker first by setting workerTag alone, then apiTag (docs/operations.md).
+  apiTag: ""
+  workerTag: ""
   pullPolicy: IfNotPresent
 
 storage:
@@ -55,6 +58,9 @@ api:
     minAvailable: 1
 
 worker:
+  # RollingUpdate keeps a writer running during an upgrade. Use Recreate (or scale to 0 first) for a release that contains a schema
+  # migration: no writer of the previous version may run while it is applied (docs/operations.md).
+  strategy: RollingUpdate
   # One replica indexes (it holds the writer lease), the others stand by and take over within seconds.
   replicaCount: 2
   # Port of /healthz/live and /healthz/ready.
