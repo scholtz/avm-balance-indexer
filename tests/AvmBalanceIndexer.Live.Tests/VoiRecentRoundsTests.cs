@@ -98,8 +98,8 @@ public class VoiRecentRoundsTests(ITestOutputHelper output)
         var innerPayments = transactions.Count(static t => t.Id.Length == 0 && t.Amount > 0);
         var payouts = blocks.Skip(1).Count(static b => b.Block.ProposerPayout is > 0);
         output.WriteLine($"voi rounds {first}-{last}: {transactions.Count} indexer transactions, {payments} payments ({innerPayments} inner), {payouts} proposer payouts, {ours.Count} accounts with effects");
-        Assert.True(payments > 0, "The window has no payments, so it proves nothing.");
-        Assert.Equal(0, payouts);
+        Assert.True(transactions.Any(static t => t.Id.Length > 0 && t.Amount > 0), "The window has no top-level payment, so it proves nothing.");
+        Assert.True(payouts == 0, "Voi now pays proposer payouts; add them to the expected side of this comparison.");
 
         var problems = new List<string>();
         foreach (var account in ours.Keys.Union(theirs.Keys))
