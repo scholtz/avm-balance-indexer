@@ -80,7 +80,15 @@ public static class BlockDecoder
             apply = [.. apply.Select(static a => a with { HasGenesisHash = true })];
         }
 
-        PaysetCommitment.Verify(payload, apply, genesisHash, profile.GenesisId, expectedRound);
+        try
+        {
+            PaysetCommitment.Verify(payload, apply, genesisHash, profile.GenesisId, expectedRound);
+        }
+        catch (Exception ex) when (ex is not (OperationCanceledException or BlockValidationException))
+        {
+            throw new BlockValidationException($"Round {expectedRound}: the payset could not be checked against the header.", ex);
+        }
+
         return new BlockData(expectedRound, hash, previous, genesisHash, profile.GenesisId, block, apply);
     }
 

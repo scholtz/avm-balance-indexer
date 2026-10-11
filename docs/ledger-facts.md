@@ -19,7 +19,7 @@ hashing or the live tests.
   appearance in the window is not checked): no discrepancy found. Suspension, bonus and the old-proposer-with-unrealized-rewards
   case are not exercised.
 - Recent `/v2/deltas` documents contain integer map keys (invalid JSON) after the leading `Accts` object; parse only that part.
-- Payset commitment and certificate are unverified (issue #23).
+- Certificate signatures are unverified (ADR 0004); the payset commitment is verified (see below).
 - Payset commitment: header `txn` = nothing before v11, flat `H("PF" + msgpack array of stored txns)` for v11 to v25, SHA-512/256
   Merkle tree from v26 (leaf `"TL" + txid + H("STIB" + stored txn entry)`, node `"MA"`, odd node paired with zeros, zero for an
   empty payset). `txn256`/`txn512` are vector commitments: padded to a power of two (zero or one element stay one leaf), bit-reversed

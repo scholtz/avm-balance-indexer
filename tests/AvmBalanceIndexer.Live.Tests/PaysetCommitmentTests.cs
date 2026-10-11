@@ -28,14 +28,20 @@ public class PaysetCommitmentTests(ITestOutputHelper output)
         var latest = await adapter.GetLatestRoundAsync(CancellationToken.None);
 
         var verified = 0;
+        var flat = false;
+        var merkle = false;
         foreach (var round in Samples.Where(r => r < latest).Append(latest - 10))
         {
             var block = await adapter.FetchBlockAsync(round, CancellationToken.None);
             verified++;
             var header = block.Block;
+            var populated = header.Transactions?.Count > 0;
+            flat |= populated && ConsensusProtocols.UsesFlatPaysetCommitment(header.CurrentProtocol!);
+            merkle |= populated && !ConsensusProtocols.UsesFlatPaysetCommitment(header.CurrentProtocol!) && !ConsensusProtocols.HasNoPaysetCommitment(header.CurrentProtocol!);
             output.WriteLine($"{chain} round {round}: {header.Transactions?.Count ?? 0} txns, protocol {header.CurrentProtocol}");
         }
 
         Assert.True(verified >= 10);
+        Assert.True(flat && merkle, "The samples must include non-empty blocks of both the flat and the Merkle era.");
     }
 }

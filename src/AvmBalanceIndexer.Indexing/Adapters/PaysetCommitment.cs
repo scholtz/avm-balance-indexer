@@ -2,7 +2,6 @@ using System.Buffers;
 using System.Numerics;
 using System.Security.Cryptography;
 using MessagePack;
-using Org.BouncyCastle.Crypto.Digests;
 
 namespace AvmBalanceIndexer.Indexing.Adapters;
 
@@ -39,16 +38,7 @@ public static class PaysetCommitment
             throw new BlockValidationException($"Round {round}: {stibs.Count} payset entries but {apply.Count} apply entries.");
         }
 
-        var txids = new byte[apply.Count][];
-        for (var i = 0; i < apply.Count; i++)
-        {
-            txids[i] = TransactionIdCalculator.ComputeDigest(apply[i], genesisHash, genesisId, sha256: false);
-        }
-
-        var stibHashes = stibs.Select(static s => Hash(HashKind.Sha512_256, "STIB"u8, s)).ToArray();
-
-        var expected = ExpectedTxn(protocol, stibs, txids, stibHashes);
-        Check(round, stibs.Count, protocol, "txn", header.Txn ?? new byte[32], expected);
+        Check(round, stibs.Count, protocol, "txn", header.Txn ?? new byte[32], ExpectedTxn(protocol, stibs, apply, genesisHash, genesisId));
 
         if (header.Txn256 is not null || header.Txn512 is not null)
         {
@@ -72,15 +62,25 @@ public static class PaysetCommitment
     public static byte[] ComputeTxn(byte[] payload, IReadOnlyList<TxnApplyData> apply, byte[] genesisHash, string genesisId)
     {
         var (header, stibs) = Read(payload);
-        var txids = apply.Select(a => TransactionIdCalculator.ComputeDigest(a, genesisHash, genesisId, sha256: false)).ToArray();
-        var stibHashes = stibs.Select(static s => Hash(HashKind.Sha512_256, "STIB"u8, s)).ToArray();
-        return ExpectedTxn(header.Protocol ?? string.Empty, stibs, txids, stibHashes);
+        return ExpectedTxn(header.Protocol ?? string.Empty, stibs, apply, genesisHash, genesisId);
     }
 
-    private static byte[] ExpectedTxn(string protocol, List<byte[]> stibs, byte[][] txids, byte[][] stibHashes) =>
-        ConsensusProtocols.HasNoPaysetCommitment(protocol)
-            ? new byte[32]
-            : ConsensusProtocols.UsesFlatPaysetCommitment(protocol) ? FlatCommit(stibs) : MerkleRoot(HashKind.Sha512_256, txids, stibHashes, vector: false);
+    private static byte[] ExpectedTxn(string protocol, List<byte[]> stibs, IReadOnlyList<TxnApplyData> apply, byte[] genesisHash, string genesisId)
+    {
+        if (ConsensusProtocols.HasNoPaysetCommitment(protocol))
+        {
+            return new byte[32];
+        }
+
+        if (ConsensusProtocols.UsesFlatPaysetCommitment(protocol))
+        {
+            return FlatCommit(stibs);
+        }
+
+        var txids = apply.Select(a => TransactionIdCalculator.ComputeDigest(a, genesisHash, genesisId, sha256: false)).ToArray();
+        var stibHashes = stibs.Select(static s => Hash(HashKind.Sha512_256, "STIB"u8, s)).ToArray();
+        return MerkleRoot(HashKind.Sha512_256, txids, stibHashes, vector: false);
+    }
 
     private static void Check(ulong round, int count, string protocol, string field, byte[] actual, byte[] expected)
     {
@@ -184,11 +184,7 @@ public static class PaysetCommitment
             case HashKind.Sha512:
                 return SHA512.HashData(input);
             default:
-                var digest = new Sha512tDigest(256);
-                digest.BlockUpdate(input, 0, input.Length);
-                var result = new byte[digest.GetDigestSize()];
-                digest.DoFinal(result, 0);
-                return result;
+                return Sha512t256.Hash(input);
         }
     }
 

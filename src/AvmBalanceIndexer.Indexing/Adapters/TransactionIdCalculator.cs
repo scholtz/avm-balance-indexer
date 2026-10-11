@@ -1,6 +1,5 @@
 using System.Buffers;
 using MessagePack;
-using Org.BouncyCastle.Crypto.Digests;
 
 namespace AvmBalanceIndexer.Indexing.Adapters;
 
@@ -36,11 +35,7 @@ public static class TransactionIdCalculator
             return System.Security.Cryptography.SHA256.HashData(input);
         }
 
-        var digest = new Sha512tDigest(256);
-        digest.BlockUpdate(input, 0, input.Length);
-        var hash = new byte[digest.GetDigestSize()];
-        digest.DoFinal(hash, 0);
-        return hash;
+        return Sha512t256.Hash(input);
     }
 
     private static byte[] Canonicalize(TxnApplyData apply, byte[] genesisHash, string genesisId)
