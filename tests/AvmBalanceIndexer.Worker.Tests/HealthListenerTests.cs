@@ -85,13 +85,14 @@ public class HealthListenerTests
     [Fact]
     public void Metrics_Report_The_Role_And_The_Counters()
     {
-        using var health = new WorkerHealth();
+        var meterName = $"{WorkerHealth.MeterName}.Test.{Guid.NewGuid():N}";
+        using var health = new WorkerHealth(meterName);
         health.ReportRoundsSource(() => 42);
         var observed = new Dictionary<string, long>();
         using var meterListener = new MeterListener();
         meterListener.InstrumentPublished = (instrument, l) =>
         {
-            if (instrument.Meter.Name == WorkerHealth.MeterName)
+            if (instrument.Meter.Name == meterName)
             {
                 l.EnableMeasurementEvents(instrument);
             }

@@ -22,15 +22,17 @@ public sealed class WorkerHealth : IDisposable
 {
     public const string MeterName = "AvmBalanceIndexer.Worker";
 
-    private readonly Meter _meter = new(MeterName);
+    private readonly Meter _meter;
     private int _state;
     private long _leasesAcquired;
     private long _leasesLost;
     private long _transientFailures;
     private Func<long> _roundsCommitted = static () => 0;
 
-    public WorkerHealth()
+    /// <param name="meterName">Only tests pass another name, to observe one instance without the others running in parallel.</param>
+    public WorkerHealth(string meterName = MeterName)
     {
+        _meter = new Meter(meterName);
         _meter.CreateObservableGauge("avm.worker.is_leader", () => State == WorkerState.Leader ? 1 : 0, description: "1 while this replica holds the writer lease");
         _meter.CreateObservableCounter("avm.worker.leases_acquired", () => Interlocked.Read(ref _leasesAcquired), description: "Times this replica became the writer");
         _meter.CreateObservableCounter("avm.worker.leases_lost", () => Interlocked.Read(ref _leasesLost), description: "Times the writer lease was lost while indexing");
