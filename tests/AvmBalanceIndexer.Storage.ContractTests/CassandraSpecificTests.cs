@@ -69,6 +69,29 @@ public class CassandraSpecificTests(CassandraFixture cassandra)
     }
 
     [Fact]
+    public async Task Latest_Holders_Ignore_Token_Index_Rows_Of_A_Round_That_Was_Never_Published()
+    {
+        var storage = await cassandra.CreateStorageAsync();
+        var account = TestChain.Account(1);
+        var ghost = TestChain.Account(2);
+        await storage.WriteRoundAsync(Status(0, IngestionState.Bootstrapping), [Effect(0, 0, account, 100, 100, EffectType.Genesis)], CancellationToken.None);
+
+        var session = await cassandra.SessionOfAsync(storage);
+        var keyspace = cassandra.KeyspaceOf(storage);
+        foreach (var (who, amount) in new[] { (account, "999"), (ghost, "5") })
+        {
+            await session.ExecuteAsync(new SimpleStatement(
+                $"INSERT INTO {keyspace}.holdings_by_token (token_kind, token_id, shard, account, amount, last_changed_round) VALUES ('algo', 0, {AvmBalanceIndexer.Storage.Cassandra.CassandraChainStorage.ShardOf(who)}, ?, '{amount}', 1) USING TIMESTAMP 2",
+                who.ToArray()));
+        }
+
+        var holders = await storage.GetHoldersAtRoundAsync(Native, 0, true, null, 10, CancellationToken.None);
+
+        var holder = Assert.Single(holders.Items);
+        Assert.Equal((account, 100UL, 0UL), (holder.Account, (ulong)holder.Amount.Value, holder.LastChangedRound));
+    }
+
+    [Fact]
     public async Task Replaying_A_Round_Whose_Rows_Were_Partly_Written_Converges_To_The_Same_State()
     {
         var storage = await cassandra.CreateStorageAsync();

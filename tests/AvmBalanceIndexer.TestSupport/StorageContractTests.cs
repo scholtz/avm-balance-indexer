@@ -203,6 +203,34 @@ public abstract class StorageContractTests
     }
 
     [Fact]
+    public async Task Holders_At_The_Latest_Round_Match_The_Current_Holdings_With_And_Without_Zero_Balances()
+    {
+        var storage = await IndexedAsync();
+
+        var withZero = new List<Holding>();
+        string? cursor = null;
+        do
+        {
+            var page = await storage.GetHoldersAtRoundAsync(Native, LastRound, true, cursor, 2, CancellationToken.None);
+            withZero.AddRange(page.Items);
+            cursor = page.NextCursor;
+        }
+        while (cursor is not null);
+        var withoutZero = await storage.GetHoldersAtRoundAsync(Native, LastRound, false, null, 100, CancellationToken.None);
+
+        Assert.Equal(6, withZero.Count);
+        Assert.Contains(withZero, h => h.Account == Carol && h.Amount.IsZero);
+        Assert.Equal(5, withoutZero.Items.Count);
+        Assert.Equal(withZero.Select(static h => h.Account.ToArray()).Order(Comparer<byte[]>.Create(static (x, y) => x.AsSpan().SequenceCompareTo(y))), withZero.Select(static h => h.Account.ToArray()));
+        foreach (var holder in withZero)
+        {
+            var current = Assert.Single((await storage.GetHoldingsAsync(holder.Account, true, null, 10, CancellationToken.None)).Items);
+            Assert.Equal((current.Amount, current.LastChangedRound), (holder.Amount, holder.LastChangedRound));
+            Assert.Equal(ExpectedBalance(holder.Account, LastRound), (ulong)holder.Amount.Value);
+        }
+    }
+
+    [Fact]
     public async Task Holders_Are_Paged_In_Account_Order_Without_Gaps_Or_Duplicates()
     {
         var storage = await IndexedAsync();

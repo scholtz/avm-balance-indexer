@@ -17,6 +17,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="AvmBalanceIndexer.Storage.ContractTests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <EmbeddedResource Include="Schema\**\*.cql" />
   </ItemGroup>
 

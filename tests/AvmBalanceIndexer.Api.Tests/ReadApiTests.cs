@@ -237,6 +237,12 @@ public sealed class ReadApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public void A_Storage_Timeout_Is_A_503()
+    {
+        Assert.Equal(503, ApiExceptionHandler.Map(new StorageTimeoutException("slow"))!.Value.Status);
+    }
+
+    [Fact]
     public void A_Rejected_Request_Keeps_Its_Own_Status()
     {
         Assert.Equal(413, ApiExceptionHandler.Map(new BadHttpRequestException("too large", 413))!.Value.Status);

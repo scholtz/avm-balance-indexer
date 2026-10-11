@@ -157,7 +157,10 @@ public sealed partial class PostgreSqlChainStorage
         return result;
     }
 
-    public async Task<Page<Holding>> GetHoldingsAsync(Address account, bool includeZero, string? cursor, int limit, CancellationToken cancellationToken)
+    public Task<Page<Holding>> GetHoldingsAsync(Address account, bool includeZero, string? cursor, int limit, CancellationToken cancellationToken) =>
+        TranslateTimeoutsAsync(() => GetHoldingsCoreAsync(account, includeZero, cursor, limit, cancellationToken));
+
+    private async Task<Page<Holding>> GetHoldingsCoreAsync(Address account, bool includeZero, string? cursor, int limit, CancellationToken cancellationToken)
     {
         var pageSize = ClampLimit(limit);
         var (afterKind, afterId) = ParseHoldingCursor(cursor);
@@ -196,7 +199,10 @@ public sealed partial class PostgreSqlChainStorage
         return ToPage(items, pageSize, indexed, static h => $"{h.Token.Kind.ToStorageName()}:{h.Token.TokenId.ToString(CultureInfo.InvariantCulture)}");
     }
 
-    public async Task<Amount> GetBalanceAtRoundAsync(Address account, TokenKey token, ulong round, CancellationToken cancellationToken)
+    public Task<Amount> GetBalanceAtRoundAsync(Address account, TokenKey token, ulong round, CancellationToken cancellationToken) =>
+        TranslateTimeoutsAsync(() => GetBalanceAtRoundCoreAsync(account, token, round, cancellationToken));
+
+    private async Task<Amount> GetBalanceAtRoundCoreAsync(Address account, TokenKey token, ulong round, CancellationToken cancellationToken)
     {
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         await using var transaction = await BeginSnapshotAsync(connection, cancellationToken).ConfigureAwait(false);
@@ -223,7 +229,10 @@ public sealed partial class PostgreSqlChainStorage
         return value is decimal balance ? ToAmount(balance) : Amount.Zero;
     }
 
-    public async Task<Page<Holding>> GetHoldersAtRoundAsync(TokenKey token, ulong round, bool includeZero, string? cursor, int limit, CancellationToken cancellationToken)
+    public Task<Page<Holding>> GetHoldersAtRoundAsync(TokenKey token, ulong round, bool includeZero, string? cursor, int limit, CancellationToken cancellationToken) =>
+        TranslateTimeoutsAsync(() => GetHoldersAtRoundCoreAsync(token, round, includeZero, cursor, limit, cancellationToken));
+
+    private async Task<Page<Holding>> GetHoldersAtRoundCoreAsync(TokenKey token, ulong round, bool includeZero, string? cursor, int limit, CancellationToken cancellationToken)
     {
         var pageSize = ClampLimit(limit);
         var after = ParseHolderCursor(cursor);
@@ -234,6 +243,11 @@ public sealed partial class PostgreSqlChainStorage
         if (round > indexed)
         {
             throw new RoundNotIndexedException(round, indexed);
+        }
+
+        if (round == indexed)
+        {
+            return await GetLatestHoldersAsync(connection, transaction, token, includeZero, after, pageSize, indexed, cancellationToken).ConfigureAwait(false);
         }
 
         // Pages over the accounts that ever touched the token and reads each one's latest balance at or before the round
@@ -276,7 +290,10 @@ public sealed partial class PostgreSqlChainStorage
         return ToPage(items, pageSize, indexed, static h => Convert.ToHexString(h.Account.Bytes));
     }
 
-    public async Task<Page<TokenEffect>> GetEffectsAsync(Address account, TokenKey token, ulong? fromRound, ulong? toRound, string? cursor, int limit, CancellationToken cancellationToken)
+    public Task<Page<TokenEffect>> GetEffectsAsync(Address account, TokenKey token, ulong? fromRound, ulong? toRound, string? cursor, int limit, CancellationToken cancellationToken) =>
+        TranslateTimeoutsAsync(() => GetEffectsCoreAsync(account, token, fromRound, toRound, cursor, limit, cancellationToken));
+
+    private async Task<Page<TokenEffect>> GetEffectsCoreAsync(Address account, TokenKey token, ulong? fromRound, ulong? toRound, string? cursor, int limit, CancellationToken cancellationToken)
     {
         var pageSize = ClampLimit(limit);
         var (cursorRound, cursorOrder, cursorOrdinal) = ParseEffectCursor(cursor);
@@ -331,6 +348,43 @@ public sealed partial class PostgreSqlChainStorage
             pageSize,
             indexed,
             static e => string.Create(CultureInfo.InvariantCulture, $"{e.Id.Round}:{e.Id.IntraRoundOrder}:{e.Id.Ordinal}"));
+    }
+
+    /// <summary>Holders at the indexed round are the current holdings: one ordered range scan of holdings_by_token.</summary>
+    private static async Task<Page<Holding>> GetLatestHoldersAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        TokenKey token,
+        bool includeZero,
+        byte[] after,
+        int pageSize,
+        ulong indexed,
+        CancellationToken cancellationToken)
+    {
+        await using var command = new NpgsqlCommand(
+            """
+            SELECT account, amount, last_changed_round
+            FROM holdings_by_token
+            WHERE token_kind = @kind AND token_id = @id AND account > @after AND (@includeZero OR amount > 0)
+            ORDER BY account
+            LIMIT @limit
+            """,
+            connection,
+            transaction);
+        command.Parameters.AddWithValue("kind", token.Kind.ToStorageName());
+        command.Parameters.AddWithValue("id", StorageId(token.TokenId));
+        command.Parameters.AddWithValue("after", after);
+        command.Parameters.AddWithValue("includeZero", includeZero);
+        command.Parameters.AddWithValue("limit", pageSize + 1);
+
+        var items = new List<Holding>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            items.Add(new Holding(new Address((byte[])reader[0]), token, ToAmount(reader.GetDecimal(1)), true, (ulong)reader.GetInt64(2)));
+        }
+
+        return ToPage(items, pageSize, indexed, static h => Convert.ToHexString(h.Account.Bytes));
     }
 
     private static Holding ReadHolding(NpgsqlDataReader reader)
@@ -411,12 +465,26 @@ public sealed partial class PostgreSqlChainStorage
             : throw new ArgumentException("Invalid cursor.", nameof(cursor));
     }
 
-    private static async Task<NpgsqlTransaction> BeginSnapshotAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
+    private static async Task<T> TranslateTimeoutsAsync<T>(Func<Task<T>> read)
+    {
+        try
+        {
+            return await read().ConfigureAwait(false);
+        }
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.QueryCanceled)
+        {
+            throw new StorageTimeoutException("The query exceeded the read timeout.", ex);
+        }
+    }
+
+    private async Task<NpgsqlTransaction> BeginSnapshotAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
     {
         var transaction = await connection.BeginTransactionAsync(IsolationLevel.RepeatableRead, cancellationToken).ConfigureAwait(false);
         try
         {
-            await using var command = new NpgsqlCommand("SET TRANSACTION READ ONLY", connection, transaction);
+            // The timeout is a number built here, never caller input.
+            var statement = string.Create(CultureInfo.InvariantCulture, $"SET TRANSACTION READ ONLY; SET LOCAL statement_timeout = {_readTimeoutMilliseconds}");
+            await using var command = new NpgsqlCommand(statement, connection, transaction);
             await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             return transaction;
         }

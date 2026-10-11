@@ -152,7 +152,10 @@ public sealed partial class CassandraChainStorage
         return result;
     }
 
-    public async Task<Page<Holding>> GetHoldingsAsync(Address account, bool includeZero, string? cursor, int limit, CancellationToken cancellationToken)
+    public Task<Page<Holding>> GetHoldingsAsync(Address account, bool includeZero, string? cursor, int limit, CancellationToken cancellationToken) =>
+        TranslateTimeoutsAsync(() => GetHoldingsCoreAsync(account, includeZero, cursor, limit, cancellationToken));
+
+    private async Task<Page<Holding>> GetHoldingsCoreAsync(Address account, bool includeZero, string? cursor, int limit, CancellationToken cancellationToken)
     {
         var pageSize = ClampLimit(limit);
         var (afterKind, afterId) = ParseHoldingCursor(cursor);
@@ -195,7 +198,10 @@ public sealed partial class CassandraChainStorage
         return ToPage(items, pageSize, indexed, static h => $"{h.Token.Kind.ToStorageName()}:{h.Token.TokenId.ToString(CultureInfo.InvariantCulture)}");
     }
 
-    public async Task<Amount> GetBalanceAtRoundAsync(Address account, TokenKey token, ulong round, CancellationToken cancellationToken)
+    public Task<Amount> GetBalanceAtRoundAsync(Address account, TokenKey token, ulong round, CancellationToken cancellationToken) =>
+        TranslateTimeoutsAsync(() => GetBalanceAtRoundCoreAsync(account, token, round, cancellationToken));
+
+    private async Task<Amount> GetBalanceAtRoundCoreAsync(Address account, TokenKey token, ulong round, CancellationToken cancellationToken)
     {
         var indexed = await ReadIndexedRoundAsync(cancellationToken).ConfigureAwait(false);
         if (round > indexed)
@@ -206,7 +212,10 @@ public sealed partial class CassandraChainStorage
         return (await LatestEffectAtOrBeforeAsync(account, token, round, cancellationToken).ConfigureAwait(false))?.Balance ?? Amount.Zero;
     }
 
-    public async Task<Page<Holding>> GetHoldersAtRoundAsync(TokenKey token, ulong round, bool includeZero, string? cursor, int limit, CancellationToken cancellationToken)
+    public Task<Page<Holding>> GetHoldersAtRoundAsync(TokenKey token, ulong round, bool includeZero, string? cursor, int limit, CancellationToken cancellationToken) =>
+        TranslateTimeoutsAsync(() => GetHoldersAtRoundCoreAsync(token, round, includeZero, cursor, limit, cancellationToken));
+
+    private async Task<Page<Holding>> GetHoldersAtRoundCoreAsync(TokenKey token, ulong round, bool includeZero, string? cursor, int limit, CancellationToken cancellationToken)
     {
         var pageSize = ClampLimit(limit);
         var after = ParseHolderCursor(cursor);
@@ -227,7 +236,9 @@ public sealed partial class CassandraChainStorage
         {
             for (var shard = 0; shard < TokenShards; shard++)
             {
-                var scan = ScanShardAsync(token, (short)shard, round, includeZero, after, chunk, gate, cancellationToken).GetAsyncEnumerator(cancellationToken);
+                var scan = (round == indexed
+                    ? ScanShardLatestAsync(token, (short)shard, indexed, includeZero, after, chunk, gate, cancellationToken)
+                    : ScanShardAsync(token, (short)shard, round, includeZero, after, chunk, gate, cancellationToken)).GetAsyncEnumerator(cancellationToken);
                 shards.Add(scan);
                 starting.Add(scan.MoveNextAsync().AsTask());
             }
@@ -279,6 +290,67 @@ public sealed partial class CassandraChainStorage
             foreach (var shard in shards)
             {
                 await shard.DisposeAsync().ConfigureAwait(false);
+            }
+        }
+    }
+
+    /// <summary>Holders at the indexed round are the current holdings, read from the token-oriented copy without per-account lookups.</summary>
+    private async IAsyncEnumerable<Holding> ScanShardLatestAsync(
+        TokenKey token,
+        short shard,
+        ulong indexed,
+        bool includeZero,
+        byte[] after,
+        int chunk,
+        SemaphoreSlim gate,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        var cursor = after;
+        while (true)
+        {
+            var rows = (await ExecuteAsync(
+                $"SELECT account, amount, last_changed_round FROM {Table("holdings_by_token")} WHERE token_kind = ? AND token_id = ? AND shard = ? AND account > ? LIMIT ?",
+                cancellationToken,
+                token.Kind.ToStorageName(),
+                StorageId(token.TokenId),
+                shard,
+                cursor,
+                chunk).ConfigureAwait(false)).ToArray();
+            if (rows.Length == 0)
+            {
+                yield break;
+            }
+
+            cursor = rows[^1].GetValue<byte[]>("account");
+            var resolved = await RunBoundedAsync(
+                rows,
+                async row =>
+                {
+                    var account = new Address(row.GetValue<byte[]>("account"));
+                    var last = (ulong)row.GetValue<long>("last_changed_round");
+                    if (last <= indexed)
+                    {
+                        return new Holding(account, token, Amount.Parse(row.GetValue<string>("amount")), true, last);
+                    }
+
+                    // Written by a round that is not published (crashed or losing writer): the effect history decides.
+                    return await LatestEffectAtOrBeforeAsync(account, token, indexed, cancellationToken).ConfigureAwait(false) is { } latest
+                        ? new Holding(account, token, latest.Balance, true, latest.Round)
+                        : null;
+                },
+                cancellationToken,
+                gate).ConfigureAwait(false);
+            foreach (var holding in resolved)
+            {
+                if (holding is not null && (includeZero || !holding.Amount.IsZero))
+                {
+                    yield return holding;
+                }
+            }
+
+            if (rows.Length < chunk)
+            {
+                yield break;
             }
         }
     }
@@ -335,7 +407,10 @@ public sealed partial class CassandraChainStorage
         }
     }
 
-    public async Task<Page<TokenEffect>> GetEffectsAsync(Address account, TokenKey token, ulong? fromRound, ulong? toRound, string? cursor, int limit, CancellationToken cancellationToken)
+    public Task<Page<TokenEffect>> GetEffectsAsync(Address account, TokenKey token, ulong? fromRound, ulong? toRound, string? cursor, int limit, CancellationToken cancellationToken) =>
+        TranslateTimeoutsAsync(() => GetEffectsCoreAsync(account, token, fromRound, toRound, cursor, limit, cancellationToken));
+
+    private async Task<Page<TokenEffect>> GetEffectsCoreAsync(Address account, TokenKey token, ulong? fromRound, ulong? toRound, string? cursor, int limit, CancellationToken cancellationToken)
     {
         var pageSize = ClampLimit(limit);
         var cursorKey = ParseEffectCursor(cursor);
@@ -427,6 +502,18 @@ public sealed partial class CassandraChainStorage
             pageSize,
             indexed,
             static e => string.Create(CultureInfo.InvariantCulture, $"{e.Id.Round}:{e.Id.IntraRoundOrder}:{e.Id.Ordinal}"));
+    }
+
+    private static async Task<T> TranslateTimeoutsAsync<T>(Func<Task<T>> read)
+    {
+        try
+        {
+            return await read().ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is OperationTimedOutException or ReadTimeoutException)
+        {
+            throw new StorageTimeoutException("The query exceeded the read timeout.", ex);
+        }
     }
 
     private readonly record struct EffectCursor(ulong Round, int Order, int Ordinal);

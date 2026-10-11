@@ -11,11 +11,14 @@ storage:
   provider: PostgreSql
   postgreSql:
     accountHashPartitions: 64
+    # Longest a read may run; longer holder scans fail with 503 instead of holding a snapshot.
+    readTimeoutSeconds: 30
     # Secret with key "connectionString"
     existingSecret: ""
   cassandra:
     contactPoints: []
     port: 9042
+    readTimeoutSeconds: 30
     keyspace: avm_indexer
     localDatacenter: dc1
     # Encrypt the connection; credentials from existingSecret travel in clear text without it.

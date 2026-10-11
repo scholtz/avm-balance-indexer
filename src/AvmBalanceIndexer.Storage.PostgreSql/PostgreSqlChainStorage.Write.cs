@@ -179,14 +179,32 @@ public sealed partial class PostgreSqlChainStorage
               WHERE holdings_by_account.last_changed_round <= EXCLUDED.last_changed_round
             """;
 
-        await using var command = new NpgsqlCommand(sql, connection, transaction);
-        command.Parameters.AddWithValue("round", unchecked((long)round));
-        AddArray(command, "account", NpgsqlDbType.Bytea, latest.Select(static e => e.Account.ToArray()).ToArray());
-        AddArray(command, "kind", NpgsqlDbType.Text, latest.Select(static e => e.Token.Kind.ToStorageName()).ToArray());
-        AddArray(command, "id", NpgsqlDbType.Bigint, latest.Select(static e => StorageId(e.Token.TokenId)).ToArray());
-        AddArray(command, "amount", NpgsqlDbType.Text, latest.Select(static e => e.BalanceAfter.ToString()).ToArray());
-        AddArray(command, "optedin", NpgsqlDbType.Boolean, latest.Select(static e => e.Type != EffectType.AssetOptOut).ToArray());
-        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        // The token-oriented copy is written with the same statement shape, in the same transaction.
+        const string byTokenSql = """
+            INSERT INTO holdings_by_token (token_kind, token_id, account, amount, last_changed_round)
+            SELECT u.token_kind, u.token_id, u.account, u.amount::numeric, @round
+            FROM unnest(@account, @kind, @id, @amount) AS u(account, token_kind, token_id, amount)
+            ON CONFLICT (token_kind, token_id, account) DO UPDATE
+              SET amount = EXCLUDED.amount,
+                  last_changed_round = EXCLUDED.last_changed_round
+              WHERE holdings_by_token.last_changed_round <= EXCLUDED.last_changed_round
+            """;
+
+        foreach (var statement in new[] { sql, byTokenSql })
+        {
+            await using var command = new NpgsqlCommand(statement, connection, transaction);
+            command.Parameters.AddWithValue("round", unchecked((long)round));
+            AddArray(command, "account", NpgsqlDbType.Bytea, latest.Select(static e => e.Account.ToArray()).ToArray());
+            AddArray(command, "kind", NpgsqlDbType.Text, latest.Select(static e => e.Token.Kind.ToStorageName()).ToArray());
+            AddArray(command, "id", NpgsqlDbType.Bigint, latest.Select(static e => StorageId(e.Token.TokenId)).ToArray());
+            AddArray(command, "amount", NpgsqlDbType.Text, latest.Select(static e => e.BalanceAfter.ToString()).ToArray());
+            if (ReferenceEquals(statement, sql))
+            {
+                AddArray(command, "optedin", NpgsqlDbType.Boolean, latest.Select(static e => e.Type != EffectType.AssetOptOut).ToArray());
+            }
+
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
     }
 
     private static async Task UpsertTouchedAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, ulong round, IReadOnlyList<TokenEffect> effects, CancellationToken cancellationToken)

@@ -23,7 +23,8 @@ public static class PostgreSqlStorageExtensions
         services.AddSingleton(static provider => new PostgreSqlChainStorage(
             provider.GetRequiredService<NpgsqlDataSource>(),
             provider.GetRequiredService<ChainContext>(),
-            provider.GetRequiredService<IOptions<StorageOptions>>().Value.PostgreSql.AccountHashPartitions));
+            provider.GetRequiredService<IOptions<StorageOptions>>().Value.PostgreSql.AccountHashPartitions,
+            TimeSpan.FromSeconds(provider.GetRequiredService<IOptions<StorageOptions>>().Value.PostgreSql.ReadTimeoutSeconds)));
         services.AddSingleton<IChainStorage>(static provider => provider.GetRequiredService<PostgreSqlChainStorage>());
         return services;
     }
@@ -41,6 +42,11 @@ public static class PostgreSqlStorageExtensions
             if (string.IsNullOrWhiteSpace(settings.ConnectionString))
             {
                 return ValidateOptionsResult.Fail("Storage:PostgreSql:ConnectionString is required when Storage:Provider is PostgreSql.");
+            }
+
+            if (settings.ReadTimeoutSeconds is < 1 or > 600)
+            {
+                return ValidateOptionsResult.Fail("Storage:PostgreSql:ReadTimeoutSeconds must be between 1 and 600.");
             }
 
             return settings.AccountHashPartitions is < 1 or > 1024
