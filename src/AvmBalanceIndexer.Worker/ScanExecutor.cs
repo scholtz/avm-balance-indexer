@@ -21,7 +21,11 @@ public sealed partial class ScanExecutor(
 
     private readonly string _owner = $"{Environment.MachineName}:{Guid.NewGuid():N}";
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override Task ExecuteAsync(CancellationToken stoppingToken) =>
+        Task.WhenAll(Enumerable.Range(0, options.Value.Concurrency).Select(index => LoopAsync(sweeps: index == 0, stoppingToken)));
+
+    /// <summary>One slot of the executor: claims a scan, runs it, repeats. Slot 0 also sweeps expired scans.</summary>
+    private async Task LoopAsync(bool sweeps, CancellationToken stoppingToken)
     {
         var settings = options.Value;
         var lastCleanup = DateTimeOffset.MinValue;
@@ -30,7 +34,7 @@ public sealed partial class ScanExecutor(
             try
             {
                 var now = clock.GetUtcNow();
-                if (now - lastCleanup >= CleanupEvery)
+                if (sweeps && now - lastCleanup >= CleanupEvery)
                 {
                     lastCleanup = now;
                     var removed = await jobs.DeleteExpiredAsync(now, stoppingToken).ConfigureAwait(false);

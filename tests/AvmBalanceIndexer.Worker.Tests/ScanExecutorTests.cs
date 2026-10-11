@@ -27,7 +27,7 @@ public class ScanExecutorTests
         return storage;
     }
 
-    private static ScanExecutor Executor(ScanStorage storage, int pageSize = 2, int retries = 3)
+    private static ScanExecutor Executor(ScanStorage storage, int pageSize = 2, int retries = 3, int concurrency = 1)
     {
         var options = Options.Create(new ScanOptions
         {
@@ -36,6 +36,7 @@ public class ScanExecutorTests
             StaleAfter = TimeSpan.FromMinutes(2),
             PageSize = pageSize,
             MaxStepRetries = retries,
+            Concurrency = concurrency,
         });
         return new ScanExecutor(storage, storage, storage, options, new FixedClock(Now), NullLogger<ScanExecutor>.Instance);
     }
@@ -211,6 +212,27 @@ public class ScanExecutorTests
     }
 
     [Fact]
+    public async Task A_Slow_Scan_Does_Not_Hold_Up_The_Next_One_On_The_Same_Replica()
+    {
+        var storage = await IndexedAsync();
+        var slow = NewJob();
+        var quick = NewJob(created: TimeSpan.FromSeconds(1));
+        await storage.CreateAsync(slow, CancellationToken.None);
+        await storage.CreateAsync(quick, CancellationToken.None);
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        storage.HoldFirstRead = gate.Task;
+        using var executor = Executor(storage, concurrency: 2);
+
+        await executor.StartAsync(CancellationToken.None);
+        await WaitForAsync(storage, quick.Id, static j => j.State == ScanState.Completed);
+        Assert.Equal(ScanState.Running, (await storage.GetJobAsync(slow.Id, CancellationToken.None))!.State);
+
+        gate.SetResult();
+        await WaitForAsync(storage, slow.Id, static j => j.State == ScanState.Completed);
+        await executor.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
     public async Task Idle_Executors_Remove_Expired_Scans()
     {
         var storage = await IndexedAsync();
@@ -238,6 +260,7 @@ public class ScanExecutorTests
     {
         private int _appendCalls;
         private int _failReads;
+        private Task? _held;
 
         public ScanStorage()
             : base(new ChainContext(ChainId.AlgorandTestnet))
@@ -270,15 +293,26 @@ public class ScanExecutorTests
             set => Volatile.Write(ref _failReads, value);
         }
 
-        public override Task<Page<Holding>> GetHoldersAtRoundAsync(TokenKey token, ulong round, bool includeZero, string? cursor, int limit, CancellationToken cancellationToken)
+        /// <summary>The first holder read waits for this task (a scan that is slow to get going).</summary>
+        public Task? HoldFirstRead
         {
+            set => Volatile.Write(ref _held, value);
+        }
+
+        public override async Task<Page<Holding>> GetHoldersAtRoundAsync(TokenKey token, ulong round, bool includeZero, string? cursor, int limit, CancellationToken cancellationToken)
+        {
+            if (Interlocked.Exchange(ref _held, null) is { } held)
+            {
+                await held;
+            }
+
             if (FailReads > 0)
             {
                 Interlocked.Decrement(ref _failReads);
-                return Task.FromException<Page<Holding>>(new StorageTimeoutException("simulated slow storage"));
+                throw new StorageTimeoutException("simulated slow storage");
             }
 
-            return base.GetHoldersAtRoundAsync(token, round, includeZero, cursor, limit, cancellationToken);
+            return await base.GetHoldersAtRoundAsync(token, round, includeZero, cursor, limit, cancellationToken);
         }
 
         public override async Task<bool> AppendAsync(Guid id, string owner, IReadOnlyList<Holding> items, string? nextCursor, DateTimeOffset now, CancellationToken cancellationToken)

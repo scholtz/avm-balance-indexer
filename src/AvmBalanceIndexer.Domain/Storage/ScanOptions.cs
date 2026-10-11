@@ -15,6 +15,10 @@ public sealed class ScanOptions : IValidatableObject
     [Range(typeof(TimeSpan), "00:01:00", "30.00:00:00")]
     public TimeSpan Retention { get; set; } = TimeSpan.FromHours(24);
 
+    /// <summary>Scans one worker replica runs at the same time, so one huge export does not hold up the others.</summary>
+    [Range(1, 16)]
+    public int Concurrency { get; set; } = 2;
+
     /// <summary>How often an idle worker replica looks for a scan to run.</summary>
     [Range(typeof(TimeSpan), "00:00:00.010", "00:10:00")]
     public TimeSpan PollInterval { get; set; } = TimeSpan.FromSeconds(5);

@@ -144,7 +144,9 @@ public static class ScanEndpoints
         // Cancelling a scan that already finished is not an error; the response shows what state it is in.
         await jobs.CancelAsync(parsed, clock.GetUtcNow(), cancellationToken).ConfigureAwait(false);
         var job = await jobs.GetJobAsync(parsed, cancellationToken).ConfigureAwait(false) ?? existing;
-        return Results.Ok(ToResponse(job));
+        return job.IsFinished
+            ? Results.Ok(ToResponse(job))
+            : Results.Json(new { error = "The scan could not be cancelled right now; try again.", scan = ToResponse(job) }, statusCode: StatusCodes.Status409Conflict);
     }
 
     private static bool TryId(string text, out Guid id) =>

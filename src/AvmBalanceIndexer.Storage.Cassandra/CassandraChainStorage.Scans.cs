@@ -58,14 +58,14 @@ public sealed partial class CassandraChainStorage : IScanJobStore
 
     public async Task<int> CountActiveAsync(DateTimeOffset now, CancellationToken cancellationToken)
     {
-        var jobs = await ReadActiveJobsAsync(cancellationToken).ConfigureAwait(false);
+        var jobs = await ReadActiveJobsAsync(now, cancellationToken).ConfigureAwait(false);
         return jobs.Count(j => !j.Job.IsFinished && j.Job.ExpiresAt > now);
     }
 
     public async Task<ScanJob?> ClaimNextAsync(string owner, DateTimeOffset now, DateTimeOffset staleBefore, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(owner);
-        var candidates = (await ReadActiveJobsAsync(cancellationToken).ConfigureAwait(false))
+        var candidates = (await ReadActiveJobsAsync(now, cancellationToken).ConfigureAwait(false))
             .Where(j => j.Job.ExpiresAt > now && (j.Job.State == ScanState.Pending || (j.Job.State == ScanState.Running && j.Job.UpdatedAt < staleBefore)))
             .OrderBy(static j => j.Job.CreatedAt);
         foreach (var (job, _) in candidates)
@@ -129,8 +129,8 @@ public sealed partial class CassandraChainStorage : IScanJobStore
             return true;
         }
 
-        // Not the owner any more (cancelled, expired, taken over): the rows just written belong to nobody. Another owner may have
-        // written the same keys already, so only take back what lies beyond the stored count.
+        // Not the owner any more. When the job is gone altogether (expired and swept) the rows just written belong to nobody, so they
+        // are taken back; otherwise the sweeper removes them with the rest of the result (another owner may be writing the same keys).
         if (await ReadJobAsync(id, cancellationToken).ConfigureAwait(false) is null)
         {
             await RunBoundedAsync(
@@ -330,7 +330,7 @@ public sealed partial class CassandraChainStorage : IScanJobStore
     /// The jobs that are pending or running, from a small marker table that only contains them (finished and expired jobs are not read
     /// on every poll). A marker whose job already finished is removed when it is met.
     /// </summary>
-    private async Task<List<(ScanJob Job, string? Owner)>> ReadActiveJobsAsync(CancellationToken cancellationToken)
+    private async Task<List<(ScanJob Job, string? Owner)>> ReadActiveJobsAsync(DateTimeOffset now, CancellationToken cancellationToken)
     {
         var markers = (await ExecuteAsync($"SELECT id, created_at FROM {Table("scan_active")} WHERE chain = ?", cancellationToken, _chain).ConfigureAwait(false))
             .Select(static row => (Id: row.GetValue<Guid>("id"), CreatedAt: row.GetValue<DateTimeOffset>("created_at")))
@@ -343,7 +343,7 @@ public sealed partial class CassandraChainStorage : IScanJobStore
             {
                 active.Add(job);
             }
-            else if (jobs[i] is not null || DateTimeOffset.UtcNow - markers[i].CreatedAt > OrphanGrace)
+            else if (jobs[i] is not null || now - markers[i].CreatedAt > OrphanGrace)
             {
                 // Finished jobs lose their marker. A marker without a job may belong to a creation that is still in progress (the marker
                 // is written first), so it is only removed once it is too old for that.

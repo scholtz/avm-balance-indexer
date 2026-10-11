@@ -56,7 +56,8 @@ worker:
 scans:
   # Asynchronous holder scans (see the README): admission limit and retention of results.
   maxActive: 20
-  retention: "24:00:00"
+  # .NET TimeSpan format: days.hours:minutes:seconds ("24:00:00" would be 24 days).
+  retention: "1.00:00:00"
   # A running scan whose owner is silent for this long is taken over by another worker replica.
   staleAfter: "00:02:00"
 

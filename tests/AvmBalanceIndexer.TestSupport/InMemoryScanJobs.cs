@@ -77,7 +77,7 @@ public partial class InMemoryChainStorage : IScanJobStore
     public Task<bool> FailAsync(Guid id, string owner, string reason, DateTimeOffset now, CancellationToken cancellationToken) =>
         Finish(id, owner, ScanState.Failed, reason, now);
 
-    public Task<bool> CancelAsync(Guid id, DateTimeOffset now, CancellationToken cancellationToken)
+    public virtual Task<bool> CancelAsync(Guid id, DateTimeOffset now, CancellationToken cancellationToken)
     {
         lock (_scanGate)
         {

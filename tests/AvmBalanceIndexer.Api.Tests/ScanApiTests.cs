@@ -43,8 +43,9 @@ public sealed class ScanApiTests : IAsyncLifetime
         return Task.CompletedTask;
     }
 
-    private void Start(int maxActive)
+    private void Start(int maxActive, InMemoryChainStorage? storage = null)
     {
+        storage ??= _storage;
         _client?.Dispose();
         _factory?.Dispose();
         _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
@@ -57,8 +58,8 @@ public sealed class ScanApiTests : IAsyncLifetime
             {
                 services.RemoveAll<IChainStorage>();
                 services.RemoveAll<IScanJobStore>();
-                services.AddSingleton<IChainStorage>(_storage);
-                services.AddSingleton<IScanJobStore>(_storage);
+                services.AddSingleton<IChainStorage>(storage);
+                services.AddSingleton<IScanJobStore>((IScanJobStore)storage);
             });
         });
         _client = _factory.CreateClient();
@@ -76,6 +77,16 @@ public sealed class ScanApiTests : IAsyncLifetime
     {
         using var response = await _client.GetAsync(new Uri(path, UriKind.Relative));
         return (response.StatusCode, await response.Content.ReadFromJsonAsync<JsonElement>());
+    }
+
+    private sealed class CancelIgnoringStorage : InMemoryChainStorage
+    {
+        public CancelIgnoringStorage()
+            : base(new ChainContext(ChainId.AlgorandTestnet))
+        {
+        }
+
+        public override Task<bool> CancelAsync(Guid id, DateTimeOffset now, CancellationToken cancellationToken) => Task.FromResult(false);
     }
 
     private static Holding Row(int index) => new(TestChain.Account(300 + index), TokenKey.Native, Amount.From((ulong)index + 1), true, 2);
@@ -154,6 +165,24 @@ public sealed class ScanApiTests : IAsyncLifetime
         Assert.Equal("Cancelled", (await first.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("state").GetString());
         Assert.Equal(HttpStatusCode.OK, second.StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, unknown.StatusCode);
+    }
+
+    [Fact]
+    public async Task A_Cancel_That_Did_Not_Take_Effect_Is_Reported_As_A_Conflict()
+    {
+        var stubborn = new CancelIgnoringStorage();
+        await new RoundIndexer(
+            Adapter(),
+            new AlgoEffectNormalizer(),
+            stubborn,
+            Options.Create(new IndexerOptions { FetchConcurrency = 2, BalanceCacheEntries = 1_000 }),
+            NullLogger<RoundIndexer>.Instance).RunAsync(LastRound, CancellationToken.None);
+        Start(maxActive: 20, stubborn);
+        var (_, created) = await PostAsync(TokenScans);
+
+        using var response = await _client.DeleteAsync(new Uri($"/v1/algorand-testnet/scans/{created.GetProperty("id").GetGuid()}", UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
     }
 
     [Fact]
