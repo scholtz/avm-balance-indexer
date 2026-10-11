@@ -7,4 +7,7 @@ public enum TokenStandard
     Asa = 1,
     Arc20 = 2,
     Arc200 = 3,
+
+    /// <summary>The chain's native token.</summary>
+    Native = 4,
 }

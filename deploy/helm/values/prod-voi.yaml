@@ -1,10 +1,8 @@
 chain: voi
 storage:
-  provider: Cassandra
-  cassandra:
-    contactPoints: ["cassandra-voi-dc1-service.avm-voi.svc"]
-    keyspace: avm_voi
-    localDatacenter: dc1
-    existingSecret: avm-voi-cassandra
+  # The Cassandra provider is not implemented yet (see the follow-up issue); switch back once it ships.
+  provider: PostgreSql
+  postgreSql:
+    existingSecret: avm-voi-postgres
 api:
   replicaCount: 3

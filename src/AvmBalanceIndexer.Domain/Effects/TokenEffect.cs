@@ -15,4 +15,12 @@ public sealed record TokenEffect(
     EffectType Type,
     BigInteger Delta,
     Amount BalanceAfter,
-    Address? Counterparty);
+    Address? Counterparty)
+{
+    /// <summary>Creates the stored effect from a delta and the account's balance after applying it.</summary>
+    public static TokenEffect From(BalanceDelta delta, Amount balanceAfter)
+    {
+        ArgumentNullException.ThrowIfNull(delta);
+        return new TokenEffect(delta.Id, delta.Account, delta.Token, delta.Type, delta.Delta, balanceAfter, delta.Counterparty);
+    }
+}

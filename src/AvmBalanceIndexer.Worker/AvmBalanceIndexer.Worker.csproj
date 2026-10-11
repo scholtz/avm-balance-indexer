@@ -10,10 +10,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\AvmBalanceIndexer.Domain\AvmBalanceIndexer.Domain.csproj" />
-    <ProjectReference Include="..\AvmBalanceIndexer.Indexing\AvmBalanceIndexer.Indexing.csproj" />
-    <ProjectReference Include="..\AvmBalanceIndexer.Storage.PostgreSql\AvmBalanceIndexer.Storage.PostgreSql.csproj" />
-    <ProjectReference Include="..\AvmBalanceIndexer.Storage.Cassandra\AvmBalanceIndexer.Storage.Cassandra.csproj" />
+    <ProjectReference Include="..\AvmBalanceIndexer.Hosting\AvmBalanceIndexer.Hosting.csproj" />
   </ItemGroup>
 
 </Project>
