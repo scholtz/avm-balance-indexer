@@ -17,8 +17,8 @@ single-node Cassandra itself (`cassandra.embedded`, StatefulSet with a `hostPath
 needs no Secret. With an external database or PostgreSQL the chart consumes existing Secrets instead.
 
 ```sh
-kubectl create namespace avm-balance-indexer   # once
-helm upgrade --install testnet deploy/helm/avm-balance-indexer   -n avm-balance-indexer   -f deploy/helm/values/stage-testnet.yaml   --set image.repository=docker.io/<dockerhub-user>/avm-balance-indexer --set image.tag=<tag>
+kubectl apply -f deploy/rbac/deployer.yaml   # namespace and deployer account, once
+helm upgrade --install testnet deploy/helm/avm-balance-indexer -n avm-balance-indexer -f deploy/helm/values/stage-testnet.yaml --set image.repository=docker.io/<dockerhub-user>/avm-balance-indexer --set image.tag=<tag>
 ```
 
 The images are `<image.repository>-api` and `<image.repository>-worker`. The GitHub workflows that build, publish and deploy them are described in

@@ -1,0 +1,68 @@
+name: Deploy testnet
+
+# Every push to main that passes CI builds the images, pushes them to Docker Hub and upgrades the release `testnet`
+# (algorand-testnet on Cassandra, https://testnet.balance-indexer.biatec.io). Run it by hand to redeploy a commit.
+# See docs/deployment-pipelines.md for the secrets this needs.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Commit to deploy (default is the head of main)
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    name: Choose the commit
+    runs-on: ubuntu-latest
+    # CI must have passed on a push to main; a manual run is the way to deploy anyway.
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    outputs:
+      sha: ${{ steps.sha.outputs.sha }}
+      tag: ${{ steps.sha.outputs.tag }}
+    steps:
+      - id: sha
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED: ${{ inputs.ref }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          sha="${RUN_SHA:-}"
+          if [ -z "$sha" ]; then
+            ref="${REQUESTED:-main}"
+            sha="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${ref}" --jq .sha)"
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "tag=main-${sha:0:7}" >> "$GITHUB_OUTPUT"
+
+  images:
+    name: Images
+    needs: plan
+    uses: ./.github/workflows/docker-publish.yml
+    with:
+      ref: ${{ needs.plan.outputs.sha }}
+      tags: |
+        ${{ needs.plan.outputs.tag }}
+        testnet
+    secrets: inherit
+
+  deploy:
+    name: Testnet
+    needs: [plan, images]
+    uses: ./.github/workflows/helm-deploy.yml
+    with:
+      environment: testnet
+      ref: ${{ needs.plan.outputs.sha }}
+      release: testnet
+      values: stage-testnet.yaml
+      chain: algorand-testnet
+      host: testnet.balance-indexer.biatec.io
+      image-tag: ${{ needs.plan.outputs.tag }}
+    secrets: inherit

@@ -51,11 +51,11 @@ cassandra:
     nodeSelector: {}
     image: cassandra:5.0
     initImage: busybox:1.37
-    maxHeapSize: 4G
-    heapNewSize: 800M
+    maxHeapSize: 2G
+    heapNewSize: 400M
     resources:
-      requests: { cpu: "1", memory: 6Gi }
-      limits: { memory: 8Gi }
+      requests: { cpu: "1", memory: 3Gi }
+      limits: { memory: 4Gi }
 
 ingress:
   enabled: false

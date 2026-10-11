@@ -1,0 +1,106 @@
+name: Helm deploy
+
+# Installs or upgrades one release of the chart in the namespace avm-balance-indexer, using the kube config in the secret KUBE_CONFIG.
+# Called by deploy-testnet.yml and deploy-production.yml; see docs/deployment-pipelines.md.
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: GitHub environment (testnet or production); environment secrets override repository secrets
+        type: string
+        required: true
+      ref:
+        description: Commit whose chart is deployed
+        type: string
+        required: true
+      release:
+        description: Helm release name (testnet, mainnet, voi)
+        type: string
+        required: true
+      values:
+        description: Values overlay in deploy/helm/values
+        type: string
+        required: true
+      chain:
+        type: string
+        required: true
+      host:
+        description: Public host name of the API, used for the smoke test
+        type: string
+        required: true
+      image-tag:
+        description: Tag of the images to run
+        type: string
+        required: true
+    secrets:
+      KUBE_CONFIG:
+        required: true
+      DOCKERHUB_USERNAME:
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  NAMESPACE: avm-balance-indexer
+
+jobs:
+  deploy:
+    name: Deploy ${{ inputs.release }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    # Two deployments of one release must not run at the same time; a newer one waits instead of cancelling a running upgrade.
+    concurrency:
+      group: deploy-${{ inputs.release }}
+      cancel-in-progress: false
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: azure/setup-helm@v5
+      - uses: azure/setup-kubectl@v4
+      - name: Kube config
+        env:
+          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
+        run: |
+          mkdir -p ~/.kube
+          # The secret may hold the YAML itself or its base64 encoding.
+          if printf '%s' "$KUBE_CONFIG" | grep -q 'apiVersion:'; then
+            printf '%s' "$KUBE_CONFIG" > ~/.kube/config
+          else
+            printf '%s' "$KUBE_CONFIG" | base64 -d > ~/.kube/config
+          fi
+          chmod 600 ~/.kube/config
+          kubectl -n "$NAMESPACE" get pods > /dev/null
+      - name: Upgrade the release
+        env:
+          RELEASE: ${{ inputs.release }}
+          VALUES: ${{ inputs.values }}
+          IMAGE_TAG: ${{ inputs.image-tag }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+        run: |
+          helm upgrade --install "$RELEASE" deploy/helm/avm-balance-indexer \
+            --namespace "$NAMESPACE" \
+            -f "deploy/helm/values/$VALUES" \
+            --set "image.repository=docker.io/${DOCKERHUB_USERNAME}/avm-balance-indexer" \
+            --set "image.tag=$IMAGE_TAG" \
+            --wait --timeout 25m
+      - name: What runs
+        if: always()
+        env:
+          RELEASE: ${{ inputs.release }}
+        run: |
+          kubectl -n "$NAMESPACE" get pods,svc,ingress -l "app.kubernetes.io/instance=$RELEASE" -o wide || true
+      - name: Smoke test
+        env:
+          HOST: ${{ inputs.host }}
+          CHAIN: ${{ inputs.chain }}
+        run: |
+          # The ingress and its certificate can take a few minutes after the first install; a failure here is a warning, not a failed deployment.
+          if curl -fsS --retry 12 --retry-delay 15 --retry-all-errors "https://${HOST}/v1/${CHAIN}/status"; then
+            echo
+          else
+            echo "::warning::https://${HOST}/v1/${CHAIN}/status did not answer; check the ingress, DNS and the certificate"
+          fi
