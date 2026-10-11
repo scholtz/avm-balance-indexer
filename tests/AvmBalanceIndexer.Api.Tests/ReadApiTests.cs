@@ -214,6 +214,12 @@ public sealed class ReadApiTests : IAsyncLifetime
     [InlineData("/v1/algorand-testnet/tokens/algo/0/holders?cursor=zz")]
     [InlineData("/v1/algorand-testnet/tokens/algo/0/holders?limit=abc")]
     [InlineData("/v1/algorand-testnet/tokens/algo/0/holders?includeZero=maybe")]
+    [InlineData("/v1/algorand-testnet/tokens/algo/0/holders?includeZero=True")]
+    [InlineData("/v1/algorand-testnet/tokens/algo/0/holders?round=05")]
+    [InlineData("/v1/algorand-testnet/tokens/asa/007/holders")]
+    [InlineData("/v1/algorand-testnet/accounts/{A}/tokens?limit=010")]
+    [InlineData("/v1/algorand-testnet/accounts/{A}/tokens?cursor=bogus%3A1")]
+    [InlineData("/v1/algorand-testnet/accounts/{A}/tokens?cursor=algo%00%3A1")]
     public async Task Invalid_Input_Is_A_400_With_A_Message(string path)
     {
         var (status, body, _) = await GetAsync(path.Replace("{A}", Text(Alice), StringComparison.Ordinal));

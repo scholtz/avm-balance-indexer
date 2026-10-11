@@ -571,7 +571,8 @@ public sealed partial class CassandraChainStorage
         }
 
         var parts = cursor.Split(':');
-        return parts.Length == 2 && long.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var id)
+        return parts.Length == 2 && TokenKindExtensions.TryParseStorageName(parts[0], out _)
+            && long.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var id)
             ? (parts[0], id)
             : throw new ArgumentException("Invalid cursor.", nameof(cursor));
     }

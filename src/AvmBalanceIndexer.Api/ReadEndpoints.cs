@@ -242,7 +242,7 @@ public static class ReadEndpoints
         {
             error = BadRequest("The token kind must be algo, asa or arc200.");
         }
-        else if (!ulong.TryParse(tokenId, NumberStyles.None, CultureInfo.InvariantCulture, out var id) || id > long.MaxValue)
+        else if (!TryCanonical(tokenId, out var id) || id > long.MaxValue)
         {
             error = BadRequest("The token id must be a non-negative integer below 2^63.");
         }
@@ -267,7 +267,7 @@ public static class ReadEndpoints
             return true;
         }
 
-        if (ulong.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed))
+        if (TryCanonical(text, out var parsed))
         {
             round = parsed;
         }
@@ -282,9 +282,9 @@ public static class ReadEndpoints
     private static bool TryLimit(string? text, out int pageSize, out IResult? error)
     {
         pageSize = DefaultLimit;
-        if (text is not null && !int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out pageSize))
+        if (text is not null)
         {
-            pageSize = 0;
+            pageSize = TryCanonical(text, out var parsed) && parsed <= int.MaxValue ? (int)parsed : 0;
         }
 
         error = pageSize is >= 1 and <= MaxLimit ? null : BadRequest($"limit must be between 1 and {MaxLimit}.");
@@ -295,9 +295,23 @@ public static class ReadEndpoints
     private static bool TryFlag(string? text, string name, out bool value, out IResult? error)
     {
         value = false;
-        error = text is null || bool.TryParse(text, out value) ? null : BadRequest($"{name} must be true or false.");
+        if (text is null || text is "true" or "false")
+        {
+            value = text is "true";
+            error = null;
+        }
+        else
+        {
+            error = BadRequest($"{name} must be true or false.");
+        }
+
         return error is null;
     }
+
+    /// <summary>Digits without leading zeros, so each value has one spelling (and one cache key).</summary>
+    private static bool TryCanonical(string text, out ulong value) =>
+        ulong.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out value)
+        && string.Equals(value.ToString(CultureInfo.InvariantCulture), text, StringComparison.Ordinal);
 
     private static bool TryCursor(string? cursor, out IResult? error)
     {

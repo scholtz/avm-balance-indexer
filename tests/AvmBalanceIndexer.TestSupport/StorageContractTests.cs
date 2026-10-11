@@ -146,6 +146,8 @@ public abstract class StorageContractTests
     [InlineData("algo")]
     [InlineData("algo:x")]
     [InlineData("algo:-1")]
+    [InlineData("bogus:1")]
+    [InlineData("algo\0:1")]
     public async Task A_Malformed_Holdings_Cursor_Is_An_Argument_Error(string cursor)
     {
         var storage = await IndexedAsync();

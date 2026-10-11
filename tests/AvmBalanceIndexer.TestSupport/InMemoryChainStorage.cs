@@ -273,7 +273,7 @@ public class InMemoryChainStorage(ChainContext context) : IChainStorage
         }
 
         var parts = cursor.Split(':');
-        return parts.Length == 2 && ulong.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var id) && id <= long.MaxValue
+        return parts.Length == 2 && TokenKindExtensions.TryParseStorageName(parts[0], out _) && ulong.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var id) && id <= long.MaxValue
             ? (parts[0], id)
             : throw new ArgumentException("Invalid cursor.", nameof(cursor));
     }
