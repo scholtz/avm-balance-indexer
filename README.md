@@ -277,7 +277,7 @@ What it says, in short (MainNet): PostgreSQL answers the holder queries (a page 
 and indexes about a third faster on one node; Cassandra stores the same data in about a quarter of the space (compression, no secondary
 indexes) and is the one to pick when you need to scale writes and storage across nodes. Account queries (holdings, balances, history) are within
 a few milliseconds of each other (PostgreSQL has the lower tail at 16 concurrent requests). Voi shows the same picture on a smaller scale: 6 times
-less disk on Cassandra, PostgreSQL faster on holders. Caveats: both databases ran as one local node (Cassandra with replication factor 1: a real cluster stores
+less disk on Cassandra, the same ranking, with the differences small on such a quiet chain. Caveats: both databases ran as one local node (Cassandra with replication factor 1: a real cluster stores
 three copies and pays quorum latency); the full-chain size is the 10,000-round figure scaled up, an upper bound because older rounds carry less activity.
 
 ## Known limitations

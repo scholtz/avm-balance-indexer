@@ -74,7 +74,7 @@ public static class Report
 
         text.AppendLine("### What the range contains");
         text.AppendLine();
-        text.AppendLine(string.Create(CultureInfo.InvariantCulture, $"Tokens with at least one effect in the range: {string.Join(", ", assets.TokensByKind.OrderBy(static p => p.Key, StringComparer.Ordinal).Select(static p => $"{p.Value:N0} {Label(p.Key)}"))}. {assets.AssetsCreated:N0} ASAs were created inside the range, {assets.Arc20Assets:N0} of them ARC-20 Smart ASAs."));
+        text.AppendLine(string.Create(CultureInfo.InvariantCulture, $"Tokens with at least one effect in the range: {string.Join(", ", assets.TokensByKind.OrderBy(static p => p.Key, StringComparer.Ordinal).Select(static p => $"{p.Value:N0} {Label(p.Key)}"))}. {assets.AssetsCreated:N0} ASAs with an effect were created inside the range, {assets.Arc20Assets:N0} of them ARC-20 Smart ASAs."));
         text.AppendLine();
         text.AppendLine("Holders are counted among the accounts that had an effect in the range (plus the starting balances the replay needed); a token with a long history has more holders on the real chain than shown here. Names exist only for tokens created inside the range.");
         text.AppendLine();
@@ -82,11 +82,20 @@ public static class Report
         text.AppendLine("|---|---|---:|---:|---:|");
         foreach (var token in assets.Top)
         {
-            text.AppendLine(string.Create(CultureInfo.InvariantCulture, $"| {token.Token} | {token.Name ?? string.Empty} | {token.Effects:N0} | {token.Holders:N0} | {token.OptedIn:N0} |"));
+            text.AppendLine(string.Create(CultureInfo.InvariantCulture, $"| {token.Token} | {Cell(token.Name)} | {token.Effects:N0} | {token.Holders:N0} | {token.OptedIn:N0} |"));
         }
 
         text.AppendLine();
     }
+
+    /// <summary>Token names are chain data written by anyone: keep them from breaking the table or injecting markup.</summary>
+    private static string Cell(string? text) =>
+        string.IsNullOrEmpty(text) ? string.Empty : string.Concat(text.Select(static c => c switch
+        {
+            '|' or '[' or ']' or '<' or '>' or '`' or '*' or '_' or '\\' => "\\" + c,
+            '\r' or '\n' => " ",
+            _ => c.ToString(),
+        }));
 
     private static string Label(string kind) => kind switch
     {

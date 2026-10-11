@@ -131,31 +131,34 @@ public static class Runner
         var top = new List<TopToken>();
         foreach (var (token, effects) in perToken.OrderByDescending(static p => p.Value).Take(TopTokens))
         {
-            var holders = await CountHoldersAsync(storage, token, (ulong)rounds, includeZero: false, cancellationToken).ConfigureAwait(false);
-            var optedIn = await CountHoldersAsync(storage, token, (ulong)rounds, includeZero: true, cancellationToken).ConfigureAwait(false);
+            var (holders, optedIn) = await CountHoldersAsync(storage, token, (ulong)rounds, cancellationToken).ConfigureAwait(false);
             var info = await storage.GetAsync(token, cancellationToken).ConfigureAwait(false);
-            top.Add(new TopToken(token.ToString(), info?.Symbol ?? info?.Name, effects, holders, optedIn));
+            var name = string.IsNullOrEmpty(info?.Symbol) ? info?.Name : info.Symbol;
+            top.Add(new TopToken(token.ToString(), string.IsNullOrEmpty(name) ? null : name, effects, holders, optedIn));
         }
 
-        var statistics = new AssetStatistics(byKind, created, arc20, [.. top.OrderByDescending(static t => t.Holders)]);
+        var statistics = new AssetStatistics(byKind, created, arc20, top);
         var largest = statistics.Top.Count > 0 ? statistics.Top[0] : null;
         Console.WriteLine($"Tokens touched: {string.Join(", ", byKind.Select(static p => $"{p.Key} {p.Value}"))}; top token {largest?.Token} has {largest?.Holders} holders");
         return statistics;
     }
 
-    private static async Task<long> CountHoldersAsync(IChainStorage storage, TokenKey token, ulong round, bool includeZero, CancellationToken cancellationToken)
+    /// <summary>One scan including zero balances gives both numbers: accounts opted in, and those with a non-zero balance.</summary>
+    private static async Task<(long NonZero, long OptedIn)> CountHoldersAsync(IChainStorage storage, TokenKey token, ulong round, CancellationToken cancellationToken)
     {
+        long nonZero = 0;
         long count = 0;
         string? cursor = null;
         do
         {
-            var page = await storage.GetHoldersAtRoundAsync(token, round, includeZero, cursor, 1000, cancellationToken).ConfigureAwait(false);
+            var page = await storage.GetHoldersAtRoundAsync(token, round, true, cursor, 1000, cancellationToken).ConfigureAwait(false);
             count += page.Items.Count;
+            nonZero += page.Items.Count(static h => !h.Amount.IsZero);
             cursor = page.NextCursor;
         }
         while (cursor is not null);
 
-        return count;
+        return (nonZero, count);
     }
 
     private static async Task<IReadOnlyList<EndpointResult>> MeasureApiAsync(RunOptions options, Dictionary<string, string?> settings, BlockSet blocks, Seeder seeder, CancellationToken cancellationToken)
@@ -181,13 +184,17 @@ public static class Runner
             new("holders, native, latest", "/tokens/algo/0/holders?limit=100", _ => $"/v1/{chain}/tokens/algo/0/holders?limit=100"),
             new("holders, native, past round", "/tokens/algo/0/holders?round=N&limit=100", _ => $"/v1/{chain}/tokens/algo/0/holders?round={middle}&limit=100"),
             new("holders, busiest ASA, latest", "/tokens/asa/{id}/holders?limit=100", _ => $"/v1/{chain}/tokens/asa/{asa}/holders?limit=100"),
-            new("holders, busiest ARC-200, latest", "/tokens/arc200/{id}/holders?limit=100", _ => arc200 == "0" ? $"/v1/{chain}/tokens/algo/0/holders?limit=100" : $"/v1/{chain}/tokens/arc200/{arc200}/holders?limit=100"),
             new("token info", "/tokens/algo/0", _ => $"/v1/{chain}/tokens/algo/0"),
         };
 
         var environment = settings.Where(static p => p.Value is not null).ToDictionary(static p => p.Key.Replace(":", "__", StringComparison.Ordinal), static p => p.Value!);
         await using var load = await ApiLoad.StartAsync(options.ApiDll!, environment, FreePort(), cancellationToken).ConfigureAwait(false);
         var results = new List<EndpointResult>();
+        if (arc200 != "0")
+        {
+            cases.Insert(cases.Count - 1, new("holders, busiest ARC-200, latest", "/tokens/arc200/{id}/holders?limit=100", _ => $"/v1/{chain}/tokens/arc200/{arc200}/holders?limit=100"));
+        }
+
         foreach (var test in cases)
         {
             var result = await load.MeasureAsync(test, cancellationToken).ConfigureAwait(false);

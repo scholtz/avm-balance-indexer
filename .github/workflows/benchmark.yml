@@ -78,7 +78,9 @@ jobs:
           dotnet $BENCH run --provider postgres --chain algorand-mainnet --rounds "$ROUNDS" --last-round "${{ needs.range.outputs.mainnet }}"
           --commit "$GITHUB_SHA" --out results --api-dll $API
           --postgres "Host=localhost;Port=5432;Username=avm;Password=avm;Database=postgres"
+      # A flaky Voi node must not cost the night's MainNet result.
       - name: Voi
+        continue-on-error: true
         run: >
           dotnet $BENCH run --provider postgres --chain voi --rounds "$VOI_ROUNDS" --last-round "${{ needs.range.outputs.voi }}"
           --commit "$GITHUB_SHA" --out results --api-dll $API
@@ -122,6 +124,7 @@ jobs:
           --commit "$GITHUB_SHA" --out results --api-dll $API
           --cassandra localhost:9042 --dc dc1 --cassandra-container "$(docker ps -q --filter ancestor=cassandra:5.0 | head -1)"
       - name: Voi
+        continue-on-error: true
         run: >
           dotnet $BENCH run --provider cassandra --chain voi --rounds "$VOI_ROUNDS" --last-round "${{ needs.range.outputs.voi }}"
           --commit "$GITHUB_SHA" --out results --api-dll $API
@@ -155,7 +158,9 @@ jobs:
       - name: Render the comparisons
         run: |
           : > comparison.md
+          shopt -s nullglob
           for chain in algorand-mainnet voi; do
+            [ -f "results/bench-cassandra/bench-$chain-cassandra.json" ] && [ -f "results/bench-postgres/bench-$chain-postgres.json" ] || { echo "No complete result for $chain tonight."; continue; }
             echo "## $chain" >> comparison.md
             echo >> comparison.md
             dotnet $BENCH report "results/bench-cassandra/bench-$chain-cassandra.json" "results/bench-postgres/bench-$chain-postgres.json" --out "comparison-$chain.md" > /dev/null
@@ -178,6 +183,7 @@ jobs:
           for provider in postgres cassandra; do
             for chain in algorand-mainnet voi; do
               file="results/bench-$provider/bench-$chain-$provider.json"
+              [ -f "$file" ] || continue
               day="$(python3 -c 'import sys,json;print(json.load(open(sys.argv[1]))["date"])' "$file")"
               cp "$file" "../out/latest-$chain-$provider.json"
               cp "$file" "../out/history/$day-$chain-$provider.json"
