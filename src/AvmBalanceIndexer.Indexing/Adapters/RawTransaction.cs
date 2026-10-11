@@ -25,6 +25,7 @@ public sealed record RawAssetParams(ulong Total, uint Decimals, string? UnitName
 /// <param name="AssetCloseTo">Close-out destination (<c>aclose</c>), null when absent.</param>
 /// <param name="ConfigAssetId">Asset reconfigured or destroyed by an asset configuration (<c>caid</c>), zero when it creates one.</param>
 /// <param name="Params">Asset parameters (<c>apar</c>), null for a destroy.</param>
+/// <param name="ApplicationId">Application called (<c>apid</c>), zero for an application creation.</param>
 public sealed record RawTransaction(
     string Type,
     ulong TransferAssetId,
@@ -33,7 +34,8 @@ public sealed record RawTransaction(
     byte[]? AssetReceiver,
     byte[]? AssetCloseTo,
     ulong ConfigAssetId,
-    RawAssetParams? Params)
+    RawAssetParams? Params,
+    ulong ApplicationId = 0)
 {
     private const int AddressLength = 32;
 
@@ -43,7 +45,7 @@ public sealed record RawTransaction(
     {
         var reader = new MessagePackReader(raw);
         var type = string.Empty;
-        ulong xaid = 0, aamt = 0, caid = 0;
+        ulong xaid = 0, aamt = 0, caid = 0, apid = 0;
         byte[]? asnd = null, arcv = null, aclose = null;
         RawAssetParams? parameters = null;
 
@@ -73,6 +75,9 @@ public sealed record RawTransaction(
                 case "caid":
                     caid = reader.ReadUInt64();
                     break;
+                case "apid":
+                    apid = reader.ReadUInt64();
+                    break;
                 case "apar":
                     parameters = ReadParams(ref reader);
                     break;
@@ -82,7 +87,7 @@ public sealed record RawTransaction(
             }
         }
 
-        return new RawTransaction(type, xaid, aamt, asnd, arcv, aclose, caid, parameters);
+        return new RawTransaction(type, xaid, aamt, asnd, arcv, aclose, caid, parameters, apid);
     }
 
     private static byte[] ReadAddress(ref MessagePackReader reader)

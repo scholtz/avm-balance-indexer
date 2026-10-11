@@ -15,16 +15,18 @@ public sealed class ReferenceNode : IDisposable
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(60) };
     private readonly string _algod;
     private readonly string _indexer;
+    private readonly string? _arc200;
 
-    public ReferenceNode(string algodUrl, string indexerUrl)
+    public ReferenceNode(string algodUrl, string indexerUrl, string? arc200Url = null)
     {
         _algod = algodUrl.TrimEnd('/');
         _indexer = indexerUrl.TrimEnd('/');
+        _arc200 = arc200Url?.TrimEnd('/');
     }
 
     public static ReferenceNode TestNet() => new("https://testnet-api.4160.nodely.dev", "https://testnet-idx.4160.nodely.dev");
 
-    public static ReferenceNode Voi() => new("https://mainnet-api.voi.nodely.dev", "https://mainnet-idx.voi.nodely.dev");
+    public static ReferenceNode Voi() => new("https://mainnet-api.voi.nodely.dev", "https://mainnet-idx.voi.nodely.dev", "https://voi-mainnet-mimirapi.nftnavigator.xyz");
 
     public static ReferenceNode MainNet() => new("https://mainnet-api.4160.nodely.dev", "https://mainnet-idx.4160.nodely.dev");
 
@@ -142,6 +144,29 @@ public sealed class ReferenceNode : IDisposable
         using var json = await GetJsonAsync($"{_indexer}/v2/assets/{assetId}?include-all=true").ConfigureAwait(false);
         var asset = json.RootElement.GetProperty("asset");
         return (new Address(new Algorand.Address(asset.GetProperty("params").GetProperty("creator").GetString()!).Bytes), asset.GetProperty("created-at-round").GetUInt64());
+    }
+
+    /// <summary>Distinct rounds of the newest ARC-200 transfers the ARC indexer lists, newest first.</summary>
+    public async Task<IReadOnlyList<ulong>> RecentArc200RoundsAsync(int transfers)
+    {
+        var url = _arc200 ?? throw new InvalidOperationException("This reference has no ARC-200 indexer.");
+        using var json = await GetJsonAsync($"{url}/arc200/transfers?limit={transfers}").ConfigureAwait(false);
+        return [.. json.RootElement.GetProperty("transfers").EnumerateArray().Select(static t => t.GetProperty("round").GetUInt64()).Distinct().OrderDescending()];
+    }
+
+    /// <summary>The ARC-200 transfers one round contains as reported by the Voi ARC indexer (Mimir).</summary>
+    public async Task<IReadOnlyList<ReferenceArc200Transfer>> Arc200TransfersInRoundAsync(ulong round)
+    {
+        var url = _arc200 ?? throw new InvalidOperationException("This reference has no ARC-200 indexer.");
+        using var json = await GetJsonAsync($"{url}/arc200/transfers?round={round}&limit=1000").ConfigureAwait(false);
+        return
+        [
+            .. json.RootElement.GetProperty("transfers").EnumerateArray().Select(static t => new ReferenceArc200Transfer(
+                t.GetProperty("contractId").GetUInt64(),
+                new Address(new Algorand.Address(t.GetProperty("sender").GetString()!).Bytes),
+                new Address(new Algorand.Address(t.GetProperty("receiver").GetString()!).Bytes),
+                System.Numerics.BigInteger.Parse(t.GetProperty("amount").GetString()!, System.Globalization.CultureInfo.InvariantCulture))),
+        ];
     }
 
     public void Dispose() => _http.Dispose();
@@ -264,3 +289,6 @@ public sealed record ReferenceTransaction(
             Number(tx, "close-rewards"));
     }
 }
+
+/// <summary>An ARC-200 transfer as reported by the ARC indexer; mints have the zero address as sender, burns as receiver.</summary>
+public sealed record ReferenceArc200Transfer(ulong ContractId, Address Sender, Address Receiver, System.Numerics.BigInteger Amount);

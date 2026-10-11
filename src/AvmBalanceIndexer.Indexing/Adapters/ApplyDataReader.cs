@@ -70,9 +70,10 @@ public static class ApplyDataReader
     private static TxnApplyData ReadTransaction(ref MessagePackReader reader)
     {
         ReadOnlyMemory<byte> rawTxn = default;
-        ulong rs = 0, rr = 0, rc = 0, ca = 0, aca = 0, caid = 0;
+        ulong rs = 0, rr = 0, rc = 0, ca = 0, aca = 0, caid = 0, apid = 0;
         bool hgh = false, hgi = false;
         IReadOnlyList<TxnApplyData> inner = [];
+        IReadOnlyList<ReadOnlyMemory<byte>> logs = [];
 
         var entries = reader.ReadMapHeader();
         for (var i = 0; i < entries; i++)
@@ -102,6 +103,9 @@ public static class ApplyDataReader
                 case "caid":
                     caid = reader.ReadUInt64();
                     break;
+                case "apid":
+                    apid = reader.ReadUInt64();
+                    break;
                 case "hgh":
                     hgh = reader.ReadBoolean();
                     break;
@@ -109,7 +113,7 @@ public static class ApplyDataReader
                     hgi = reader.ReadBoolean();
                     break;
                 case "dt":
-                    inner = ReadDetail(ref reader);
+                    (inner, logs) = ReadDetail(ref reader);
                     break;
                 default:
                     reader.Skip();
@@ -117,25 +121,47 @@ public static class ApplyDataReader
             }
         }
 
-        return new TxnApplyData(rawTxn, rs, rr, rc, ca, aca, caid, hgh, hgi, inner);
+        return new TxnApplyData(rawTxn, rs, rr, rc, ca, aca, caid, hgh, hgi, inner, apid, logs);
     }
 
-    private static IReadOnlyList<TxnApplyData> ReadDetail(ref MessagePackReader reader)
+    private static (IReadOnlyList<TxnApplyData> Inner, IReadOnlyList<ReadOnlyMemory<byte>> Logs) ReadDetail(ref MessagePackReader reader)
     {
         IReadOnlyList<TxnApplyData> inner = [];
+        IReadOnlyList<ReadOnlyMemory<byte>> logs = [];
         var entries = reader.ReadMapHeader();
         for (var i = 0; i < entries; i++)
         {
-            if (reader.ReadString() == "itx")
+            switch (reader.ReadString())
             {
-                inner = ReadTransactions(ref reader);
-            }
-            else
-            {
-                reader.Skip();
+                case "itx":
+                    inner = ReadTransactions(ref reader);
+                    break;
+                case "lg":
+                    logs = ReadLogs(ref reader);
+                    break;
+                default:
+                    reader.Skip();
+                    break;
             }
         }
 
-        return inner;
+        return (inner, logs);
+    }
+
+    private static List<ReadOnlyMemory<byte>> ReadLogs(ref MessagePackReader reader)
+    {
+        var logs = new List<ReadOnlyMemory<byte>>();
+        if (reader.TryReadNil())
+        {
+            return logs;
+        }
+
+        var count = reader.ReadArrayHeader();
+        for (var i = 0; i < count; i++)
+        {
+            logs.Add(reader.ReadBytes()?.ToArray() ?? []);
+        }
+
+        return logs;
     }
 }
