@@ -129,3 +129,10 @@ prove it), size it to one PR, and add `enhancement` plus your team label. Cite s
 
 - Algorand5 SDK block model drops apply data and ignores HTTP status; the repo fetches raw block bytes and reads apply
   data itself. Do not "simplify" this back to the SDK model.
+- Schema scripts and ADRs are numbered by a shared sequence, and two teams took `0003` / `0007` at the same time -> `git fetch`
+  and list `Schema/` and `docs/adr/` on `origin/main` right before numbering, and renumber after a rebase conflict.
+- A `MeterListener` sees every meter of that name in the process, and xUnit runs test classes in parallel -> give the object
+  under test a unique meter name in tests (see `WorkerHealth`).
+- Each replica must apply the schema before asking for anything that needs a table (the writer lease needs `writer_lease`).
+- Review loops keep finding real issues in lease, timeout and migration code until round 3 -> budget for three rounds there and
+  write the failure-path test (lost lease, timeout, missing column) together with the code.
