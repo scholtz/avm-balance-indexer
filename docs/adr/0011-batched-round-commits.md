@@ -23,7 +23,8 @@ small rounds. The benchmark (`BackfillBenchmark`) also showed that block downloa
 - `BalanceTracker` keeps the balances of staged rounds in an overlay the next round reads, and moves them to the cache only after the
   batch is durable. A failed write throws out of `RunAsync`; the tracker is discarded with it.
 - Token records are still written when a round is staged (before its batch is published), so a destroy later in the same batch finds the
-  record. Replaying a batch rewrites identical values.
+  record. Replaying a batch rewrites identical values: creation builds a fresh record, destroy and reconfiguration use only fields that never change after creation (creator, total, url, issuing application), so a record written ahead of a failed batch does not change how earlier rounds replay.
+- A failing fetch or bad block writes the rounds already computed (within 10 s) before the error is reported; cancellation does not, because it also means a lost writer lease.
 - `FetchConcurrency` defaults to 64 (was 8).
 
 ## Consequences

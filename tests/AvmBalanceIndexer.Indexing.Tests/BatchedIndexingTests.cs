@@ -85,6 +85,29 @@ public class BatchedIndexingTests
     }
 
     [Fact]
+    public async Task Cancellation_Does_Not_Write_Anything_Because_The_Writer_Lease_May_Be_Lost()
+    {
+        var storage = new RecordingStorage(new ChainContext(ChainId.AlgorandTestnet));
+        var cancelled = new FailingAdapter(Adapter(), failingRound: 4, new OperationCanceledException());
+        var options = new IndexerOptions { FetchConcurrency = 1, CommitBatchRounds = 10, FollowingThresholdRounds = 0 };
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Indexer(storage, cancelled, options).RunAsync(LastRound, CancellationToken.None));
+
+        Assert.Equal(0UL, (await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!.IndexedRound);
+    }
+
+    [Fact]
+    public async Task A_Bounded_Run_That_Meets_A_Hole_Also_Writes_The_Rounds_Before_It()
+    {
+        var storage = new RecordingStorage(new ChainContext(ChainId.AlgorandTestnet));
+        var options = new IndexerOptions { FetchConcurrency = 1, CommitBatchRounds = 10, FollowingThresholdRounds = 0 };
+
+        await Assert.ThrowsAsync<Adapters.BlockNotAvailableException>(() => Indexer(storage, Adapter(Blocks().Take(3)), options).RunAsync(LastRound, CancellationToken.None));
+
+        Assert.Equal(3UL, (await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!.IndexedRound);
+    }
+
+    [Fact]
     public async Task A_Failing_Write_Is_Not_Written_Again_While_Failing()
     {
         var storage = new RecordingStorage(new ChainContext(ChainId.AlgorandTestnet)) { FailBatchesOver = 1 };
@@ -94,7 +117,7 @@ public class BatchedIndexingTests
         Assert.Equal(1, storage.FailedAttempts); // one refused batch, no second attempt from the failure handler
     }
 
-    private sealed class FailingAdapter(Adapters.IChainAdapter inner, ulong failingRound) : Adapters.IChainAdapter
+    private sealed class FailingAdapter(Adapters.IChainAdapter inner, ulong failingRound, Exception? failure = null) : Adapters.IChainAdapter
     {
         public Adapters.ChainProfile Profile => inner.Profile;
 
@@ -105,7 +128,7 @@ public class BatchedIndexingTests
         public Task<Adapters.GenesisDocument> GetGenesisAsync(CancellationToken cancellationToken) => inner.GetGenesisAsync(cancellationToken);
 
         public Task<Adapters.BlockData> FetchBlockAsync(ulong round, CancellationToken cancellationToken) =>
-            round == failingRound ? Task.FromException<Adapters.BlockData>(new TimeoutException("host timed out")) : inner.FetchBlockAsync(round, cancellationToken);
+            round == failingRound ? Task.FromException<Adapters.BlockData>(failure ?? new TimeoutException("host timed out")) : inner.FetchBlockAsync(round, cancellationToken);
     }
 
     [Fact]

@@ -29,7 +29,7 @@ public sealed partial class RoundIndexer(
     private readonly IndexerOptions _options = options.Value;
     private readonly HashSet<ulong> _knownArc200 = [];
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
-    private static readonly TimeSpan FlushGracePeriod = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan FlushGracePeriod = TimeSpan.FromSeconds(10);
     private long _roundsCommitted;
     private bool _writeFailed;
 
@@ -46,6 +46,7 @@ public sealed partial class RoundIndexer(
     /// <exception cref="ChainDivergenceException">A block does not link to the published chain.</exception>
     public async Task<IndexingResult> RunAsync(ulong? stopAfterRound, CancellationToken cancellationToken)
     {
+        _writeFailed = false;
         var chain = adapter.Profile.Chain;
         var status = await storage.GetAsync(chain, cancellationToken).ConfigureAwait(false);
         RewardsState rewards;
@@ -128,10 +129,11 @@ public sealed partial class RoundIndexer(
                     }
                 }
             }
-            catch (Exception ex) when (pending.Count > 0 && ex is not (BlockNotAvailableException or ChainDivergenceException) && !_writeFailed)
+            catch (Exception ex) when (pending.Count > 0 && !_writeFailed && ex is not (OperationCanceledException or ChainDivergenceException) && !(ex is BlockNotAvailableException && stopAfterRound is null))
             {
-                // A failing fetch, a bad block or a shutdown must not throw away the rounds already computed: with batches of
-                // 25, a flaky host would otherwise keep a backfill from ever completing one. Best effort within a grace period.
+                // A failing fetch or a bad block must not throw away the rounds already computed: with batches of 25, a flaky host
+                // would otherwise keep a backfill from ever completing one. Best effort within a grace period. Cancellation is
+                // excluded on purpose: it also means a lost writer lease, after which this process must not write again.
                 await TryFlushAsync(tracker, pending).ConfigureAwait(false);
                 ExceptionDispatchInfo.Capture(ex).Throw();
             }

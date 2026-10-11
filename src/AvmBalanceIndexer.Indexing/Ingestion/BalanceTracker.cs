@@ -124,15 +124,23 @@ public sealed class BalanceTracker(IBalanceReadStore store, int maxCacheEntries)
         }
     }
 
-    /// <summary>Records the staged balances after the batch that contained them was durably written.</summary>
+    /// <summary>
+    /// Records the staged balances after the batch that contained them was durably written. A batch larger than a generation
+    /// keeps its most recent entries instead of being dropped altogether.
+    /// </summary>
     public void CommitStaged()
     {
-        if (_staged.Count == 0)
+        foreach (var (key, amount) in _staged)
         {
-            return;
+            _young[key] = amount;
+            _old.Remove(key);
+            if (_young.Count >= _generationSize)
+            {
+                _old = _young;
+                _young = [];
+            }
         }
 
-        CommitBalances(_staged);
         _staged.Clear();
     }
 
@@ -140,14 +148,9 @@ public sealed class BalanceTracker(IBalanceReadStore store, int maxCacheEntries)
     public void Commit(RoundEffects round)
     {
         ArgumentNullException.ThrowIfNull(round);
-        CommitBalances(round.FinalBalances);
-    }
 
-    private void CommitBalances(IReadOnlyDictionary<HoldingKey, Amount> balances) => CommitBalances(balances, balances.Count);
-
-    private void CommitBalances(IEnumerable<KeyValuePair<HoldingKey, Amount>> balances, int count)
-    {
-        if (count >= _generationSize)
+        var balances = round.FinalBalances;
+        if (balances.Count >= _generationSize)
         {
             // A round this large would not fit a generation. Forget what it changed instead of caching it; storage has it.
             foreach (var (key, _) in balances)
