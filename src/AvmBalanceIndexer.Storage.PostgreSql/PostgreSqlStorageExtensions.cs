@@ -24,7 +24,12 @@ public static class PostgreSqlStorageExtensions
 
             // Npgsql's own command timeout must not fire before the server's statement timeout (which is the one that is translated).
             var connection = new NpgsqlConnectionStringBuilder(settings.ConnectionString);
-            connection.CommandTimeout = Math.Max(connection.CommandTimeout, settings.ReadTimeoutSeconds + 5);
+            // 0 means no limit and stays that way.
+            if (connection.CommandTimeout != 0)
+            {
+                connection.CommandTimeout = Math.Max(connection.CommandTimeout, settings.ReadTimeoutSeconds + 5);
+            }
+
             return NpgsqlDataSource.Create(connection.ConnectionString);
         });
         services.AddSingleton(static provider => new PostgreSqlChainStorage(

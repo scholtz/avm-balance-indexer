@@ -44,7 +44,9 @@ public sealed partial class CassandraChainStorage : IChainStorage
     public CassandraChainStorage(CassandraSessionSource source, ChainContext chain, CassandraOptions options, TimeSpan? readDeadline = null)
     {
         ArgumentNullException.ThrowIfNull(options);
-        _readDeadline = readDeadline ?? TimeSpan.FromSeconds(options.ReadTimeoutSeconds);
+        _readDeadline = (readDeadline ?? TimeSpan.FromSeconds(options.ReadTimeoutSeconds)) is { } deadline && deadline >= TimeSpan.Zero
+            ? deadline
+            : throw new ArgumentOutOfRangeException(nameof(readDeadline), "The read deadline must not be negative.");
         _source = source ?? throw new ArgumentNullException(nameof(source));
         _chain = chain?.Chain ?? throw new ArgumentNullException(nameof(chain));
         _keyspace = CassandraOptionsValidator.IsValidIdentifier(options.Keyspace)

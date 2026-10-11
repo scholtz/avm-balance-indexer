@@ -16,7 +16,7 @@ public sealed partial class PostgreSqlChainStorage
 
         foreach (var script in ReadEmbeddedScripts())
         {
-            await ExecuteAsync(connection, transaction, script, cancellationToken).ConfigureAwait(false);
+            await ExecuteAsync(connection, transaction, script, cancellationToken, unlimited: true).ConfigureAwait(false);
         }
 
         await EnsurePartitionCountMatchesAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
@@ -100,10 +100,15 @@ public sealed partial class PostgreSqlChainStorage
         }
     }
 
-    private static async Task ExecuteAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, string sql, CancellationToken cancellationToken)
+    private static async Task ExecuteAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, string sql, CancellationToken cancellationToken, bool unlimited = false)
     {
-        // Schema scripts may copy a lot of data (the holdings_by_token backfill), so they are not subject to the command timeout.
-        await using var command = new NpgsqlCommand(sql, connection, transaction) { CommandTimeout = 0 };
+        // Embedded scripts may copy a lot of data (the holdings_by_token backfill), so they are not subject to the command timeout.
+        await using var command = new NpgsqlCommand(sql, connection, transaction);
+        if (unlimited)
+        {
+            command.CommandTimeout = 0;
+        }
+
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 }
