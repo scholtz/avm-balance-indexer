@@ -183,7 +183,10 @@ public class IndexerWorkerTests : IDisposable
         var (worker, lifetime) = Create(storage, adapter, maxFailures: 2);
         await worker.StartAsync(CancellationToken.None);
         await WaitForRoundAsync(storage, Scenario.LastRound);
-        await Task.Delay(50);
+
+        // Wait until the indexer has really asked for the announced block (and not found it), instead of guessing with a sleep.
+        var fetchesBefore = adapter.FetchCount;
+        await WaitUntilAsync(() => adapter.FetchCount > fetchesBefore);
         adapter.Add(next);
         await WaitForRoundAsync(storage, 6);
         await worker.StopAsync(CancellationToken.None);
@@ -244,10 +247,9 @@ public class IndexerWorkerTests : IDisposable
         await WaitForRoundAsync(storage, Scenario.LastRound);
         storage.RevokeLease();
         await WaitUntilAsync(() => health.LeasesLost == 1 && health.State == WorkerState.Leader && storage.LeasesGranted == 2);
-        // The block first, then the tip that announces it: the other way round the indexer can see an announced block that is not there
-        // yet, and a starved test thread turns that into enough consecutive failures to stop the worker.
+        // The tip follows the highest added block, so adding block 6 is all it takes. Announcing round 6 before the block exists (as
+        // the test above does on purpose) lets a starved test thread produce enough consecutive failures to stop the worker.
         adapter.Add(next);
-        adapter.Latest = 6;
         await WaitForRoundAsync(storage, 6);
         await worker.StopAsync(CancellationToken.None);
 

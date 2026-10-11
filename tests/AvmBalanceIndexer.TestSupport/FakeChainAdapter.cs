@@ -12,6 +12,7 @@ public sealed class FakeChainAdapter(ChainProfile profile, GenesisDocument genes
     private readonly object _latestGate = new();
     private ulong? _latest;
     private int _fetchCount;
+    private bool _algodDown;
 
     public ChainProfile Profile { get; } = profile;
 
@@ -38,7 +39,11 @@ public sealed class FakeChainAdapter(ChainProfile profile, GenesisDocument genes
     }
 
     /// <summary>When true, asking for the latest round fails like an unreachable algod would.</summary>
-    public bool AlgodDown { get; set; }
+    public bool AlgodDown
+    {
+        get => Volatile.Read(ref _algodDown);
+        set => Volatile.Write(ref _algodDown, value);
+    }
 
     /// <summary>Number of block fetches served.</summary>
     public int FetchCount => Volatile.Read(ref _fetchCount);
