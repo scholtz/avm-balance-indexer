@@ -1,5 +1,7 @@
 # Deployment
 
+The runbook for operators (sizing, upgrades, backup, monitoring, failure modes) is [docs/operations.md](../docs/operations.md).
+
 One Helm release per chain deployment, each with its own namespace, database, credentials and network policy:
 
 | Release | Values overlay | Chain | Default provider |

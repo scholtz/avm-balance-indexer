@@ -4,7 +4,7 @@ Self-hosted indexer and API for Algorand-family (AVM) token balances. Indexes a 
 rounds, and serves current and end-of-round balances, holders and per-token account history for native ALGO/VOI,
 ASAs, ARC-20 Smart ASAs and ARC-200 application tokens.
 
-Full design: [PRODUCT-DESCRIPTION.md](PRODUCT-DESCRIPTION.md). Decisions: [docs/adr](docs/adr).
+Full design: [PRODUCT-DESCRIPTION.md](PRODUCT-DESCRIPTION.md). Decisions: [docs/adr](docs/adr). Running an instance: [docs/operations.md](docs/operations.md).
 
 ## Status
 
