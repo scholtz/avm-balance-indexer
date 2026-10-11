@@ -1,5 +1,4 @@
 using System.Numerics;
-using Algorand.Algod.Model.Transactions;
 using AvmBalanceIndexer.Domain.Effects;
 using AvmBalanceIndexer.Domain.Tokens;
 using AvmBalanceIndexer.Indexing.Adapters;
@@ -39,28 +38,36 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
             ? ToDomain(sink, "fee sink")
             : throw new InvalidDataException($"Round {block.Round}: block header has no fee sink.");
 
-        var transactions = (header.Transactions ?? []).ToArray();
+        var transactions = block.ApplyData;
         var round = new RoundBuilder(block.Round, feeSink, assets);
 
         round.BeginTransaction(0, string.Empty);
         ApplyStartOfBlock(round, block, previousRewards);
 
         var hasInnerTransactions = block.ApplyData.Any(static a => a.InnerTxns.Count > 0);
-        for (var index = 0; index < transactions.Length; index++)
+        for (var index = 0; index < transactions.Count; index++)
         {
-            var apply = block.ApplyData[index];
+            var apply = transactions[index];
             var transactionId = TransactionIdCalculator.Compute(apply, block.GenesisHash, block.GenesisId);
             round.BeginTransaction(index + 1, transactionId);
             // Blocks of the early protocols do not record the id of a created asset; it is the transaction counter at the transaction.
-            var legacyCreatedId = hasInnerTransactions ? 0UL : LegacyCreatedId(header.TxnCounter, transactions.Length, index);
-            ApplyTransaction(round, transactions[index], apply, [], 0, legacyCreatedId);
+            var legacyCreatedId = hasInnerTransactions ? 0UL : LegacyCreatedId(header.TxnCounter, transactions.Count, index);
+            try
+            {
+                ApplyTransaction(round, apply, [], 0, legacyCreatedId);
+            }
+            catch (Exception ex) when (ex is InvalidDataException or EndOfStreamException or ArgumentException or InvalidCastException or OverflowException or MessagePack.MessagePackSerializationException)
+            {
+                // Say which transaction made the round fail: a stalled indexer is diagnosed from this message.
+                throw new InvalidDataException($"Transaction {index} ({transactionId}) of round {block.Round}: {ex.Message}", ex);
+            }
         }
 
         if (header.ProposerPayout is > 0)
         {
             var proposer = header.Proposer
                 ?? throw new InvalidDataException($"Round {block.Round}: block header pays a proposer payout but names no proposer.");
-            round.BeginTransaction(transactions.Length + 1, string.Empty);
+            round.BeginTransaction(transactions.Count + 1, string.Empty);
             var payout = new BigInteger(header.ProposerPayout.Value);
             var proposerAddress = ToDomain(proposer, "proposer");
             round.Add(feeSink, -payout, EffectType.ProposerPayout, proposerAddress, []);
@@ -110,15 +117,20 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
         round.Add(pool, -withdrawal, EffectType.RewardsWithdrawal, null, []);
     }
 
-    private static void ApplyTransaction(RoundBuilder round, SignedTransaction signed, TxnApplyData apply, int[] path, ulong issuedBy, ulong legacyCreatedId = 0)
+    private static void ApplyTransaction(RoundBuilder round, TxnApplyData apply, int[] path, ulong issuedBy, ulong legacyCreatedId = 0)
     {
-        var transaction = signed.Tx ?? throw new InvalidDataException("Block transaction without a txn body.");
-        var sender = ToDomain(transaction.Sender, "sender");
-        var payment = transaction as PaymentTransaction;
+        if (apply.RawTxn.IsEmpty)
+        {
+            throw new InvalidDataException($"Round {round.Round}: block transaction without a txn body.");
+        }
+
+        var raw = RawTransaction.Read(apply.RawTxn);
+        var sender = raw.Sender is { } snd ? new DomainAddress(snd) : throw new InvalidDataException($"Round {round.Round}: a transaction has no sender address.");
+        var isPayment = raw.Type == "pay";
 
         // The receiver field is omitted from the stored transaction when it is the zero address (a burn).
-        var receiver = payment is null ? (DomainAddress?)null : payment.Receiver is null ? ZeroAddress : ToDomain(payment.Receiver, "receiver");
-        var closeTo = payment?.CloseRemainderTo is { } close && !IsZero(close) ? ToDomain(close, "close-to") : (DomainAddress?)null;
+        var receiver = !isPayment ? (DomainAddress?)null : raw.Receiver is { } rcv ? new DomainAddress(rcv) : ZeroAddress;
+        var closeTo = isPayment && raw.CloseTo is { } close && !close.All(static b => b == 0) ? new DomainAddress(close) : (DomainAddress?)null;
 
         round.Add(sender, apply.SenderRewards, EffectType.Reward, null, path);
         if (receiver is { } rewardedReceiver)
@@ -131,13 +143,13 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
             round.Add(rewardedCloseTo, apply.CloseRewards, EffectType.Reward, null, path);
         }
 
-        var fee = new BigInteger(transaction.Fee);
+        var fee = new BigInteger(raw.Fee);
         round.Add(sender, -fee, EffectType.Fee, round.FeeSink, path);
         round.Add(round.FeeSink, fee, EffectType.FeeCollected, sender, path);
 
-        if (payment is not null && receiver is { } to)
+        if (receiver is { } to)
         {
-            var amount = new BigInteger(payment.Amount ?? 0);
+            var amount = new BigInteger(raw.Amount);
             round.Add(sender, -amount, EffectType.Payment, to, path);
             round.Add(to, amount, EffectType.Payment, sender, path);
 
@@ -149,19 +161,16 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
             }
         }
 
-        var executing = apply.RawTxn.IsEmpty ? 0UL : ApplyAsset(round, sender, apply, path, issuedBy, legacyCreatedId);
-
-        var inner = (signed.Detail?.InnerTxns ?? []).ToArray();
-        for (var i = 0; i < inner.Length; i++)
+        var executing = ApplyAsset(round, sender, raw, apply, path, issuedBy, legacyCreatedId);
+        for (var i = 0; i < apply.InnerTxns.Count; i++)
         {
-            ApplyTransaction(round, inner[i], apply.InnerTxns[i], [.. path, i], executing);
+            ApplyTransaction(round, apply.InnerTxns[i], [.. path, i], executing);
         }
     }
 
     /// <returns>The application this transaction runs, which issues its inner transactions; zero for other types.</returns>
-    private static ulong ApplyAsset(RoundBuilder round, DomainAddress sender, TxnApplyData apply, int[] path, ulong issuedBy, ulong legacyCreatedId)
+    private static ulong ApplyAsset(RoundBuilder round, DomainAddress sender, RawTransaction raw, TxnApplyData apply, int[] path, ulong issuedBy, ulong legacyCreatedId)
     {
-        var raw = RawTransaction.Read(apply.RawTxn);
         switch (raw.Type)
         {
             case "axfer":
@@ -291,8 +300,6 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
 
     private static DomainAddress ToDomain(Algorand.Address? address, string role) =>
         address is null ? throw new InvalidDataException($"A transaction has no {role} address.") : new DomainAddress(address.Bytes);
-
-    private static bool IsZero(Algorand.Address address) => address.Bytes.All(static b => b == 0);
 
     private sealed class RoundBuilder(ulong round, DomainAddress feeSink, IAssetDirectory assets)
     {

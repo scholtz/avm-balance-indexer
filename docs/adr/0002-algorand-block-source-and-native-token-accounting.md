@@ -1,6 +1,7 @@
 # ADR 0002: Archival gossip block source and exact native token accounting
 
 - Status: accepted
+- Amended by: [ADR 0010](0010-transactions-from-raw-msgpack.md) (the SDK no longer decodes transactions)
 - Date: 2026-10-11
 - Issue: #13
 

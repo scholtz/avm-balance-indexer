@@ -10,7 +10,10 @@ using MessagePack;
 
 namespace AvmBalanceIndexer.TestSupport;
 
-/// <summary>A payment transaction to place in a synthetic block, optionally with inner payments and apply data.</summary>
+/// <summary>
+/// A payment transaction to place in a synthetic block, optionally with inner payments and apply data. <c>RawEntry</c> places a
+/// stored block transaction (a <c>txns</c> element) verbatim instead.
+/// </summary>
 public sealed record TestPayment(
     Address Sender,
     Address Receiver,
@@ -23,7 +26,8 @@ public sealed record TestPayment(
     ulong CloseRewards = 0,
     IReadOnlyList<TestPayment>? Inner = null,
     TestAsset? Asset = null,
-    TestApplication? Application = null);
+    TestApplication? Application = null,
+    byte[]? RawEntry = null);
 
 /// <summary>An application call placed in a synthetic block in the place of a payment (the payment's sender and fee are used).</summary>
 /// <param name="ApplicationId">Application called; zero for a creation.</param>
@@ -172,7 +176,14 @@ public sealed class TestChain
         // The certificate digest must be the real header hash, which does not depend on the certificate itself.
         // The header commits to the payset, which in turn is only known from the encoded transactions.
         var draft = Write(round, payments, proposerPayout, rewards, protocol, previous, new byte[32], new byte[32]);
-        var txn = PaysetCommitment.ComputeTxn(draft, ApplyDataReader.ReadBlockTransactions(draft), GenesisHash, Profile.GenesisId);
+        var stored = ApplyDataReader.ReadBlockTransactions(draft);
+        if (ConsensusProtocols.RequiresGenesisHash(protocol))
+        {
+            // Like the decoder: from v16 on the genesis hash is restored on every transaction whatever its flags say.
+            stored = [.. stored.Select(static a => a with { HasGenesisHash = true })];
+        }
+
+        var txn = PaysetCommitment.ComputeTxn(draft, stored, GenesisHash, Profile.GenesisId);
         var hash = BlockHashCalculator.Compute(Write(round, payments, proposerPayout, rewards, protocol, previous, new byte[32], txn));
         _hashes[round] = hash;
         return Write(round, payments, proposerPayout, rewards, protocol, previous, hash, txn);
@@ -265,6 +276,13 @@ public sealed class TestChain
 
     private static void WriteTransaction(ref MessagePackWriter writer, TestPayment payment, bool topLevel)
     {
+        if (payment.RawEntry is { } raw)
+        {
+            // A transaction taken from a real block, written as it was stored.
+            writer.WriteRaw(raw);
+            return;
+        }
+
         var entries = 1;
         entries += payment.SenderRewards > 0 ? 1 : 0;
         entries += payment.ReceiverRewards > 0 ? 1 : 0;
