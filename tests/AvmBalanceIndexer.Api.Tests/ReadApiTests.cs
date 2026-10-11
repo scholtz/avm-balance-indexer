@@ -212,12 +212,39 @@ public sealed class ReadApiTests : IAsyncLifetime
     [InlineData("/v1/algorand-testnet/accounts/{A}/tokens/algo/0/transactions?fromRound=5&toRound=2")]
     [InlineData("/v1/algorand-testnet/tokens/algo/0/holders?cursor=zz")]
     [InlineData("/v1/algorand-testnet/tokens/algo/0/holders?limit=abc")]
+    [InlineData("/v1/algorand-testnet/tokens/algo/0/holders?includeZero=maybe")]
     public async Task Invalid_Input_Is_A_400_With_A_Message(string path)
     {
         var (status, body, _) = await GetAsync(path.Replace("{A}", Text(Alice), StringComparison.Ordinal));
 
         Assert.Equal(HttpStatusCode.BadRequest, status);
         Assert.True(body.TryGetProperty("error", out _) || body.TryGetProperty("title", out _));
+    }
+
+    [Fact]
+    public async Task A_Lower_Case_Address_Is_Answered_With_The_Canonical_Text()
+    {
+        var (_, body, _) = await GetAsync($"/v1/algorand-testnet/accounts/{Text(Alice).ToLowerInvariant()}/tokens");
+
+        Assert.Equal(Text(Alice), body.GetProperty("account").GetString());
+    }
+
+    [Fact]
+    public async Task A_Bad_Query_For_Another_Chain_Is_Still_A_404()
+    {
+        var (status, _, _) = await GetAsync($"/v1/voi/accounts/{Text(Alice)}/tokens?limit=abc&includeZero=maybe");
+
+        Assert.Equal(HttpStatusCode.NotFound, status);
+    }
+
+    [Fact]
+    public async Task A_History_Window_Ending_At_A_Published_Round_Is_Cacheable()
+    {
+        var closed = await GetAsync($"/v1/algorand-testnet/accounts/{Text(Alice)}/tokens/algo/0/transactions?toRound=3");
+        var open = await GetAsync($"/v1/algorand-testnet/accounts/{Text(Alice)}/tokens/algo/0/transactions");
+
+        Assert.Contains("immutable", closed.Response.Headers.CacheControl!.ToString(), StringComparison.Ordinal);
+        Assert.Null(open.Response.Headers.CacheControl);
     }
 
     [Fact]

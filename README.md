@@ -119,7 +119,8 @@ Amounts and deltas are decimal strings. Every list response has `indexedRound` a
 `cursor`). `limit` is 1 to 1000 (default 100); `kind` is `algo`, `asa` or `arc200`. Without `round`, balance and holders use
 the latest published round; an explicit round is immutable, so those answers carry `Cache-Control: public, immutable`.
 Errors: 400 for invalid input or cursor, 404 for an unknown token, a round beyond the published one (with `indexedRound`) or
-another chain, 503 while nothing is indexed yet.
+another chain, 503 while nothing is indexed yet. A walk over the holders of the latest round should pass the
+`round` it received, so that all pages come from one round.
 
 ## Known limitations
 

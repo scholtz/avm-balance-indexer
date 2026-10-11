@@ -69,19 +69,20 @@ public static class ReadEndpoints
     private static async Task<IResult> GetHoldings(
         string address,
         IChainStorage storage,
-        bool? includeZero,
+        string? includeZero,
         string? cursor,
-        int? limit,
+        string? limit,
         CancellationToken cancellationToken)
     {
-        if (!TryAccount(address, out var account, out var error) || !TryLimit(limit, out var pageSize, out error) || !TryCursor(cursor, out error))
+        if (!TryAccount(address, out var account, out var error) || !TryFlag(includeZero, "includeZero", out var withZero, out error)
+            || !TryLimit(limit, out var pageSize, out error) || !TryCursor(cursor, out error))
         {
             return error!;
         }
 
-        var page = await storage.GetHoldingsAsync(account, includeZero ?? false, cursor, pageSize, cancellationToken).ConfigureAwait(false);
+        var page = await storage.GetHoldingsAsync(account, withZero, cursor, pageSize, cancellationToken).ConfigureAwait(false);
         return Results.Ok(new HoldingsResponse(
-            address,
+            AddressText.Format(account),
             page.IndexedRound,
             [.. page.Items.Select(static h => new HoldingDto(Ref(h.Token), h.Amount.ToString(), h.OptedIn, h.LastChangedRound))],
             page.NextCursor));
@@ -106,7 +107,7 @@ public static class ReadEndpoints
         var at = requested ?? indexed;
         var amount = await storage.GetBalanceAtRoundAsync(account, token, at, cancellationToken).ConfigureAwait(false);
         MarkImmutable(http, requested);
-        return Results.Ok(new BalanceResponse(address, Ref(token), at, amount.ToString(), indexed));
+        return Results.Ok(new BalanceResponse(AddressText.Format(account), Ref(token), at, amount.ToString(), indexed));
     }
 
     private static async Task<IResult> GetHolders(
@@ -116,19 +117,20 @@ public static class ReadEndpoints
         string tokenId,
         IChainStorage storage,
         string? round,
-        bool? includeZero,
+        string? includeZero,
         string? cursor,
-        int? limit,
+        string? limit,
         CancellationToken cancellationToken)
     {
         if (!TryToken(kind, tokenId, out var token, out var error) || !TryRound(round, out var requested, out error)
+            || !TryFlag(includeZero, "includeZero", out var withZero, out error)
             || !TryLimit(limit, out var pageSize, out error) || !TryCursor(cursor, out error))
         {
             return error!;
         }
 
         var at = requested ?? await IndexedRoundAsync(storage, chain, cancellationToken).ConfigureAwait(false);
-        var page = await storage.GetHoldersAtRoundAsync(token, at, includeZero ?? false, cursor, pageSize, cancellationToken).ConfigureAwait(false);
+        var page = await storage.GetHoldersAtRoundAsync(token, at, withZero, cursor, pageSize, cancellationToken).ConfigureAwait(false);
         MarkImmutable(http, requested);
         return Results.Ok(new HoldersResponse(
             Ref(token),
@@ -139,6 +141,7 @@ public static class ReadEndpoints
     }
 
     private static async Task<IResult> GetHistory(
+        HttpContext http,
         string address,
         string kind,
         string tokenId,
@@ -146,7 +149,7 @@ public static class ReadEndpoints
         string? fromRound,
         string? toRound,
         string? cursor,
-        int? limit,
+        string? limit,
         CancellationToken cancellationToken)
     {
         if (!TryAccount(address, out var account, out var error) || !TryToken(kind, tokenId, out var token, out error)
@@ -162,7 +165,13 @@ public static class ReadEndpoints
         }
 
         var page = await storage.GetEffectsAsync(account, token, from, to, cursor, pageSize, cancellationToken).ConfigureAwait(false);
-        return Results.Ok(new HistoryResponse(address, Ref(token), page.IndexedRound, [.. page.Items.Select(ToDto)], page.NextCursor));
+        if (to is { } upper && upper <= page.IndexedRound)
+        {
+            // A window that ends at a published round cannot change any more.
+            MarkImmutable(http, upper);
+        }
+
+        return Results.Ok(new HistoryResponse(AddressText.Format(account), Ref(token), page.IndexedRound, [.. page.Items.Select(ToDto)], page.NextCursor));
     }
 
     private static async Task<IResult> GetToken(string kind, string tokenId, IChainStorage storage, CancellationToken cancellationToken)
@@ -267,10 +276,23 @@ public static class ReadEndpoints
         return error is null;
     }
 
-    private static bool TryLimit(int? limit, out int pageSize, out IResult? error)
+    private static bool TryLimit(string? text, out int pageSize, out IResult? error)
     {
-        pageSize = limit ?? DefaultLimit;
+        pageSize = DefaultLimit;
+        if (text is not null && !int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out pageSize))
+        {
+            pageSize = 0;
+        }
+
         error = pageSize is >= 1 and <= MaxLimit ? null : BadRequest($"limit must be between 1 and {MaxLimit}.");
+        return error is null;
+    }
+
+    /// <summary>Flags are parsed here, not by parameter binding, so a bad query on another chain is still the chain filter's 404.</summary>
+    private static bool TryFlag(string? text, string name, out bool value, out IResult? error)
+    {
+        value = false;
+        error = text is null || bool.TryParse(text, out value) ? null : BadRequest($"{name} must be true or false.");
         return error is null;
     }
 
