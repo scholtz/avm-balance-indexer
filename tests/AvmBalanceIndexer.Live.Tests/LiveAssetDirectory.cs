@@ -19,8 +19,8 @@ public static class LiveAssetDirectory
             var (_, createdAt) = await reference.AssetAsync(assetId);
             var creation = await adapter.FetchBlockAsync(createdAt, CancellationToken.None);
             var previous = await adapter.FetchBlockAsync(createdAt - 1, CancellationToken.None);
-            var created = normalizer.NormalizeBlock(creation, RewardsState.FromHeader(previous.Block), AssetDirectory.Empty)
-                .TokenChanges.FirstOrDefault(t => t.Key == TokenKey.Asa(assetId));
+            var created = normalizer.NormalizeBlock(creation, RewardsState.FromHeader(previous.Block), await LoadAsync(reference, adapter, creation))
+                .TokenChanges.LastOrDefault(t => t.Key == TokenKey.Asa(assetId));
             records.Add(created ?? throw new InvalidOperationException($"Asset {assetId} was not created in round {createdAt}."));
         }
 

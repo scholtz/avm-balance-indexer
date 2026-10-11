@@ -752,7 +752,7 @@ public abstract class StorageContractTests
         var smart = await storage.GetAsync(key, CancellationToken.None);
 
         Assert.NotNull(smart);
-        Assert.Equal((TokenStandard.Arc20, true, (ulong?)application, appAccount), (smart.Standard, smart.StandardVerified, smart.ControllingAppId, smart.Creator));
+        Assert.Equal((TokenStandard.Arc20, false, (ulong?)application, appAccount), (smart.Standard, smart.StandardVerified, smart.ControllingAppId, smart.Creator));
         Assert.Equal(500UL, (ulong)(await storage.GetBalanceAtRoundAsync(appAccount, key, 1, CancellationToken.None)).Value);
 
         await indexer.RunAsync(2, CancellationToken.None);

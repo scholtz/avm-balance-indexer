@@ -46,6 +46,12 @@ public static class AssetRecords
 
         // Only the four addresses can change; an address left out of the transaction is cleared.
         var current = ReadMetadata(info);
+        if (!current.HasIssuingApplication)
+        {
+            // Written before the issuing application was kept: the classification cannot be re-evaluated, so it stays.
+            return info with { MetadataJson = Metadata(Total(info), current.Url, parameters with { DefaultFrozen = current.DefaultFrozen }, 0) };
+        }
+
         var reconfigured = info with
         {
             MetadataJson = Metadata(Total(info), current.Url, parameters with { DefaultFrozen = current.DefaultFrozen }, current.IssuingApplication),
@@ -58,8 +64,8 @@ public static class AssetRecords
 
     /// <summary>
     /// ARC-20 Smart ASAs are created by their controlling application, hold the application account as clawback and start
-    /// frozen. All three are visible on chain, which makes the classification evidence-based rather than formally verified
-    /// (another contract can create such an asset); the ASA balance stays the only balance stream.
+    /// frozen. All three are visible on chain, but another contract can create such an asset too, so the standard is reported
+    /// as unverified (like ARC-200); the ASA balance stays the only balance stream.
     /// </summary>
     private static TokenInfo Classify(TokenInfo info, bool defaultFrozen, byte[]? clawback, ulong application)
     {
@@ -68,7 +74,7 @@ public static class AssetRecords
             && clawback is not null
             && clawback.AsSpan().SequenceEqual(ApplicationAddresses.Of(application).Bytes);
         return smart
-            ? info with { Standard = TokenStandard.Arc20, StandardVerified = true, ControllingAppId = application }
+            ? info with { Standard = TokenStandard.Arc20, StandardVerified = false, ControllingAppId = application }
             : info with { Standard = TokenStandard.Asa, StandardVerified = true, ControllingAppId = null };
     }
 
@@ -89,7 +95,7 @@ public static class AssetRecords
         address is null || address.All(static b => b == 0) ? null : new Algorand.Address(address).EncodeAsString();
 
     // Records written before the addresses were kept have none of these fields; they read as unset.
-    private static (string? Url, bool DefaultFrozen, ulong IssuingApplication) ReadMetadata(TokenInfo info)
+    private static (string? Url, bool DefaultFrozen, ulong IssuingApplication, bool HasIssuingApplication) ReadMetadata(TokenInfo info)
     {
         using var document = JsonDocument.Parse(info.MetadataJson ?? "{}");
         var root = document.RootElement;
@@ -97,7 +103,8 @@ public static class AssetRecords
         return (
             Text("url"),
             Text("defaultFrozen") == "true",
-            ulong.TryParse(Text("issuingApplication"), NumberStyles.None, CultureInfo.InvariantCulture, out var application) ? application : 0);
+            ulong.TryParse(Text("issuingApplication"), NumberStyles.None, CultureInfo.InvariantCulture, out var application) ? application : 0,
+            root.TryGetProperty("issuingApplication", out _));
     }
 
     /// <summary>Total supply recorded at creation.</summary>

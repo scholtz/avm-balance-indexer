@@ -28,12 +28,12 @@ public class AssetCreationEraTests(ITestOutputHelper output)
         var checkedAssets = 0;
         foreach (var start in EraStarts)
         {
-            var creations = await reference.AssetCreationsAsync(start, start + 100_000, 4);
+            var creations = await reference.AssetCreationsAsync(start, start + 100_000, 60);
             foreach (var (round, assetId, creator) in creations.Take(3))
             {
                 var block = await adapter.FetchBlockAsync(round, CancellationToken.None);
                 var previous = await adapter.FetchBlockAsync(round - 1, CancellationToken.None);
-                var normalized = normalizer.NormalizeBlock(block, RewardsState.FromHeader(previous.Block), AssetDirectory.Empty);
+                var normalized = normalizer.NormalizeBlock(block, RewardsState.FromHeader(previous.Block), await LiveAssetDirectory.LoadAsync(reference, adapter, block));
 
                 var created = normalized.Deltas.Single(d => d.Token == TokenKey.Asa(assetId) && d.Type == EffectType.AssetCreate);
                 Assert.Equal(creator, created.Account);

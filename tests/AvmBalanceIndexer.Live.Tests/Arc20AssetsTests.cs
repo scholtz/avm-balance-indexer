@@ -26,7 +26,7 @@ public class Arc20AssetsTests(ITestOutputHelper output)
         var classified = 0;
         foreach (var (assetId, createdAt, defaultFrozen, clawback) in await reference.AssetsByUnitAsync("S-ASA", 8))
         {
-            var token = await CreatedRecordAsync(adapter, normalizer, assetId, createdAt);
+            var token = await CreatedRecordAsync(reference, adapter, normalizer, assetId, createdAt);
 
             output.WriteLine($"asset {assetId}: {token.Standard}, controlling application {token.ControllingAppId}");
             if (token.Standard == TokenStandard.Arc20)
@@ -40,15 +40,15 @@ public class Arc20AssetsTests(ITestOutputHelper output)
         Assert.True(classified >= 2, "Fewer than two Smart ASAs were recognised.");
 
         // A well known plain asset (USDC) is created by a person's account, not by an application.
-        var plain = await CreatedRecordAsync(adapter, normalizer, 31566704, 8874561);
+        var plain = await CreatedRecordAsync(reference, adapter, normalizer, 31566704, 8874561);
         Assert.Equal((TokenStandard.Asa, (ulong?)null), (plain.Standard, plain.ControllingAppId));
     }
 
-    private static async Task<TokenInfo> CreatedRecordAsync(AlgorandChainAdapter adapter, AlgoEffectNormalizer normalizer, ulong assetId, ulong round)
+    private static async Task<TokenInfo> CreatedRecordAsync(ReferenceNode reference, AlgorandChainAdapter adapter, AlgoEffectNormalizer normalizer, ulong assetId, ulong round)
     {
         var block = await adapter.FetchBlockAsync(round, CancellationToken.None);
         var previous = await adapter.FetchBlockAsync(round - 1, CancellationToken.None);
-        var normalized = normalizer.NormalizeBlock(block, RewardsState.FromHeader(previous.Block), AssetDirectory.Empty);
-        return normalized.TokenChanges.Single(t => t.Key == TokenKey.Asa(assetId));
+        var normalized = normalizer.NormalizeBlock(block, RewardsState.FromHeader(previous.Block), await LiveAssetDirectory.LoadAsync(reference, adapter, block));
+        return normalized.TokenChanges.Last(t => t.Key == TokenKey.Asa(assetId));
     }
 }

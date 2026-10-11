@@ -45,13 +45,14 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
         round.BeginTransaction(0, string.Empty);
         ApplyStartOfBlock(round, block, previousRewards);
 
+        var hasInnerTransactions = block.ApplyData.Any(static a => a.InnerTxns.Count > 0);
         for (var index = 0; index < transactions.Length; index++)
         {
             var apply = block.ApplyData[index];
             var transactionId = TransactionIdCalculator.Compute(apply, block.GenesisHash, block.GenesisId);
             round.BeginTransaction(index + 1, transactionId);
             // Blocks of the early protocols do not record the id of a created asset; it is the transaction counter at the transaction.
-            var legacyCreatedId = LegacyCreatedId(header.TxnCounter, transactions.Length, index, block.ApplyData);
+            var legacyCreatedId = hasInnerTransactions ? 0UL : LegacyCreatedId(header.TxnCounter, transactions.Length, index);
             ApplyTransaction(round, transactions[index], apply, [], 0, legacyCreatedId);
         }
 
@@ -72,11 +73,12 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
     /// <summary>
     /// The id of an asset created at <paramref name="index"/> in a block that does not record it: the transaction counter
     /// after the block minus the transactions after this one. That only holds while every counted transaction is a top-level
-    /// one, which is true before inner transactions exist (the same protocols that lack the id); zero means unknown.
+    /// one, which is true before inner transactions exist (the same protocols that lack the id; the caller passes zero for a block that
+    /// has inner transactions); zero means unknown.
     /// </summary>
-    private static ulong LegacyCreatedId(ulong? counter, int transactions, int index, IReadOnlyList<TxnApplyData> apply)
+    private static ulong LegacyCreatedId(ulong? counter, int transactions, int index)
     {
-        if (counter is not { } after || after < (ulong)transactions || apply.Any(static a => a.InnerTxns.Count > 0))
+        if (counter is not { } after || after < (ulong)transactions)
         {
             return 0;
         }

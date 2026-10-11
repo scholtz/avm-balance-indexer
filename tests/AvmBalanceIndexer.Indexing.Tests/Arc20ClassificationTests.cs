@@ -32,7 +32,7 @@ public class Arc20ClassificationTests
     {
         var token = Assert.Single(Normalize(Chain.Block(5, [CreatedByApplication(App, Smart(AppAccount))])).TokenChanges);
 
-        Assert.Equal((TokenStandard.Arc20, true, (ulong?)App, TokenKey.Asa(Asset)), (token.Standard, token.StandardVerified, token.ControllingAppId, token.Key));
+        Assert.Equal((TokenStandard.Arc20, false, (ulong?)App, TokenKey.Asa(Asset)), (token.Standard, token.StandardVerified, token.ControllingAppId, token.Key));
         Assert.Equal(AppAccount, token.Creator);
         Assert.Contains(new Algorand.Address(AppAccount.ToArray()).EncodeAsString(), token.MetadataJson!, StringComparison.Ordinal);
     }
