@@ -25,7 +25,7 @@ Separately, a slow scan could hold a snapshot and a connection for minutes.
   must not be running an older version meanwhile (stop the old worker, then start the new one, which applies the schema first).
   Schema scripts run without a command timeout because the backfill can copy a large table.
 - The index also stores `opted_in`, so latest and historical holders agree (historical reads take it from the latest effect at or
-  before the round). PostgreSQL adds the column with migration `0003`, which fills it from `holdings_by_account`, and holds the single
+  before the round). PostgreSQL adds the column with migration `0004`, which fills it from `holdings_by_account`, and holds the single
   backfill; Cassandra adds it with `0002_*.cql` (`ADD IF NOT EXISTS`), which the schema manager applies when the column is missing, and
   rows without the flag are resolved from the effect history. The upgrade rule above applies to this migration too: no writer of the
   previous version may run while it is applied, and the API must not be upgraded before a new worker has applied the schema (the
