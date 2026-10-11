@@ -59,7 +59,7 @@ public class PaysetCommitmentTests
         var damaged = (byte[])bytes.Clone();
         damaged[at + 60] ^= 0x01;
 
-        Assert.ThrowsAny<Exception>(() => BlockDecoder.Decode(damaged, round, TestNet, null));
+        Assert.Throws<BlockValidationException>(() => BlockDecoder.Decode(damaged, round, TestNet, null));
     }
 
     private static byte[] Load(ulong round) =>

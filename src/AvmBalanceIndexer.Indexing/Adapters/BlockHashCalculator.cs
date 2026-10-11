@@ -1,6 +1,5 @@
 using System.Buffers;
 using MessagePack;
-using Org.BouncyCastle.Crypto.Digests;
 
 namespace AvmBalanceIndexer.Indexing.Adapters;
 
@@ -55,11 +54,9 @@ public static class BlockHashCalculator
 
         writer.Flush();
 
-        var digest = new Sha512tDigest(256);
-        digest.BlockUpdate("BH"u8);
-        digest.BlockUpdate(buffer.WrittenSpan);
-        var hash = new byte[digest.GetDigestSize()];
-        digest.DoFinal(hash, 0);
-        return hash;
+        var input = new byte[2 + buffer.WrittenCount];
+        "BH"u8.CopyTo(input);
+        buffer.WrittenSpan.CopyTo(input.AsSpan(2));
+        return Sha512t256.Hash(input);
     }
 }
