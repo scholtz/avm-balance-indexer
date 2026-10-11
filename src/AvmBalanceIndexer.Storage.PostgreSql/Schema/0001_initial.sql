@@ -1,6 +1,9 @@
 -- PostgreSQL schema for one chain database. Applied idempotently by PostgreSqlChainStorage.EnsureSchemaAsync.
 -- Amounts use numeric(20,0) so uint64 values never overflow a signed bigint.
 --
+-- This is the first released schema, so there is nothing to migrate from. Later changes need numbered migration scripts
+-- (0002_*.sql, ...) because every statement here is CREATE ... IF NOT EXISTS and would not alter existing tables.
+--
 -- Deviations from the reference design in PRODUCT-DESCRIPTION.md (see docs/adr/0002):
 --   * effect keys end in (round, intra_round_order, ordinal) so several effects of one transaction on the same
 --     account cannot collide; transaction_id is a plain column.

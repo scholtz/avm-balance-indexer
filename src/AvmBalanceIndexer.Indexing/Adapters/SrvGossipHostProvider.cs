@@ -26,7 +26,16 @@ public sealed partial class SrvGossipHostProvider(
             return fresh.Hosts;
         }
 
-        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (ObjectDisposedException)
+        {
+            // The adapter is being shut down while a fetch was still asking for hosts: that is a cancellation, not a failure.
+            throw new OperationCanceledException(cancellationToken);
+        }
+
         try
         {
             if (_snapshot is { } current && _time.GetUtcNow() < current.Expires)
@@ -69,7 +78,14 @@ public sealed partial class SrvGossipHostProvider(
         }
         finally
         {
-            _gate.Release();
+            try
+            {
+                _gate.Release();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Disposed while a lookup was running; nothing left to release.
+            }
         }
     }
 
