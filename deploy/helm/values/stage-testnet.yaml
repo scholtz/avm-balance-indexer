@@ -1,7 +1,21 @@
+# Release "testnet" in namespace avm-balance-indexer (see deploy/README.md).
 chain: algorand-testnet
 storage:
-  provider: PostgreSql
-  postgreSql:
-    existingSecret: avm-testnet-postgres
+  provider: Cassandra
+  cassandra:
+    keyspace: avm_testnet
+    replicationFactor: 1
+cassandra:
+  embedded:
+    enabled: true
+    hostPath: /mnt/nvme1/avm-balance-indexer/testnet
+ingress:
+  enabled: true
+  host: testnet.balance-indexer.biatec.io
+  tls:
+    enabled: true
+    clusterIssuer: letsencrypt-prod
 api:
+  replicaCount: 1
+worker:
   replicaCount: 1

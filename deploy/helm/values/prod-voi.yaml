@@ -1,8 +1,19 @@
+# Release "voi" in namespace avm-balance-indexer (see deploy/README.md).
 chain: voi
 storage:
-  # The Cassandra provider is not implemented yet (see the follow-up issue); switch back once it ships.
-  provider: PostgreSql
-  postgreSql:
-    existingSecret: avm-voi-postgres
+  provider: Cassandra
+  cassandra:
+    keyspace: avm_voi
+    replicationFactor: 1
+cassandra:
+  embedded:
+    enabled: true
+    hostPath: /mnt/nvme1/avm-balance-indexer/voi
+ingress:
+  enabled: true
+  host: voi.balance-indexer.biatec.io
+  tls:
+    enabled: true
+    clusterIssuer: letsencrypt-prod
 api:
-  replicaCount: 3
+  replicaCount: 2

@@ -1,11 +1,24 @@
+# Release "mainnet" in namespace avm-balance-indexer (see deploy/README.md).
 chain: algorand-mainnet
 storage:
-  provider: PostgreSql
-  postgreSql:
-    existingSecret: avm-algorand-postgres
+  provider: Cassandra
+  cassandra:
+    keyspace: avm_mainnet
+    replicationFactor: 1
+cassandra:
+  embedded:
+    enabled: true
+    hostPath: /mnt/nvme1/avm-balance-indexer/mainnet
+    maxHeapSize: 8G
+    heapNewSize: 1600M
+    resources:
+      requests: { cpu: "2", memory: 10Gi }
+      limits: { memory: 12Gi }
+ingress:
+  enabled: true
+  host: mainnet.balance-indexer.biatec.io
+  tls:
+    enabled: true
+    clusterIssuer: letsencrypt-prod
 api:
-  replicaCount: 3
-worker:
-  resources:
-    requests: { cpu: "1", memory: 1Gi }
-    limits: { cpu: "4", memory: 4Gi }
+  replicaCount: 2

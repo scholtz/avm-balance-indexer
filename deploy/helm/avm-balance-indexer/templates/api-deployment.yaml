@@ -16,6 +16,9 @@ spec:
       labels: {{- include "avm.labels" . | nindent 8 }}
         app.kubernetes.io/component: api
     spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: api
           image: {{ include "avm.image" (merge (dict "component" "api") .) }}
