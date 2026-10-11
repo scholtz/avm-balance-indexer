@@ -209,11 +209,10 @@ public abstract class StorageContractTests
         var asset = TokenKey.Asa(7);
         var holder = TestChain.Account(50);
         var other = TestChain.Account(51);
-        var ids = new[] { 0UL, 1UL, 2UL, 3UL };
         TokenEffect AssetEffect(ulong round, int ordinal, Address who, EffectType type, long delta, ulong after) =>
-            new(new EffectId(round, 1, round == 0 ? string.Empty : $"TX{round}", [], ordinal), who, asset, type, delta, Amount.From(after), null);
+            new(new EffectId(round, 1, $"TX{round}", [], ordinal), who, asset, type, delta, Amount.From(after), null);
 
-        // round 1: both opt in; round 2: holder receives 5; round 3: holder returns them and opts out.
+        // round 1: both opt in; round 2: holder receives 5; round 3: holder returns them and opts out; round 4: opts in again.
         await storage.WriteRoundAsync(new ChainStatus(ChainId.AlgorandTestnet, 0, TestChain.FakeHash(0), null, IngestionState.Bootstrapping, DateTimeOffset.UnixEpoch), [], CancellationToken.None);
         await storage.WriteRoundAsync(
             Status(1),
@@ -221,8 +220,11 @@ public abstract class StorageContractTests
             CancellationToken.None);
         await storage.WriteRoundAsync(Status(2), [AssetEffect(2, 0, holder, EffectType.AssetTransfer, 5, 5)], CancellationToken.None);
         await storage.WriteRoundAsync(Status(3), [AssetEffect(3, 0, holder, EffectType.AssetOptOut, -5, 0)], CancellationToken.None);
+        var optedOutNow = await storage.GetHoldersAtRoundAsync(asset, 3, true, null, 10, CancellationToken.None);
+        Assert.False(optedOutNow.Items.Single(h => h.Account == holder).OptedIn);
+        await storage.WriteRoundAsync(Status(4), [AssetEffect(4, 0, holder, EffectType.AssetOptIn, 0, 0)], CancellationToken.None);
 
-        foreach (var round in ids)
+        foreach (var round in new[] { 0UL, 1UL, 2UL, 3UL, 4UL })
         {
             var holders = await storage.GetHoldersAtRoundAsync(asset, round, true, null, 10, CancellationToken.None);
             var byAccount = holders.Items.ToDictionary(static h => h.Account);
@@ -232,13 +234,12 @@ public abstract class StorageContractTests
                 continue;
             }
 
-            var expected = round == 3 ? false : true;
-            Assert.Equal(expected, byAccount[holder].OptedIn);
+            Assert.Equal(round != 3, byAccount[holder].OptedIn);
             Assert.True(byAccount[other].OptedIn);
         }
 
         var current = await storage.GetHoldingsAsync(holder, true, null, 10, CancellationToken.None);
-        Assert.False(Assert.Single(current.Items, h => h.Token == asset).OptedIn);
+        Assert.True(Assert.Single(current.Items, h => h.Token == asset).OptedIn);
 
         ChainStatus Status(ulong round) => new(ChainId.AlgorandTestnet, round, TestChain.FakeHash(round), null, IngestionState.Following, DateTimeOffset.UnixEpoch);
     }

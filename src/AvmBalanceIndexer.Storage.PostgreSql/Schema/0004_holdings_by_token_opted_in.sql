@@ -15,3 +15,9 @@ BEGIN
   END IF;
 END
 $$;
+
+-- Databases created before the table existed: fill it once from the account-oriented table.
+INSERT INTO holdings_by_token (token_kind, token_id, account, amount, last_changed_round, opted_in)
+SELECT h.token_kind, h.token_id, h.account, h.amount, h.last_changed_round, h.opted_in
+FROM holdings_by_account h
+WHERE NOT EXISTS (SELECT 1 FROM holdings_by_token);

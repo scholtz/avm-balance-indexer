@@ -255,7 +255,7 @@ public sealed partial class PostgreSqlChainStorage
         // page, which is the page size plus any zero-balance accounts skipped when zero balances are excluded.
         await using var command = new NpgsqlCommand(
             """
-            SELECT t.account, COALESCE(b.balance_after, 0), COALESCE(b.round, t.first_round), COALESCE(b.effect_type <> 'AssetOptOut', true)
+            SELECT t.account, COALESCE(b.balance_after, 0), COALESCE(b.round, t.first_round), COALESCE(b.effect_type <> @optout, true)
             FROM accounts_touched_by_token t
             LEFT JOIN LATERAL (
                 SELECT e.balance_after, e.round, e.effect_type
@@ -276,6 +276,7 @@ public sealed partial class PostgreSqlChainStorage
         command.Parameters.AddWithValue("id", StorageId(token.TokenId));
         command.Parameters.AddWithValue("after", after);
         command.Parameters.AddWithValue("includeZero", includeZero);
+        command.Parameters.AddWithValue("optout", EffectType.AssetOptOut.ToString());
         command.Parameters.AddWithValue("limit", pageSize + 1);
 
         var items = new List<Holding>();

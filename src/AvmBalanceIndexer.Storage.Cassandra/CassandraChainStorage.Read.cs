@@ -328,12 +328,13 @@ public sealed partial class CassandraChainStorage
                 {
                     var account = new Address(row.GetValue<byte[]>("account"));
                     var last = (ulong)row.GetValue<long>("last_changed_round");
-                    if (last <= indexed)
+                    if (last <= indexed && !row.IsNull("opted_in"))
                     {
-                        return new Holding(account, token, Amount.Parse(row.GetValue<string>("amount")), row.IsNull("opted_in") || row.GetValue<bool>("opted_in"), last);
+                        return new Holding(account, token, Amount.Parse(row.GetValue<string>("amount")), row.GetValue<bool>("opted_in"), last);
                     }
 
-                    // Written by a round that is not published (crashed or losing writer): the effect history decides.
+                    // Written by a round that is not published (crashed or losing writer), or before the opt-in column existed: the
+                    // effect history decides.
                     return await LatestEffectAtOrBeforeAsync(account, token, indexed, cancellationToken).ConfigureAwait(false) is { } latest
                         ? new Holding(account, token, latest.Balance, latest.Type != EffectType.AssetOptOut, latest.Round)
                         : null;

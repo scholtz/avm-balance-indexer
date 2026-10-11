@@ -10,8 +10,4 @@ CREATE TABLE IF NOT EXISTS holdings_by_token (
   PRIMARY KEY (token_kind, token_id, account)
 );
 
--- Databases created before this table existed: fill it once from the account-oriented table.
-INSERT INTO holdings_by_token (token_kind, token_id, account, amount, last_changed_round)
-SELECT h.token_kind, h.token_id, h.account, h.amount, h.last_changed_round
-FROM holdings_by_account h
-WHERE NOT EXISTS (SELECT 1 FROM holdings_by_token);
+-- The backfill of databases that predate this table is in 0003, once the opt-in column exists.

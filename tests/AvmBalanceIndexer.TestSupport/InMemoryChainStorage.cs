@@ -212,7 +212,7 @@ public partial class InMemoryChainStorage(ChainContext context) : IChainStorage
                     x.Account,
                     x.Effects[0].Token,
                     new Amount(x.Effects.Aggregate(BigInteger.Zero, static (sum, e) => sum + e.Delta)),
-                    x.Effects[^1].Type != EffectType.AssetOptOut,
+                    x.Effects.MaxBy(static e => (e.Id.Round, e.Id.IntraRoundOrder, e.Id.Ordinal))!.Type != EffectType.AssetOptOut,
                     x.Effects.Max(static e => e.Id.Round)))
                 .Where(h => includeZero || !h.Amount.IsZero)
                 .Where(h => h.Account.Bytes.SequenceCompareTo(after) > 0)
