@@ -151,6 +151,14 @@ public sealed partial class CassandraChainStorage : IChainStorage
     private static async Task RunBoundedAsync<TItem>(IReadOnlyCollection<TItem> items, Func<TItem, Task> work, CancellationToken cancellationToken) =>
         await RunBoundedAsync<TItem, bool>(items, async item => { await work(item).ConfigureAwait(false); return true; }, cancellationToken).ConfigureAwait(false);
 
+    /// <summary>
+    /// True for the errors Cassandra raises while the keyspace or its tables do not exist yet. Other invalid-query errors
+    /// (a bad column, a syntax error) are programming or configuration faults and must stay loud.
+    /// </summary>
+    private static bool IsMissingSchema(InvalidQueryException ex) =>
+        ex.Message.Contains("does not exist", StringComparison.OrdinalIgnoreCase)
+        || ex.Message.Contains("unconfigured", StringComparison.OrdinalIgnoreCase);
+
     private void EnsureChain(string chain)
     {
         if (!string.Equals(chain, _chain, StringComparison.Ordinal))

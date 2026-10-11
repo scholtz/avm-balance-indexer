@@ -25,7 +25,9 @@ the same contract suite (`StorageContractTests`) as PostgreSQL.
   that had no holding row, then holdings. A holding row therefore implies its touched row, which keeps `first_round`
   correct across a crash and replay without a read-modify-write.
 - **Holdings are a cache of the effect history.** They are written with `USING TIMESTAMP = round + 1`, so a stale
-  writer replaying an older round can never overwrite a newer round. A holding whose `last_changed_round` is beyond the
+  writer replaying an older round can never overwrite a newer round. This relies on this writer being the only one that
+  ever touches the table: a default-timestamp write or delete by a tool would carry a timestamp far above any round and
+  win over every later round write, so operators must not modify `holdings_by_account` by hand (rebuild by replay). A holding whose `last_changed_round` is beyond the
   published round (left by a crashed or losing writer) is ignored and resolved from the effect history instead, so the
   balance tracker never builds on an unpublished balance.
 - **Query tables** (`Schema/0001_initial.cql`): `effects_by_account_token_bucket` (account history and "latest effect
@@ -34,7 +36,9 @@ the same contract suite (`StorageContractTests`) as PostgreSQL.
   lookup skips empty ones), `effects_by_token_bucket` and `accounts_touched_by_token` (both sharded by an FNV hash of
   the account into 16 shards, fixed in the on-disk layout like `RoundBuckets.Size`).
 - **Holders at a round** scan the 16 touched-account shards lazily in account order, look up each account's latest
-  balance at or before the round, and merge the shards, so the cost follows the page size and not the holder count.
+  balance at or before the round, and merge the shards. The cost follows the page size when most accounts predate the
+  round; accounts that first appeared later are skipped after being read, exactly as in the PostgreSQL provider, so a
+  very early round on a token with many later accounts scans more.
   Cursors are identical to PostgreSQL's (hex account, `round:order:ordinal`, `kind:id`).
 - Optional columns (`counterparty`, `inner_path`) are left out of the insert instead of bound to null, because a null
   cell is a tombstone and about every other effect has no counterparty.
@@ -51,6 +55,9 @@ the same contract suite (`StorageContractTests`) as PostgreSQL.
 - `GetHoldingsAsync` filters zero balances in the client (amounts are text), so a page can cost several partition reads
   for an account with many zero-balance opt-ins.
 - Fee sink and rewards pool remain hot partitions (see ADR 0002); the 100,000-round bucket and the shard count need
-  load testing before MainNet.
+  load testing before MainNet. `effects_by_token_bucket` is written for the streaming holder aggregation of #22 and has no
+  reader yet; PostgreSQL writes its twin for the same reason.
+- The cursor is read at `LOCAL_SERIAL` only by the writer; API reads use `LOCAL_QUORUM` (a publication is committed at
+  `LOCAL_QUORUM` before it is acknowledged), so API load does not run Paxos rounds on the hot cursor partition.
 - Concurrent schema changes from several pods rely on `IF NOT EXISTS` and the driver's schema agreement wait; run the
   schema step from a single pod (the worker) as with PostgreSQL.

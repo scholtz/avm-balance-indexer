@@ -83,8 +83,8 @@ curl http://localhost:5000/v1/algorand-testnet/status
 | `Storage:PostgreSql:AccountHashPartitions` | Hash partitions of the account effect table, 1 to 1024. Fixed per database. |
 | `Storage:Cassandra:ContactPoints` / `Port` | Required for Cassandra: hosts and native-protocol port (default 9042). |
 | `Storage:Cassandra:Keyspace` / `LocalDatacenter` | One keyspace per chain deployment; the datacenter the driver routes to. Reads and writes use `LOCAL_QUORUM`. |
-| `Storage:Cassandra:CreateKeyspace` / `ReplicationFactor` | Let the worker create the keyspace (`NetworkTopologyStrategy`, default 3 replicas). Set `CreateKeyspace` to false when the operator manages it. |
-| `Storage:Cassandra:Username` / `Password` | Optional credentials. Keep them in a secret. |
+| `Storage:Cassandra:CreateKeyspace` / `ReplicationFactor` | Let the worker create the keyspace (`NetworkTopologyStrategy`, default 3 replicas). Use `ReplicationFactor` 1 on a single-node dev cluster (reads and writes need a `LOCAL_QUORUM`). Set `CreateKeyspace` to false when the operator manages it. |
+| `Storage:Cassandra:Username` / `Password` / `UseTls` | Optional credentials (keep them in a secret) and TLS. Without `UseTls` credentials travel in clear text. |
 | `Algorand:AlgodUrl` / `AlgodToken` | Algod node for the latest round and genesis. Defaults to a public endpoint. |
 | `Algorand:GossipHosts` | Archival gossip node URLs. Empty discovers them through DNS SRV. Use your own nodes in production. |
 | `Algorand:ExpectedGenesisHash` | Base64 genesis hash. Pinned for Algorand MainNet, TestNet and Voi; set it only for another network. |

@@ -19,12 +19,18 @@ public sealed partial class CassandraChainStorage
         }
 
         // The driver waits for schema agreement after every DDL statement.
-        session.ChangeKeyspace(_keyspace);
         foreach (var statement in ReadEmbeddedStatements())
         {
-            await session.ExecuteAsync(new SimpleStatement(statement)).WaitAsync(cancellationToken).ConfigureAwait(false);
+            await session.ExecuteAsync(new SimpleStatement(QualifyTables(statement))).WaitAsync(cancellationToken).ConfigureAwait(false);
         }
     }
+
+    /// <summary>Puts the keyspace in front of every created table so the DDL does not depend on the session's current keyspace.</summary>
+    private string QualifyTables(string statement) =>
+        System.Text.RegularExpressions.Regex.Replace(
+            statement,
+            @"^CREATE TABLE IF NOT EXISTS (\w+)",
+            $"CREATE TABLE IF NOT EXISTS {_keyspace}.$1");
 
     private static IEnumerable<string> ReadEmbeddedStatements()
     {

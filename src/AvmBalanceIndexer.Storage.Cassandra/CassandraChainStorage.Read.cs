@@ -21,11 +21,9 @@ public sealed partial class CassandraChainStorage
                 $"SELECT indexed_round, indexed_block_hash, target_round, status, updated_at FROM {Table("chain_status")} WHERE chain = ?",
                 cancellationToken,
                 chain).ConfigureAwait(false);
-            // SERIAL so that a cursor published by a lightweight transaction is never read stale.
-            statement.SetConsistencyLevel(ConsistencyLevel.LocalSerial);
             rows = await ExecuteAsync(statement, cancellationToken).ConfigureAwait(false);
         }
-        catch (InvalidQueryException)
+        catch (InvalidQueryException ex) when (IsMissingSchema(ex))
         {
             // The worker creates the keyspace and tables; until it has, nothing is indexed.
             return null;
@@ -518,9 +516,9 @@ public sealed partial class CassandraChainStorage
     {
         try
         {
-            return (await ReadCursorAsync(cancellationToken).ConfigureAwait(false))?.Round;
+            return (await ReadCursorAsync(serial: false, cancellationToken).ConfigureAwait(false))?.Round;
         }
-        catch (InvalidQueryException)
+        catch (InvalidQueryException ex) when (IsMissingSchema(ex))
         {
             // The worker has not created the keyspace or tables yet.
             return null;

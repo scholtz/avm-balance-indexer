@@ -33,7 +33,7 @@ public sealed partial class CassandraChainStorage
             }
         }
 
-        var published = await ReadCursorAsync(cancellationToken).ConfigureAwait(false);
+        var published = await ReadCursorAsync(serial: true, cancellationToken).ConfigureAwait(false);
         if (published is null)
         {
             if (round != 0)
@@ -80,11 +80,14 @@ public sealed partial class CassandraChainStorage
         // Accounts without a holding row have never been touched in this token; they get their first_round recorded.
         // Read before anything is written: a replay after a crash must see the same answer.
         var keys = latest.Keys.ToArray();
-        var known = await RunBoundedAsync(
+        var previous = await RunBoundedAsync(
             keys,
-            key => HoldingExistsAsync(key, cancellationToken),
+            key => HoldingRoundAsync(key, cancellationToken),
             cancellationToken).ConfigureAwait(false);
-        var firstTimers = keys.Where((_, i) => !known[i]).ToArray();
+        var firstTimers = keys.Where((_, i) => previous[i] is null).ToArray();
+
+        // The bucket index only changes when an account moves into a new bucket (about once per 100,000 rounds).
+        var newBuckets = keys.Where((_, i) => previous[i] is not { } last || RoundBuckets.ForRound(last) != bucket).ToArray();
 
         // Order matters for crash recovery: a holding row is written last, so every holding implies its touched row.
         var insertTokenEffect = $"""
@@ -120,7 +123,7 @@ public sealed partial class CassandraChainStorage
                 delta));
         }
 
-        foreach (var key in keys)
+        foreach (var key in newBuckets)
         {
             var keyCopy = key;
             statements.Add(() => ExecuteAsync(
@@ -208,7 +211,8 @@ public sealed partial class CassandraChainStorage
         return ExecuteAsync($"INSERT INTO {Table("effects_by_account_token_bucket")} ({columns}) VALUES ({markers})", cancellationToken, [.. values]);
     }
 
-    private async Task<bool> HoldingExistsAsync(HoldingKey key, CancellationToken cancellationToken)
+    /// <summary>Round of the last write to the holding row, or null when the account never held the token.</summary>
+    private async Task<ulong?> HoldingRoundAsync(HoldingKey key, CancellationToken cancellationToken)
     {
         var rows = await ExecuteAsync(
             $"SELECT last_changed_round FROM {Table("holdings_by_account")} WHERE account = ? AND token_kind = ? AND token_id = ?",
@@ -216,7 +220,7 @@ public sealed partial class CassandraChainStorage
             key.Account.ToArray(),
             key.Token.Kind.ToStorageName(),
             StorageId(key.Token.TokenId)).ConfigureAwait(false);
-        return rows.FirstOrDefault() is not null;
+        return rows.FirstOrDefault() is { } row ? (ulong)row.GetValue<long>("last_changed_round") : null;
     }
 
     /// <summary>
@@ -268,13 +272,22 @@ public sealed partial class CassandraChainStorage
         }
     }
 
-    private async Task<(ulong Round, byte[] Hash)?> ReadCursorAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// The writer reads the cursor with SERIAL so it completes any lightweight transaction still in flight. Readers use
+    /// LOCAL_QUORUM instead: a publication is committed at LOCAL_QUORUM before it is acknowledged, so a quorum read after
+    /// it sees it, and the hot cursor partition is not hit with a Paxos round per API request.
+    /// </summary>
+    private async Task<(ulong Round, byte[] Hash)?> ReadCursorAsync(bool serial, CancellationToken cancellationToken)
     {
         var statement = await BindAsync(
             $"SELECT indexed_round, indexed_block_hash FROM {Table("chain_status")} WHERE chain = ?",
             cancellationToken,
             _chain).ConfigureAwait(false);
-        statement.SetConsistencyLevel(ConsistencyLevel.LocalSerial);
+        if (serial)
+        {
+            statement.SetConsistencyLevel(ConsistencyLevel.LocalSerial);
+        }
+
         var row = (await ExecuteAsync(statement, cancellationToken).ConfigureAwait(false)).FirstOrDefault();
         return row is null ? null : ((ulong)row.GetValue<long>("indexed_round"), row.GetValue<byte[]>("indexed_block_hash"));
     }
