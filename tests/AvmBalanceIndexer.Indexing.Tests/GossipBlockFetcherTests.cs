@@ -68,7 +68,7 @@ public class GossipBlockFetcherTests
             {
                 var host = request.RequestUri!.Host;
                 served.AddOrUpdate(host, 1, static (_, n) => n + 1);
-                await Task.Delay(host == "slow.test" ? 80 : 5, token);
+                await Task.Delay(host == "slow.test" ? 200 : 5, token);
                 return Ok(Chain.Encode(7, []));
             },
             hosts: ["http://slow.test:4160", "http://fast.test:4160"]);
@@ -78,7 +78,7 @@ public class GossipBlockFetcherTests
             await fetcher.FetchBlockAsync(7, CancellationToken.None);
         }
 
-        Assert.True(served["fast.test"] >= 60, $"fast {served["fast.test"]}, slow {served.GetValueOrDefault("slow.test")}");
+        Assert.True(served["fast.test"] >= 68, $"fast {served["fast.test"]}, slow {served.GetValueOrDefault("slow.test")}");
     }
 
     [Fact]
