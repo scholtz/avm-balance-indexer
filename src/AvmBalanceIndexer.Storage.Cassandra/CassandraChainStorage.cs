@@ -30,6 +30,7 @@ public sealed partial class CassandraChainStorage : IChainStorage
     private readonly string _localDatacenter;
     private readonly int _replicationFactor;
     private readonly bool _createKeyspace;
+    private readonly TimeSpan _readDeadline;
     private readonly ConcurrentDictionary<string, Task<PreparedStatement>> _prepared = new();
     private readonly object _cursorLock = new();
     private (ulong Round, byte[] Hash)? _lastPublished;
@@ -40,9 +41,12 @@ public sealed partial class CassandraChainStorage : IChainStorage
         set { lock (_cursorLock) { _lastPublished = value; } }
     }
 
-    public CassandraChainStorage(CassandraSessionSource source, ChainContext chain, CassandraOptions options)
+    public CassandraChainStorage(CassandraSessionSource source, ChainContext chain, CassandraOptions options, TimeSpan? readDeadline = null)
     {
         ArgumentNullException.ThrowIfNull(options);
+        _readDeadline = (readDeadline ?? TimeSpan.FromSeconds(options.ReadTimeoutSeconds)) is { } deadline && deadline >= TimeSpan.Zero
+            ? deadline
+            : throw new ArgumentOutOfRangeException(nameof(readDeadline), "The read deadline must not be negative.");
         _source = source ?? throw new ArgumentNullException(nameof(source));
         _chain = chain?.Chain ?? throw new ArgumentNullException(nameof(chain));
         _keyspace = CassandraOptionsValidator.IsValidIdentifier(options.Keyspace)

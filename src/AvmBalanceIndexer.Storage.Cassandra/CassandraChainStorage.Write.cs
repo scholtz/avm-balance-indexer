@@ -160,19 +160,37 @@ public sealed partial class CassandraChainStorage
             INSERT INTO {Table("holdings_by_account")} (account, token_kind, token_id, amount, opted_in, last_changed_round)
             VALUES (?, ?, ?, ?, ?, ?) USING TIMESTAMP ?
             """;
+        var upsertByToken = $"""
+            INSERT INTO {Table("holdings_by_token")} (token_kind, token_id, shard, account, amount, last_changed_round)
+            VALUES (?, ?, ?, ?, ?, ?) USING TIMESTAMP ?
+            """;
         var timestamp = unchecked((long)round) + 1;
         await RunBoundedAsync(
             latest.Values.ToArray(),
-            effect => ExecuteAsync(
-                upsertHolding,
-                cancellationToken,
-                effect.Account.ToArray(),
-                effect.Token.Kind.ToStorageName(),
-                StorageId(effect.Token.TokenId),
-                effect.BalanceAfter.ToString(),
-                effect.Type != EffectType.AssetOptOut,
-                roundValue,
-                timestamp),
+            async effect =>
+            {
+                // One after the other, so the in-flight bound stays the number of accounts being written.
+                await ExecuteAsync(
+                    upsertHolding,
+                    cancellationToken,
+                    effect.Account.ToArray(),
+                    effect.Token.Kind.ToStorageName(),
+                    StorageId(effect.Token.TokenId),
+                    effect.BalanceAfter.ToString(),
+                    effect.Type != EffectType.AssetOptOut,
+                    roundValue,
+                    timestamp).ConfigureAwait(false);
+                await ExecuteAsync(
+                    upsertByToken,
+                    cancellationToken,
+                    effect.Token.Kind.ToStorageName(),
+                    StorageId(effect.Token.TokenId),
+                    ShardOf(effect.Account),
+                    effect.Account.ToArray(),
+                    effect.BalanceAfter.ToString(),
+                    roundValue,
+                    timestamp).ConfigureAwait(false);
+            },
             cancellationToken).ConfigureAwait(false);
     }
 

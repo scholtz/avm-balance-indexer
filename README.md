@@ -82,6 +82,7 @@ curl http://localhost:5000/v1/algorand-testnet/status
 | `Storage:Provider` | `PostgreSql` or `Cassandra`. Only the selected provider is opened. |
 | `Storage:PostgreSql:ConnectionString` | Required for PostgreSQL. Keep it in a secret. |
 | `Storage:PostgreSql:AccountHashPartitions` | Hash partitions of the account effect table, 1 to 1024. Fixed per database. |
+| `Storage:PostgreSql:ReadTimeoutSeconds` / `Storage:Cassandra:ReadTimeoutSeconds` | Default 30. PostgreSQL: `statement_timeout` of each read query. Cassandra: deadline of a whole read and driver timeout of every request (at least 5). A slower read fails with HTTP 503 instead of holding a snapshot. |
 | `Storage:Cassandra:ContactPoints` / `Port` | Required for Cassandra: hosts and native-protocol port (default 9042). |
 | `Storage:Cassandra:Keyspace` / `LocalDatacenter` | One keyspace per chain deployment; the datacenter the driver routes to. Reads and writes use `LOCAL_QUORUM`. |
 | `Storage:Cassandra:CreateKeyspace` / `ReplicationFactor` | Let the worker create the keyspace (`NetworkTopologyStrategy`, default 3 replicas). Use `ReplicationFactor` 1 on a single-node dev cluster (reads and writes need a `LOCAL_QUORUM`). Set `CreateKeyspace` to false when the operator manages it. |
@@ -125,8 +126,9 @@ another chain, 503 while nothing is indexed yet. A walk over the holders of the 
 
 ## Known limitations
 
-- Holder queries read each holder's latest balance from its own history, one index lookup per account, so a page is cheap
-  but listing every holder of a huge token is still a long walk. Asynchronous scans are planned (#22).
+- Holders at the latest round are one ordered index scan. Holders at an older round read each holder's latest balance from its
+  own history, one lookup per account, so a page is cheap but a huge token at a past round can exceed the read timeout
+  (HTTP 503). Asynchronous scans are planned (#30).
 - Indexing speed is about 60 rounds per second with default settings, which is far too slow to backfill MainNet in a
   reasonable time. Batching and fetch tuning are follow-up work.
 - Only one worker may run per chain. There is no leader election yet.

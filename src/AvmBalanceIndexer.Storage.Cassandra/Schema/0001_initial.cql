@@ -45,6 +45,17 @@ CREATE TABLE IF NOT EXISTS holdings_by_account (
   PRIMARY KEY ((account), token_kind, token_id)
 );
 
+-- Current holdings by token, sharded by account like the other token oriented tables. Also written with USING TIMESTAMP = round.
+CREATE TABLE IF NOT EXISTS holdings_by_token (
+  token_kind text,
+  token_id bigint,
+  shard smallint,
+  account blob,
+  amount text,
+  last_changed_round bigint,
+  PRIMARY KEY ((token_kind, token_id, shard), account)
+);
+
 -- Account history and the source of "latest effect at or before round R". Newest first.
 CREATE TABLE IF NOT EXISTS effects_by_account_token_bucket (
   account blob,

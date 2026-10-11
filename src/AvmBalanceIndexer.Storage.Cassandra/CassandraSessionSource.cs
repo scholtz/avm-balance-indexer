@@ -77,7 +77,7 @@ public sealed class CassandraSessionSource : IAsyncDisposable
             .WithPort(options.Port)
             .WithQueryOptions(new QueryOptions().SetConsistencyLevel(ConsistencyLevel.LocalQuorum).SetPageSize(1_100))
             .WithLoadBalancingPolicy(new TokenAwarePolicy(new DCAwareRoundRobinPolicy(options.LocalDatacenter)))
-            .WithSocketOptions(new SocketOptions().SetReadTimeoutMillis(30_000));
+            .WithSocketOptions(new SocketOptions().SetReadTimeoutMillis(checked(options.ReadTimeoutSeconds * 1000)));
         if (options.UseTls)
         {
             builder = builder.WithSSL();

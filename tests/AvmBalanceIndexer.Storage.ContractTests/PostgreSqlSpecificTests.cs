@@ -225,11 +225,60 @@ public class PostgreSqlSpecificTests(PostgresFixture postgres)
     }
 
     [Fact]
+    public async Task A_Database_Created_Before_The_Token_Index_Existed_Is_Backfilled_On_Schema_Apply()
+    {
+        var storage = await postgres.CreateStorageAsync();
+        var account = TestChain.Account(1);
+        await storage.WriteRoundAsync(
+            new ChainStatus(ChainId.AlgorandTestnet, 0, TestChain.FakeHash(0), null, IngestionState.Bootstrapping, DateTimeOffset.UnixEpoch),
+            [Effect(0, 0, "a", account, 5, 5)],
+            CancellationToken.None);
+        await using (var command = postgres.DataSourceOf(storage).CreateCommand("DROP TABLE holdings_by_token"))
+        {
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await storage.EnsureSchemaAsync(CancellationToken.None);
+
+        var holders = await storage.GetHoldersAtRoundAsync(Native, 0, false, null, 10, CancellationToken.None);
+        Assert.Equal(5UL, (ulong)Assert.Single(holders.Items).Amount.Value);
+    }
+
+    [Fact]
+    public async Task A_Read_That_Exceeds_The_Timeout_Is_A_Storage_Timeout_Not_A_Hang()
+    {
+        var storage = await postgres.CreateStorageAsync(readTimeout: TimeSpan.FromMilliseconds(300));
+        await storage.WriteRoundAsync(
+            new ChainStatus(ChainId.AlgorandTestnet, 0, TestChain.FakeHash(0), null, IngestionState.Bootstrapping, DateTimeOffset.UnixEpoch),
+            [Effect(0, 0, "a", TestChain.Account(1), 5, 5)],
+            CancellationToken.None);
+
+        // A writer holding the table makes the holder scan wait, which is what a scan that is too large looks like to the client.
+        await using var blocker = await postgres.DataSourceOf(storage).OpenConnectionAsync();
+        await using var transaction = await blocker.BeginTransactionAsync();
+        await using (var lockCommand = new NpgsqlCommand("LOCK TABLE holdings_by_token IN ACCESS EXCLUSIVE MODE", blocker, transaction))
+        {
+            await lockCommand.ExecuteNonQueryAsync();
+        }
+
+        await Assert.ThrowsAsync<StorageTimeoutException>(() => storage.GetHoldersAtRoundAsync(Native, 0, false, null, 10, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task A_Storage_Bound_To_One_Chain_Rejects_Another()
     {
         var storage = await postgres.CreateStorageAsync();
 
         await Assert.ThrowsAsync<ArgumentException>(() => storage.GetAsync(ChainId.Voi, CancellationToken.None));
+    }
+
+    [Fact]
+    public void The_Read_Timeout_Must_Be_Positive()
+    {
+        using var dataSource = NpgsqlDataSource.Create("Host=localhost");
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => new AvmBalanceIndexer.Storage.PostgreSql.PostgreSqlChainStorage(dataSource, new ChainContext(ChainId.Voi), 4, TimeSpan.Zero));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new AvmBalanceIndexer.Storage.PostgreSql.PostgreSqlChainStorage(dataSource, new ChainContext(ChainId.Voi), 4, TimeSpan.FromSeconds(-1)));
     }
 
     [Fact]
