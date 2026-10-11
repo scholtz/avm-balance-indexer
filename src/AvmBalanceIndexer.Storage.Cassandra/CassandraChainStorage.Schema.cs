@@ -28,7 +28,7 @@ public sealed partial class CassandraChainStorage
         // The driver waits for schema agreement after every DDL statement.
         foreach (var statement in ReadEmbeddedStatements())
         {
-            await session.ExecuteAsync(new SimpleStatement(QualifyTables(statement))).WaitAsync(cancellationToken).ConfigureAwait(false);
+            await session.ExecuteAsync(new SimpleStatement(Qualify(statement))).WaitAsync(cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -37,11 +37,23 @@ public sealed partial class CassandraChainStorage
         var rows = await session.ExecuteAsync(new SimpleStatement("SELECT table_name FROM system_schema.tables WHERE keyspace_name = ?", _keyspace))
             .WaitAsync(cancellationToken).ConfigureAwait(false);
         var existing = rows.Select(static row => row.GetValue<string>("table_name")).ToHashSet(StringComparer.Ordinal);
-        var expected = ReadEmbeddedStatements()
+        var statements = ReadEmbeddedStatements().ToArray();
+        var expectedTables = statements
             .Select(static statement => System.Text.RegularExpressions.Regex.Match(statement, @"^CREATE TABLE IF NOT EXISTS (\w+)"))
             .Where(static match => match.Success)
             .Select(static match => match.Groups[1].Value);
-        return expected.All(existing.Contains);
+        if (!expectedTables.All(existing.Contains))
+        {
+            return false;
+        }
+
+        var columnRows = await session.ExecuteAsync(new SimpleStatement("SELECT table_name, column_name FROM system_schema.columns WHERE keyspace_name = ?", _keyspace))
+            .WaitAsync(cancellationToken).ConfigureAwait(false);
+        var columns = columnRows.Select(static row => (row.GetValue<string>("table_name"), row.GetValue<string>("column_name"))).ToHashSet();
+        return statements
+            .Select(static statement => System.Text.RegularExpressions.Regex.Match(statement, @"^ALTER TABLE (\w+) ADD (?:IF NOT EXISTS )?(\w+) "))
+            .Where(static match => match.Success)
+            .All(match => columns.Contains((match.Groups[1].Value, match.Groups[2].Value)));
     }
 
     /// <summary>Puts the keyspace in front of every created table so the DDL does not depend on the session's current keyspace.</summary>
@@ -50,6 +62,9 @@ public sealed partial class CassandraChainStorage
             statement,
             @"^CREATE TABLE IF NOT EXISTS (\w+)",
             $"CREATE TABLE IF NOT EXISTS {_keyspace}.$1");
+
+    private string Qualify(string statement) =>
+        System.Text.RegularExpressions.Regex.Replace(QualifyTables(statement), @"^ALTER TABLE (\w+)", $"ALTER TABLE {_keyspace}.$1");
 
     private static IEnumerable<string> ReadEmbeddedStatements()
     {

@@ -203,6 +203,48 @@ public abstract class StorageContractTests
     }
 
     [Fact]
+    public async Task Holders_Report_The_Opt_In_State_Of_The_Round_They_Are_Read_At()
+    {
+        var storage = await CreateStorageAsync();
+        var asset = TokenKey.Asa(7);
+        var holder = TestChain.Account(50);
+        var other = TestChain.Account(51);
+        TokenEffect AssetEffect(ulong round, int ordinal, Address who, EffectType type, long delta, ulong after) =>
+            new(new EffectId(round, 1, $"TX{round}", [], ordinal), who, asset, type, delta, Amount.From(after), null);
+
+        // round 1: both opt in; round 2: holder receives 5; round 3: holder returns them and opts out; round 4: opts in again.
+        await storage.WriteRoundAsync(new ChainStatus(ChainId.AlgorandTestnet, 0, TestChain.FakeHash(0), null, IngestionState.Bootstrapping, DateTimeOffset.UnixEpoch), [], CancellationToken.None);
+        await storage.WriteRoundAsync(
+            Status(1),
+            [AssetEffect(1, 0, holder, EffectType.AssetOptIn, 0, 0), AssetEffect(1, 1, other, EffectType.AssetOptIn, 0, 0)],
+            CancellationToken.None);
+        await storage.WriteRoundAsync(Status(2), [AssetEffect(2, 0, holder, EffectType.AssetTransfer, 5, 5)], CancellationToken.None);
+        await storage.WriteRoundAsync(Status(3), [AssetEffect(3, 0, holder, EffectType.AssetOptOut, -5, 0)], CancellationToken.None);
+        var optedOutNow = await storage.GetHoldersAtRoundAsync(asset, 3, true, null, 10, CancellationToken.None);
+        Assert.False(optedOutNow.Items.Single(h => h.Account == holder).OptedIn);
+        await storage.WriteRoundAsync(Status(4), [AssetEffect(4, 0, holder, EffectType.AssetOptIn, 0, 0)], CancellationToken.None);
+
+        foreach (var round in new[] { 0UL, 1UL, 2UL, 3UL, 4UL })
+        {
+            var holders = await storage.GetHoldersAtRoundAsync(asset, round, true, null, 10, CancellationToken.None);
+            var byAccount = holders.Items.ToDictionary(static h => h.Account);
+            if (round == 0)
+            {
+                Assert.Empty(byAccount);
+                continue;
+            }
+
+            Assert.Equal(round != 3, byAccount[holder].OptedIn);
+            Assert.True(byAccount[other].OptedIn);
+        }
+
+        var current = await storage.GetHoldingsAsync(holder, true, null, 10, CancellationToken.None);
+        Assert.True(Assert.Single(current.Items, h => h.Token == asset).OptedIn);
+
+        ChainStatus Status(ulong round) => new(ChainId.AlgorandTestnet, round, TestChain.FakeHash(round), null, IngestionState.Following, DateTimeOffset.UnixEpoch);
+    }
+
+    [Fact]
     public async Task The_Writer_Lease_Is_Exclusive_And_Free_Again_After_It_Is_Released()
     {
         var provider = Assert.IsAssignableFrom<IWriterLeaseProvider>(await CreateStorageAsync());

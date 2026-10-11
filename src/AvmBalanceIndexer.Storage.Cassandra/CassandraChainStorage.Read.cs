@@ -309,7 +309,7 @@ public sealed partial class CassandraChainStorage
         while (true)
         {
             var rows = (await ExecuteAsync(
-                $"SELECT account, amount, last_changed_round FROM {Table("holdings_by_token")} WHERE token_kind = ? AND token_id = ? AND shard = ? AND account > ? LIMIT ?",
+                $"SELECT account, amount, opted_in, last_changed_round FROM {Table("holdings_by_token")} WHERE token_kind = ? AND token_id = ? AND shard = ? AND account > ? LIMIT ?",
                 cancellationToken,
                 token.Kind.ToStorageName(),
                 StorageId(token.TokenId),
@@ -328,14 +328,15 @@ public sealed partial class CassandraChainStorage
                 {
                     var account = new Address(row.GetValue<byte[]>("account"));
                     var last = (ulong)row.GetValue<long>("last_changed_round");
-                    if (last <= indexed)
+                    if (last <= indexed && !row.IsNull("opted_in"))
                     {
-                        return new Holding(account, token, Amount.Parse(row.GetValue<string>("amount")), true, last);
+                        return new Holding(account, token, Amount.Parse(row.GetValue<string>("amount")), row.GetValue<bool>("opted_in"), last);
                     }
 
-                    // Written by a round that is not published (crashed or losing writer): the effect history decides.
+                    // Written by a round that is not published (crashed or losing writer), or before the opt-in column existed: the
+                    // effect history decides.
                     return await LatestEffectAtOrBeforeAsync(account, token, indexed, cancellationToken).ConfigureAwait(false) is { } latest
-                        ? new Holding(account, token, latest.Balance, true, latest.Round)
+                        ? new Holding(account, token, latest.Balance, latest.Type != EffectType.AssetOptOut, latest.Round)
                         : null;
                 },
                 cancellationToken,
@@ -396,7 +397,7 @@ public sealed partial class CassandraChainStorage
                 var balance = latest[i]?.Balance ?? Amount.Zero;
                 if (includeZero || !balance.IsZero)
                 {
-                    yield return new Holding(candidates[i].Account, token, balance, true, latest[i]?.Round ?? candidates[i].FirstRound);
+                    yield return new Holding(candidates[i].Account, token, balance, latest[i]?.Type != EffectType.AssetOptOut, latest[i]?.Round ?? candidates[i].FirstRound);
                 }
             }
 

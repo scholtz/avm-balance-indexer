@@ -181,11 +181,12 @@ public sealed partial class PostgreSqlChainStorage
 
         // The token-oriented copy is written with the same statement shape, in the same transaction.
         const string byTokenSql = """
-            INSERT INTO holdings_by_token (token_kind, token_id, account, amount, last_changed_round)
-            SELECT u.token_kind, u.token_id, u.account, u.amount::numeric, @round
-            FROM unnest(@account, @kind, @id, @amount) AS u(account, token_kind, token_id, amount)
+            INSERT INTO holdings_by_token (token_kind, token_id, account, amount, last_changed_round, opted_in)
+            SELECT u.token_kind, u.token_id, u.account, u.amount::numeric, @round, u.opted_in
+            FROM unnest(@account, @kind, @id, @amount, @optedin) AS u(account, token_kind, token_id, amount, opted_in)
             ON CONFLICT (token_kind, token_id, account) DO UPDATE
               SET amount = EXCLUDED.amount,
+                  opted_in = EXCLUDED.opted_in,
                   last_changed_round = EXCLUDED.last_changed_round
               WHERE holdings_by_token.last_changed_round <= EXCLUDED.last_changed_round
             """;
@@ -194,6 +195,7 @@ public sealed partial class PostgreSqlChainStorage
         var kinds = latest.Select(static e => e.Token.Kind.ToStorageName()).ToArray();
         var ids = latest.Select(static e => StorageId(e.Token.TokenId)).ToArray();
         var amounts = latest.Select(static e => e.BalanceAfter.ToString()).ToArray();
+        var optedIn = latest.Select(static e => e.Type != EffectType.AssetOptOut).ToArray();
 
         await using (var command = new NpgsqlCommand(sql, connection, transaction))
         {
@@ -202,7 +204,7 @@ public sealed partial class PostgreSqlChainStorage
             AddArray(command, "kind", NpgsqlDbType.Text, kinds);
             AddArray(command, "id", NpgsqlDbType.Bigint, ids);
             AddArray(command, "amount", NpgsqlDbType.Text, amounts);
-            AddArray(command, "optedin", NpgsqlDbType.Boolean, latest.Select(static e => e.Type != EffectType.AssetOptOut).ToArray());
+            AddArray(command, "optedin", NpgsqlDbType.Boolean, optedIn);
             await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
 
@@ -213,6 +215,7 @@ public sealed partial class PostgreSqlChainStorage
             AddArray(command, "kind", NpgsqlDbType.Text, kinds);
             AddArray(command, "id", NpgsqlDbType.Bigint, ids);
             AddArray(command, "amount", NpgsqlDbType.Text, amounts);
+            AddArray(command, "optedin", NpgsqlDbType.Boolean, optedIn);
             await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
     }

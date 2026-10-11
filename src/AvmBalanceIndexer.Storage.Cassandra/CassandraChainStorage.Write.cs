@@ -161,8 +161,8 @@ public sealed partial class CassandraChainStorage
             VALUES (?, ?, ?, ?, ?, ?) USING TIMESTAMP ?
             """;
         var upsertByToken = $"""
-            INSERT INTO {Table("holdings_by_token")} (token_kind, token_id, shard, account, amount, last_changed_round)
-            VALUES (?, ?, ?, ?, ?, ?) USING TIMESTAMP ?
+            INSERT INTO {Table("holdings_by_token")} (token_kind, token_id, shard, account, amount, opted_in, last_changed_round)
+            VALUES (?, ?, ?, ?, ?, ?, ?) USING TIMESTAMP ?
             """;
         var timestamp = unchecked((long)round) + 1;
         await RunBoundedAsync(
@@ -188,6 +188,7 @@ public sealed partial class CassandraChainStorage
                     ShardOf(effect.Account),
                     effect.Account.ToArray(),
                     effect.BalanceAfter.ToString(),
+                    effect.Type != EffectType.AssetOptOut,
                     roundValue,
                     timestamp).ConfigureAwait(false);
             },

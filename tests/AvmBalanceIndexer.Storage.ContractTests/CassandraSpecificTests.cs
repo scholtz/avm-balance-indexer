@@ -103,6 +103,31 @@ public class CassandraSpecificTests(CassandraFixture cassandra)
     }
 
     [Fact]
+    public async Task A_Keyspace_From_Before_The_Opt_In_Column_Is_Migrated_And_Old_Rows_Are_Resolved_From_The_History()
+    {
+        var storage = await cassandra.CreateStorageAsync();
+        var account = TestChain.Account(1);
+        var asset = TokenKey.Asa(9);
+        await storage.WriteRoundAsync(
+            Status(0, IngestionState.Bootstrapping),
+            [new TokenEffect(new EffectId(0, 0, string.Empty, [], 0), account, asset, EffectType.AssetOptOut, 0, Amount.Zero, null)],
+            CancellationToken.None);
+        var session = await cassandra.SessionOfAsync(storage);
+        var keyspace = cassandra.KeyspaceOf(storage);
+        await session.ExecuteAsync(new SimpleStatement($"ALTER TABLE {keyspace}.holdings_by_token DROP opted_in"));
+
+        await storage.EnsureSchemaAsync(CancellationToken.None);
+
+        // A row written by the previous version: no flag stored.
+        await session.ExecuteAsync(new SimpleStatement(
+            $"INSERT INTO {keyspace}.holdings_by_token (token_kind, token_id, shard, account, amount, last_changed_round) VALUES ('asa', 9, {AvmBalanceIndexer.Storage.Cassandra.CassandraChainStorage.ShardOf(account)}, ?, '0', 0)",
+            account.ToArray()));
+        var holders = await storage.GetHoldersAtRoundAsync(asset, 0, true, null, 10, CancellationToken.None);
+
+        Assert.False(Assert.Single(holders.Items).OptedIn);
+    }
+
+    [Fact]
     public async Task A_Lease_Another_Owner_Took_Is_Reported_Lost()
     {
         var storage = await cassandra.CreateStorageAsync(leaseTtl: TimeSpan.FromSeconds(3));
