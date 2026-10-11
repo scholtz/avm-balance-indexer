@@ -5,6 +5,9 @@
 {{- if not (or .Values.cassandra.embedded.node .Values.cassandra.embedded.nodeSelector) }}
 {{- fail "cassandra.embedded.node (or nodeSelector) is required: the data directory belongs to one machine, the pod must always run there" }}
 {{- end }}
+{{- if ne (int .Values.storage.cassandra.replicationFactor) 1 }}
+{{- fail "the embedded single-node Cassandra needs storage.cassandra.replicationFactor=1" }}
+{{- end }}
 {{- $data := required "cassandra.embedded.hostPath is required (directory on the node that keeps the data)" .Values.cassandra.embedded.hostPath }}
 apiVersion: v1
 kind: Service

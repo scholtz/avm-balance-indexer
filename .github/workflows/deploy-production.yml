@@ -7,14 +7,14 @@ name: Deploy production
 
 on:
   push:
-    tags: ["v*.*.*"]
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
   workflow_dispatch:
     inputs:
       image-tag:
         description: Existing image tag to deploy (for example v1.2.3 or main-abc1234)
         required: true
       ref:
-        description: Commit or tag whose chart and values are used (default is the tag itself, or main)
+        description: Commit or tag of main whose chart and values are used (default is the image tag, which then has to be a git tag)
         default: ""
 
 permissions:
@@ -54,6 +54,7 @@ jobs:
             # The chart and values of a rollback must match the image: say which commit (or tag) they come from.
             [ -n "$REQUESTED" ] || REQUESTED="$IMAGE_TAG"
             sha="$(git rev-parse --verify --quiet "${REQUESTED}^{commit}")" || { echo "::error::'${REQUESTED}' is not a commit or tag of this repository; pass the ref input"; exit 1; }
+            git merge-base --is-ancestor "$sha" origin/main || { echo "::error::${REQUESTED} is not on main; only commits of main are deployed"; exit 1; }
             echo "tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
             echo "build=false" >> "$GITHUB_OUTPUT"
           fi

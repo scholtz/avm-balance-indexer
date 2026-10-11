@@ -161,6 +161,9 @@ jobs:
           if helm template x deploy/helm/avm-balance-indexer --set cassandra.embedded.enabled=true --set storage.provider=Cassandra --set cassandra.embedded.node=n > /dev/null 2>&1; then
             echo "the embedded Cassandra without a hostPath must fail the render"; exit 1
           fi
+          if helm template x deploy/helm/avm-balance-indexer -f deploy/helm/values/stage-testnet.yaml --set cassandra.embedded.node=n --set storage.cassandra.replicationFactor=3 > /dev/null 2>&1; then
+            echo "the embedded Cassandra with replication factor 3 must fail the render"; exit 1
+          fi
           if helm template x deploy/helm/avm-balance-indexer -f deploy/helm/values/stage-testnet.yaml > /dev/null 2>&1; then
             echo "the embedded Cassandra without a node must fail the render"; exit 1
           fi

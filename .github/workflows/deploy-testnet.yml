@@ -76,4 +76,5 @@ jobs:
       chain: algorand-testnet
       host: testnet.balance-indexer.biatec.io
       image-tag: ${{ needs.plan.outputs.tag }}
+      require-head-of-main: ${{ github.event_name != 'workflow_dispatch' }}
     secrets: inherit

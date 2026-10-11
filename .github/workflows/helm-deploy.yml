@@ -33,6 +33,10 @@ on:
         description: Tag of the images to run
         type: string
         required: true
+      require-head-of-main:
+        description: Refuse to deploy when ref is no longer the head of main (an older run must not roll back a newer one)
+        type: boolean
+        default: false
     secrets:
       KUBE_CONFIG:
         required: true
@@ -46,15 +50,37 @@ env:
   NAMESPACE: avm-balance-indexer
 
 jobs:
+  guard:
+    name: Is this still wanted?
+    runs-on: ubuntu-latest
+    outputs:
+      go: ${{ steps.head.outputs.go }}
+    steps:
+      - id: head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ inputs.ref }}
+          REQUIRE_HEAD: ${{ inputs.require-head-of-main }}
+        run: |
+          head="$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq .sha)"
+          if [ "$REQUIRE_HEAD" = true ] && [ "$head" != "$SHA" ]; then
+            echo "::notice::$SHA is no longer the head of main ($head); the newer run deploys"
+            echo "go=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          fi
+
   deploy:
     name: Deploy ${{ inputs.release }}
+    needs: guard
+    if: needs.guard.outputs.go == 'true'
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
     # Two deployments of one release must not run at the same time; a newer one waits instead of cancelling a running upgrade.
     concurrency:
       group: deploy-${{ inputs.release }}
       cancel-in-progress: false
-    timeout-minutes: 40
+    timeout-minutes: 70
     steps:
       - uses: actions/checkout@v4
         with:
@@ -89,7 +115,7 @@ jobs:
           fi
           common=(--namespace "$NAMESPACE" -f "deploy/helm/values/$VALUES"
             --set-string "image.repository=docker.io/${DOCKERHUB_USERNAME}/avm-balance-indexer"
-            --set-string "cassandra.embedded.node=$CASSANDRA_NODE" --wait --timeout 25m)
+            --set-string "cassandra.embedded.node=$CASSANDRA_NODE" --atomic --timeout 25m)
 
           # Upgrade rules of docs/operations.md: the worker first (it applies schema changes; Recreate so that no old writer runs meanwhile),
           # the API only after the new worker is ready. A first installation has nothing to protect and goes in one step.

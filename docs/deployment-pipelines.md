@@ -104,8 +104,11 @@ The chart refuses to render when a required secret name is missing (`required` c
 
 Upgrades follow the rules of [operations.md](operations.md) automatically: when the release already exists, the deploy job first upgrades the worker alone
 (`worker.strategy=Recreate`, so no old writer runs while a migration is applied), waits until it is ready, and then moves the API and everything else to the new tag. Indexing pauses for the
-seconds a worker restart takes. Deployments of one release queue (they never overlap), testnet only ever deploys the head of `main`, and a production tag is refused unless CI succeeded on its commit.
+seconds a worker restart takes. Deployments of one release never overlap (a run waits for the running one; of several waiting runs only the newest is kept, so start a rollback when nothing else is pending), testnet only ever deploys the head of `main`, and a production tag is refused unless CI succeeded on its commit.
 For a rollback give *Deploy production* the image tag **and** the `ref` (tag or commit) whose chart and values belong to it.
+
+A failed upgrade is rolled back by Helm (`--atomic`). Each production job (MainNet, then Voi) asks the environment's reviewers for its own approval. The pods need a namespace without Pod Security enforcement
+stricter than `privileged` for the Cassandra pod (it uses a hostPath volume and a root init container). Pre-release tags (`v1.2.3-rc1`) do not deploy.
 
 Known limits of this setup: one Cassandra node per chain on one disk (no replication; back up the directories), `hostPath` ties the data to a machine, and the three Cassandra instances plus
 the workers compete for the memory of that machine (see `cassandra.embedded.resources`).
