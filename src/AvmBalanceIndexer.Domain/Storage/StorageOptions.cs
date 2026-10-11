@@ -32,6 +32,9 @@ public sealed class CassandraOptions
 
     public int Port { get; set; } = 9042;
 
+    /// <summary>Requests the round writer keeps in flight at once (256 was the best of 64 to 1024 on one local node; see CassandraBackfillBenchmark).</summary>
+    public int WriteConcurrency { get; set; } = 256;
+
     /// <summary>Lifetime of the writer lease row; failover takes at most this long. A Paxos round must fit well inside it.</summary>
     public int LeaseTtlSeconds { get; set; } = 30;
 

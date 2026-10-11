@@ -98,7 +98,8 @@ public sealed partial class CassandraChainStorage
         var previous = await RunBoundedAsync(
             keys,
             key => HoldingRoundAsync(key, cancellationToken),
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken,
+            maxInFlight: _writeConcurrency).ConfigureAwait(false);
         var firstTimers = keys.Where((_, i) => previous[i] is null).ToArray();
 
         // The bucket index only changes when an account moves into a new bucket (about once per 100,000 rounds).
@@ -163,7 +164,7 @@ public sealed partial class CassandraChainStorage
                 roundValue));
         }
 
-        await RunBoundedAsync(statements, static statement => statement(), cancellationToken).ConfigureAwait(false);
+        await RunBoundedAsync(statements, static statement => statement(), cancellationToken, _writeConcurrency).ConfigureAwait(false);
 
         // The last effect of a round per account/token carries the end-of-round absolute balance. USING TIMESTAMP makes
         // the newest round win even when a stale writer is still replaying an older one.
@@ -203,7 +204,8 @@ public sealed partial class CassandraChainStorage
                     roundValue,
                     timestamp).ConfigureAwait(false);
             },
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken,
+            _writeConcurrency).ConfigureAwait(false);
     }
 
     /// <summary>
