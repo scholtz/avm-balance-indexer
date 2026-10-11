@@ -12,7 +12,7 @@ Full design: [PRODUCT-DESCRIPTION.md](PRODUCT-DESCRIPTION.md). Decisions: [docs/
 |---|---|
 | Native token (ALGO/VOI) indexing from archival nodes | Done. Verified against the ledger for the first 1000 rounds of TestNet and MainNet, and against the public indexer for Voi. |
 | PostgreSQL provider | Done: schema, atomic round writer, current and historical balances, holders, history. |
-| Cassandra provider | Done: schema, idempotent round writer with compare-and-set publication, current and historical balances, holders, history. Runs the same contract suite as PostgreSQL. |
+| Cassandra provider | Done: schema, idempotent round writer with compare-and-set publication, current and historical balances, holders, history. Runs the same contract suite as PostgreSQL and is verified against the ledger for the first 1000 rounds of TestNet and MainNet like PostgreSQL. |
 | ASA effects (transfer, opt-in/out, close-to, clawback, create, destroy) | Done, verified against the ledger holdings of recent MainNet rounds (`AssetRoundsTests`). ARC-20 Smart ASAs are recognised from chain data and the management addresses follow reconfigurations (`Arc20AssetsTests`); the balance stays an ASA balance. |
 | ARC-200 transfers from application logs | Done; 778 transfers of 111 recent Voi rounds match the Voi ARC indexer (`Arc200RoundsTests`). Balances are derived from logged events only. |
 | Read API | Done: status, holdings, balance at a round, holders, history, token metadata. |

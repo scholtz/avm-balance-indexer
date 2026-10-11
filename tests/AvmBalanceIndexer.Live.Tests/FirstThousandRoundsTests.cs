@@ -95,7 +95,7 @@ public class FirstThousandRoundsTests(PostgresFixture postgres)
         Assert.Equal(expected.Select(static h => (h.Account, h.Amount)), actual.Select(static h => (h.Account, h.Amount)));
     }
 
-    private static async Task IndexAndVerifyAsync(string chain, IChainStorage storage, bool expectPayments, bool ledgerDeltas = true)
+    internal static async Task IndexAndVerifyAsync(string chain, IChainStorage storage, bool expectPayments, bool ledgerDeltas = true)
     {
         var adapter = Adapter(chain);
         var result = await CreateIndexer(storage, adapter).RunAsync(Rounds, CancellationToken.None);

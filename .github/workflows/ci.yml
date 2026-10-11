@@ -76,13 +76,25 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U avm -d avm_indexer"
           --health-interval 5s --health-timeout 3s --health-retries 20
+      cassandra:
+        image: cassandra:5.0
+        env:
+          CASSANDRA_CLUSTER_NAME: avm-ci-live
+          CASSANDRA_DC: dc1
+          CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
+          MAX_HEAP_SIZE: 1G
+          HEAP_NEWSIZE: 256M
+        ports: ["9042:9042"]
+        options: >-
+          --health-cmd "cqlsh -e 'describe cluster' localhost 9042"
+          --health-interval 15s --health-timeout 10s --health-retries 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
-      # Indexes the first 1000 rounds of Algorand TestNet and MainNet from public archival nodes into PostgreSQL and
-      # compares every balance with the ledger state deltas published by a public algod.
+      # Indexes the first 1000 rounds of Algorand TestNet and MainNet from public archival nodes into PostgreSQL and into
+      # Cassandra and compares every balance with the ledger state deltas published by a public algod.
       - run: dotnet test tests/AvmBalanceIndexer.Live.Tests -c Release --logger "trx;LogFileName=live.trx" --results-directory TestResults
       - uses: actions/upload-artifact@v7
         if: always()
