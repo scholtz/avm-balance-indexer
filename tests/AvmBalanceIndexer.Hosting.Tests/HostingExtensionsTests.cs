@@ -65,6 +65,7 @@ public class HostingExtensionsTests
             ("Storage:Cassandra:Keyspace", "avm_voi")));
 
         Assert.IsType<CassandraChainStorage>(provider.GetRequiredService<IChainStorage>());
+        Assert.Same(provider.GetRequiredService<IChainStorage>(), provider.GetRequiredService<IWriterLeaseProvider>());
         Assert.Same(provider.GetRequiredService<IChainStorage>(), provider.GetRequiredService<IChainStorage>());
         Assert.Equal(ChainId.Voi, provider.GetRequiredService<ChainContext>().Chain);
     }
@@ -102,6 +103,7 @@ public class HostingExtensionsTests
         using var provider = Build(Config(("Chain", ChainId.AlgorandMainnet), ("Storage:Provider", "PostgreSql"), ("Storage:PostgreSql:ConnectionString", Connection)));
 
         Assert.IsType<PostgreSqlChainStorage>(provider.GetRequiredService<IChainStorage>());
+        Assert.Same(provider.GetRequiredService<IChainStorage>(), provider.GetRequiredService<IWriterLeaseProvider>());
         Assert.Same(provider.GetRequiredService<IChainStorage>(), provider.GetRequiredService<IChainStorage>());
         Assert.Equal(ChainId.AlgorandMainnet, provider.GetRequiredService<ChainContext>().Chain);
     }

@@ -8,7 +8,9 @@ using Microsoft.Extensions.Options;
 namespace AvmBalanceIndexer.Worker;
 
 /// <summary>
-/// Single ordered writer for one chain: prepares the schema, then follows the chain from the stored cursor.
+/// Single ordered writer for one chain: waits for the writer lease (so several replicas can run, one active), prepares the
+/// schema, then follows the chain from the stored cursor. Losing the lease stops indexing at once and the replica goes back to
+/// waiting; a replica that never holds the lease simply stands by.
 /// Transient failures (network, database availability) are retried with backoff, and the backoff resets whenever rounds
 /// were indexed in between. Data problems such as a chain divergence stop the process immediately so that nothing is
 /// written on top of inconsistent state, and so does a long run of failures without progress, which makes a permanently
@@ -20,13 +22,16 @@ public sealed partial class IndexerWorker(
     ChainContext chain,
     IOptions<IndexerOptions> options,
     IHostApplicationLifetime lifetime,
+    IWriterLeaseProvider leases,
+    WorkerHealth health,
     ILogger<IndexerWorker> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        health.ReportRoundsSource(() => indexer.RoundsCommitted);
         try
         {
-            await FollowAsync(stoppingToken).ConfigureAwait(false);
+            await LeadWhenPossibleAsync(stoppingToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
@@ -37,6 +42,56 @@ public sealed partial class IndexerWorker(
             LogFatal(logger, ex);
             Environment.ExitCode = 1;
             lifetime.StopApplication();
+        }
+    }
+
+    private async Task LeadWhenPossibleAsync(CancellationToken stoppingToken)
+    {
+        var settings = options.Value;
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            IWriterLease? lease;
+            try
+            {
+                lease = await leases.TryAcquireAsync(stoppingToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception ex) when (IsTransient(ex, stoppingToken))
+            {
+                // A database that is still starting or failing over is a wait, not a crash.
+                health.ReportTransientFailure();
+                LogLeaseUnavailable(logger, ex);
+                await Task.Delay(settings.LeaseRetryInterval, stoppingToken).ConfigureAwait(false);
+                continue;
+            }
+
+            if (lease is null)
+            {
+                if (health.State != WorkerState.Standby)
+                {
+                    LogStandby(logger, chain.Chain);
+                }
+
+                health.BecameStandby();
+                await Task.Delay(settings.LeaseRetryInterval, stoppingToken).ConfigureAwait(false);
+                continue;
+            }
+
+            await using (lease.ConfigureAwait(false))
+            {
+                health.BecameLeader();
+                LogLeading(logger, chain.Chain);
+                using var term = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, lease.Lost);
+                await FollowAsync(term.Token).ConfigureAwait(false);
+                if (lease.Lost.IsCancellationRequested && !stoppingToken.IsCancellationRequested)
+                {
+                    health.LostLease();
+                    LogLeaseLost(logger, chain.Chain);
+                }
+            }
         }
     }
 
@@ -83,6 +138,7 @@ public sealed partial class IndexerWorker(
                     throw new InvalidOperationException($"Indexing made no progress in {failures} consecutive attempts.", ex);
                 }
 
+                health.ReportTransientFailure();
                 LogTransientFailure(logger, ex, backoff, failures);
                 await Task.Delay(backoff, stoppingToken).ConfigureAwait(false);
                 backoff = TimeSpan.FromTicks(Math.Min(backoff.Ticks * 2, settings.RetryMaxBackoff.Ticks));
@@ -102,6 +158,18 @@ public sealed partial class IndexerWorker(
 
     [LoggerMessage(EventId = 1300, Level = LogLevel.Information, Message = "Indexer worker started for {Chain}")]
     private static partial void LogStarted(ILogger logger, string chain);
+
+    [LoggerMessage(EventId = 1303, Level = LogLevel.Information, Message = "Another replica is the writer of {Chain}; standing by")]
+    private static partial void LogStandby(ILogger logger, string chain);
+
+    [LoggerMessage(EventId = 1304, Level = LogLevel.Information, Message = "This replica is now the writer of {Chain}")]
+    private static partial void LogLeading(ILogger logger, string chain);
+
+    [LoggerMessage(EventId = 1305, Level = LogLevel.Warning, Message = "The writer lease for {Chain} was lost; indexing stopped and this replica goes back to standby")]
+    private static partial void LogLeaseLost(ILogger logger, string chain);
+
+    [LoggerMessage(EventId = 1306, Level = LogLevel.Warning, Message = "The writer lease could not be requested; retrying")]
+    private static partial void LogLeaseUnavailable(ILogger logger, Exception exception);
 
     [LoggerMessage(EventId = 1301, Level = LogLevel.Warning, Message = "Indexing paused by a transient failure (failure {Failures} without progress); retrying in {Backoff}")]
     private static partial void LogTransientFailure(ILogger logger, Exception exception, TimeSpan backoff, int failures);

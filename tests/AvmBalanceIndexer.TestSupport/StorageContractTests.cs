@@ -203,6 +203,23 @@ public abstract class StorageContractTests
     }
 
     [Fact]
+    public async Task The_Writer_Lease_Is_Exclusive_And_Free_Again_After_It_Is_Released()
+    {
+        var provider = Assert.IsAssignableFrom<IWriterLeaseProvider>(await CreateStorageAsync());
+
+        var first = await provider.TryAcquireAsync(CancellationToken.None);
+        Assert.NotNull(first);
+        Assert.False(first.Lost.IsCancellationRequested);
+        Assert.Null(await provider.TryAcquireAsync(CancellationToken.None));
+
+        await first.DisposeAsync();
+
+        var second = await provider.TryAcquireAsync(CancellationToken.None);
+        Assert.NotNull(second);
+        await second.DisposeAsync();
+    }
+
+    [Fact]
     public async Task Holders_At_The_Latest_Round_Match_The_Current_Holdings_With_And_Without_Zero_Balances()
     {
         var storage = await IndexedAsync();

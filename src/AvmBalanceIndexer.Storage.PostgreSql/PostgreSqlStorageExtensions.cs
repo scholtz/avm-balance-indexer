@@ -38,6 +38,7 @@ public static class PostgreSqlStorageExtensions
             provider.GetRequiredService<IOptions<StorageOptions>>().Value.PostgreSql.AccountHashPartitions,
             TimeSpan.FromSeconds(provider.GetRequiredService<IOptions<StorageOptions>>().Value.PostgreSql.ReadTimeoutSeconds)));
         services.AddSingleton<IChainStorage>(static provider => provider.GetRequiredService<PostgreSqlChainStorage>());
+        services.AddSingleton<IWriterLeaseProvider>(static provider => provider.GetRequiredService<PostgreSqlChainStorage>());
         return services;
     }
 

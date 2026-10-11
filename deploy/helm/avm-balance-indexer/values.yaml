@@ -41,8 +41,10 @@ api:
     minAvailable: 1
 
 worker:
-  # Single active ordered writer per chain. Keep at 1: leader election for failover is not implemented yet.
-  replicaCount: 1
+  # One replica indexes (it holds the writer lease), the others stand by and take over within seconds.
+  replicaCount: 2
+  # Port of /healthz/live and /healthz/ready.
+  healthPort: 8081
   resources:
     requests: { cpu: 500m, memory: 512Mi }
     limits: { cpu: "2", memory: 2Gi }

@@ -103,6 +103,38 @@ public class CassandraSpecificTests(CassandraFixture cassandra)
     }
 
     [Fact]
+    public async Task A_Lease_Another_Owner_Took_Is_Reported_Lost()
+    {
+        var storage = await cassandra.CreateStorageAsync(leaseTtl: TimeSpan.FromSeconds(3));
+        var lease = await storage.TryAcquireAsync(CancellationToken.None);
+        Assert.NotNull(lease);
+
+        var session = await cassandra.SessionOfAsync(storage);
+        var keyspace = cassandra.KeyspaceOf(storage);
+        await session.ExecuteAsync(new SimpleStatement($"UPDATE {keyspace}.writer_lease SET owner = 'someone-else' WHERE chain = '{ChainId.AlgorandTestnet}' IF owner != 'someone-else'"));
+
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        await Task.Delay(Timeout.Infinite, CancellationTokenSource.CreateLinkedTokenSource(lease.Lost, timeout.Token).Token).ContinueWith(static _ => { }, TaskScheduler.Default);
+
+        Assert.True(lease.Lost.IsCancellationRequested);
+        await lease.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task A_Lease_That_Is_Renewed_Outlives_Its_Ttl()
+    {
+        var storage = await cassandra.CreateStorageAsync(leaseTtl: TimeSpan.FromSeconds(3));
+        var lease = await storage.TryAcquireAsync(CancellationToken.None);
+        Assert.NotNull(lease);
+
+        await Task.Delay(TimeSpan.FromSeconds(7));
+
+        Assert.False(lease.Lost.IsCancellationRequested);
+        Assert.Null(await storage.TryAcquireAsync(CancellationToken.None));
+        await lease.DisposeAsync();
+    }
+
+    [Fact]
     public async Task Driver_Timeouts_Become_Storage_Timeouts()
     {
         var endpoint = new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, 9042);

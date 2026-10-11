@@ -46,7 +46,7 @@ public sealed class PostgresFixture : IAsyncLifetime
     public NpgsqlDataSource DataSourceOf(PostgreSqlChainStorage storage) => _dataSources[storage];
 
     /// <summary>Creates an empty database, applies the schema (unless told not to) and returns the storage bound to it.</summary>
-    public async Task<PostgreSqlChainStorage> CreateStorageAsync(string chain = ChainId.AlgorandTestnet, int accountPartitions = 4, bool applySchema = true, TimeSpan? readTimeout = null)
+    public async Task<PostgreSqlChainStorage> CreateStorageAsync(string chain = ChainId.AlgorandTestnet, int accountPartitions = 4, bool applySchema = true, TimeSpan? readTimeout = null, TimeSpan? leaseHeartbeat = null)
     {
         var name = $"avm_test_{Environment.ProcessId}_{Interlocked.Increment(ref _databaseCounter)}_{Guid.NewGuid():N}";
         await using (var admin = new NpgsqlConnection(_adminConnectionString))
@@ -58,7 +58,7 @@ public sealed class PostgresFixture : IAsyncLifetime
 
         var connectionString = new NpgsqlConnectionStringBuilder(_adminConnectionString) { Database = name, Pooling = true, MaxPoolSize = 8 }.ConnectionString;
         var dataSource = NpgsqlDataSource.Create(connectionString);
-        var storage = new PostgreSqlChainStorage(dataSource, new ChainContext(chain), accountPartitions, readTimeout);
+        var storage = new PostgreSqlChainStorage(dataSource, new ChainContext(chain), accountPartitions, readTimeout, leaseHeartbeat);
         _dataSources[storage] = dataSource;
         if (applySchema)
         {

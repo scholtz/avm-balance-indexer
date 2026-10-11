@@ -5,6 +5,7 @@ metadata:
   labels: {{- include "avm.labels" . | nindent 4 }}
 data:
   Chain: {{ .Values.chain | quote }}
+  Worker__HealthPort: {{ .Values.worker.healthPort | quote }}
   Storage__Provider: {{ .Values.storage.provider | quote }}
   Storage__PostgreSql__AccountHashPartitions: {{ .Values.storage.postgreSql.accountHashPartitions | quote }}
   Storage__Cassandra__UseTls: {{ .Values.storage.cassandra.useTls | quote }}

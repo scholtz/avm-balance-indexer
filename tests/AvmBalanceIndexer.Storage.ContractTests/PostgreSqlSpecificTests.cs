@@ -273,6 +273,30 @@ public class PostgreSqlSpecificTests(PostgresFixture postgres)
     }
 
     [Fact]
+    public async Task A_Lease_Whose_Session_Dies_Is_Reported_Lost_And_Can_Be_Taken_Over()
+    {
+        var storage = await postgres.CreateStorageAsync(leaseHeartbeat: TimeSpan.FromMilliseconds(100));
+        var lease = await storage.TryAcquireAsync(CancellationToken.None);
+        Assert.NotNull(lease);
+
+        // What a crashed pod or a network loss looks like to the server: the session holding the lock goes away.
+        await using (var terminate = postgres.DataSourceOf(storage).CreateCommand(
+            "SELECT pg_terminate_backend(pid) FROM pg_locks WHERE locktype = 'advisory' AND granted AND pid <> pg_backend_pid()"))
+        {
+            await terminate.ExecuteNonQueryAsync();
+        }
+
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await Task.Delay(Timeout.Infinite, CancellationTokenSource.CreateLinkedTokenSource(lease.Lost, timeout.Token).Token).ContinueWith(static _ => { }, TaskScheduler.Default);
+        Assert.True(lease.Lost.IsCancellationRequested);
+
+        var successor = await storage.TryAcquireAsync(CancellationToken.None);
+        Assert.NotNull(successor);
+        await successor.DisposeAsync();
+        await lease.DisposeAsync();
+    }
+
+    [Fact]
     public void The_Read_Timeout_Must_Be_Positive()
     {
         using var dataSource = NpgsqlDataSource.Create("Host=localhost");
