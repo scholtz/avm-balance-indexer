@@ -22,7 +22,7 @@ public sealed partial class CassandraChainStorage : IChainStorage
     private const int MaxPageSize = 1000;
 
     /// <summary>Requests in flight per operation; keeps a genesis round with many thousand accounts from flooding the driver queue.</summary>
-    private const int MaxInFlight = 64;
+    private const int MaxInFlight = 256;
 
     private readonly CassandraSessionSource _source;
     private readonly string _chain;

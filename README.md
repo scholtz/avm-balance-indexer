@@ -146,8 +146,9 @@ another chain, 503 while nothing is indexed yet. A walk over the holders of the 
   (HTTP 503): use an asynchronous scan for it.
 - Backfill speed is limited by downloading blocks from gossip hosts (about 100 ms per block and host, 25 to 60 rounds/s on
   busy MainNet blocks with 32 to 192 in flight; empty early blocks are much faster). The database is no longer the limit:
-  committing 25 rounds per transaction raised the PostgreSQL write path (Cassandra saves one compare-and-set per batch instead of per round; not benchmarked) from about 330 to about 3,900 rounds/s in the benchmark
-  (`BackfillBenchmark`, `AVM_BENCH=1`). Running several chains or your own archival nodes is the way to go faster.
+  committing 25 rounds per transaction raised the PostgreSQL write path from about 330 to about 3,900 rounds/s in the benchmark (`BackfillBenchmark`, `AVM_BENCH=1`). Cassandra saves one compare-and-set per batch
+  instead of per round: on one local node 364 rounds/s with one round per commit, 1,900 with 25 and 2,500 with 100 for early TestNet rounds, and about 12,000
+  effects per second for synthetic busy rounds (`CassandraBackfillBenchmark`); busy MainNet rounds are therefore limited by the database as well as by the download. Running several chains or your own archival nodes is the way to go faster.
 - Several workers may run per chain: one holds the writer lease (PostgreSQL advisory lock on a dedicated session, Cassandra TTL row) and indexes, the others stand by. Failover takes up to the lease TTL (30 s) on Cassandra and about 30 s (TCP keepalives of the lease session) on PostgreSQL. Worker metrics are published on the `AvmBalanceIndexer.Worker` meter and exported over OTLP when an endpoint is configured.
 - Block headers are hash-checked against their certificate digest and transactions against the header commitments, but
   certificate signatures are not verified (ADR 0004). A host serving a whole fabricated chain is not detected: run your
