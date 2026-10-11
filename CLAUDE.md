@@ -146,3 +146,9 @@ prove it), size it to one PR, and add `enhancement` plus your team label. Cite s
 - Edit files with the Write tool or a script file, not inline heredocs: escape sequences such as backslash-zero came out as real NUL bytes.
 - Measure before tuning (`BackfillBenchmark`, `AVM_BENCH=1`): CPU was 2 ms/round, download latency and per-round commits were the limits.
 
+- Cassandra: never mix lightweight-transaction writes and plain writes on one row. Paxos uses server timestamps, plain writes client
+  ones, and a skewed clock (a Docker VM) lets the plain write silently shadow the conditional one -> make every write to such a row conditional.
+- Test fixtures must start their database container on the first test that needs it, not in the collection setup, otherwise a run with
+  every test skipped (`AVM_SKIP_LIVE_TESTS=1`) still starts containers.
+- An upgrade rule is only real if the chart can perform it (per-component image tags, `worker.strategy`) and CI renders those paths; write the
+  procedure and check it with `helm template` before documenting it.
