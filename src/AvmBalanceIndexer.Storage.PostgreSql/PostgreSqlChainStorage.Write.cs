@@ -13,19 +13,27 @@ public sealed partial class PostgreSqlChainStorage
     /// <summary>Effects per statement; keeps array parameters and statement memory bounded for very large rounds such as genesis.</summary>
     private const int WriteBatchSize = 5_000;
 
-    public async Task<bool> WriteRoundAsync(ChainStatus roundStatus, IReadOnlyList<TokenEffect> effects, CancellationToken cancellationToken)
+    public Task<bool> WriteRoundAsync(ChainStatus roundStatus, IReadOnlyList<TokenEffect> effects, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(roundStatus);
         ArgumentNullException.ThrowIfNull(effects);
-        EnsureChain(roundStatus.Chain);
+        return WriteRoundsAsync([new RoundWrite(roundStatus, effects)], cancellationToken);
+    }
 
-        var round = roundStatus.IndexedRound;
-        if (effects.Any(e => e.Id.Round != round))
+    public async Task<bool> WriteRoundsAsync(IReadOnlyList<RoundWrite> rounds, CancellationToken cancellationToken)
+    {
+        RoundWrite.EnsureValid(rounds);
+        foreach (var write in rounds)
         {
-            throw new ArgumentException($"All effects must belong to round {round}.", nameof(effects));
+            EnsureChain(write.Status.Chain);
         }
 
-        await EnsureBucketPartitionAsync(RoundBuckets.ForRound(round), cancellationToken).ConfigureAwait(false);
+        var firstRound = rounds[0].Status.IndexedRound;
+        var last = rounds[^1].Status;
+        foreach (var bucket in rounds.Select(static r => RoundBuckets.ForRound(r.Status.IndexedRound)).Distinct())
+        {
+            await EnsureBucketPartitionAsync(bucket, cancellationToken).ConfigureAwait(false);
+        }
 
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         await using var transaction = await connection.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken).ConfigureAwait(false);
@@ -34,44 +42,45 @@ public sealed partial class PostgreSqlChainStorage
         var published = await LockCursorAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
         if (published is null)
         {
-            if (round != 0)
+            if (firstRound != 0)
             {
-                throw new ChainDivergenceException($"The first round written must be 0 but round {round} was given.");
+                throw new ChainDivergenceException($"The first round written must be 0 but round {firstRound} was given.");
             }
         }
-        else if (round == published.Value.Round)
+        else if (rounds.Count == 1 && firstRound == published.Value.Round)
         {
-            if (!roundStatus.IndexedBlockHash.Span.SequenceEqual(published.Value.Hash))
+            if (!last.IndexedBlockHash.Span.SequenceEqual(published.Value.Hash))
             {
-                throw new ChainDivergenceException($"Round {round} is already published with a different block hash.");
+                throw new ChainDivergenceException($"Round {firstRound} is already published with a different block hash.");
             }
 
             // Idempotent replay of the latest published round: nothing to do.
             return false;
         }
-        else if (round < published.Value.Round)
+        else if (firstRound <= published.Value.Round)
         {
             throw new ChainDivergenceException(
-                $"Round {round} is older than the published round {published.Value.Round}; its block hash can no longer be verified, so it is refused.");
+                $"Round {firstRound} is older than the published round {published.Value.Round}; its block hash can no longer be verified, so it is refused.");
         }
-        else if (round != published.Value.Round + 1)
+        else if (firstRound != published.Value.Round + 1)
         {
-            throw new ChainDivergenceException($"Round {round} would leave a gap after published round {published.Value.Round}.");
+            throw new ChainDivergenceException($"Round {firstRound} would leave a gap after published round {published.Value.Round}.");
         }
 
+        var effects = rounds.Count == 1 ? rounds[0].Effects : [.. rounds.SelectMany(static r => r.Effects)];
         if (effects.Count > 0)
         {
             foreach (var batch in effects.Chunk(WriteBatchSize))
             {
                 await InsertAccountEffectsAsync(connection, transaction, batch, cancellationToken).ConfigureAwait(false);
-                await InsertTokenEffectsAsync(connection, transaction, round, batch, cancellationToken).ConfigureAwait(false);
+                await InsertTokenEffectsAsync(connection, transaction, batch, cancellationToken).ConfigureAwait(false);
             }
 
-            await UpsertHoldingsAsync(connection, transaction, round, effects, cancellationToken).ConfigureAwait(false);
-            await UpsertTouchedAsync(connection, transaction, round, effects, cancellationToken).ConfigureAwait(false);
+            await UpsertHoldingsAsync(connection, transaction, effects, cancellationToken).ConfigureAwait(false);
+            await UpsertTouchedAsync(connection, transaction, effects, cancellationToken).ConfigureAwait(false);
         }
 
-        await UpsertCursorAsync(connection, transaction, roundStatus, cancellationToken).ConfigureAwait(false);
+        await UpsertCursorAsync(connection, transaction, last, cancellationToken).ConfigureAwait(false);
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
         return true;
     }
@@ -128,22 +137,22 @@ public sealed partial class PostgreSqlChainStorage
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private static async Task InsertTokenEffectsAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, ulong round, TokenEffect[] effects, CancellationToken cancellationToken)
+    private static async Task InsertTokenEffectsAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, TokenEffect[] effects, CancellationToken cancellationToken)
     {
         const string sql = """
             INSERT INTO effects_by_token_bucket
               (token_kind, token_id, bucket, round, intra_round_order, ordinal, account, transaction_id, effect_type, delta)
-            SELECT u.token_kind, u.token_id, @bucket, @round, u.intra_round_order, u.ordinal, u.account,
+            SELECT u.token_kind, u.token_id, u.bucket, u.round, u.intra_round_order, u.ordinal, u.account,
                    u.transaction_id, u.effect_type, u.delta::numeric
-            FROM unnest(@kind, @id, @order, @ordinal, @account, @txid, @type, @delta)
-                 AS u(token_kind, token_id, intra_round_order, ordinal, account, transaction_id, effect_type, delta)
+            FROM unnest(@kind, @id, @bucket, @round, @order, @ordinal, @account, @txid, @type, @delta)
+                 AS u(token_kind, token_id, bucket, round, intra_round_order, ordinal, account, transaction_id, effect_type, delta)
             """;
 
         await using var command = new NpgsqlCommand(sql, connection, transaction);
-        command.Parameters.AddWithValue("bucket", RoundBuckets.ForRound(round));
-        command.Parameters.AddWithValue("round", unchecked((long)round));
         AddArray(command, "kind", NpgsqlDbType.Text, effects.Select(static e => e.Token.Kind.ToStorageName()).ToArray());
         AddArray(command, "id", NpgsqlDbType.Bigint, effects.Select(static e => StorageId(e.Token.TokenId)).ToArray());
+        AddArray(command, "bucket", NpgsqlDbType.Integer, effects.Select(static e => RoundBuckets.ForRound(e.Id.Round)).ToArray());
+        AddArray(command, "round", NpgsqlDbType.Bigint, effects.Select(static e => unchecked((long)e.Id.Round)).ToArray());
         AddArray(command, "order", NpgsqlDbType.Integer, effects.Select(static e => e.Id.IntraRoundOrder).ToArray());
         AddArray(command, "ordinal", NpgsqlDbType.Integer, effects.Select(static e => e.Id.Ordinal).ToArray());
         AddArray(command, "account", NpgsqlDbType.Bytea, effects.Select(static e => e.Account.ToArray()).ToArray());
@@ -153,25 +162,24 @@ public sealed partial class PostgreSqlChainStorage
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private static async Task UpsertHoldingsAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, ulong round, IReadOnlyList<TokenEffect> effects, CancellationToken cancellationToken)
+    private static async Task UpsertHoldingsAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, IReadOnlyList<TokenEffect> effects, CancellationToken cancellationToken)
     {
-        // The last effect of a round per account/token carries the end-of-round absolute balance.
+        // The newest effect per account/token (by round, then ordinal) carries the absolute balance after the whole batch.
         foreach (var batch in effects
             .GroupBy(static e => new HoldingKey(e.Account, e.Token))
-            .Select(static g => g.MaxBy(static e => e.Id.Ordinal)!)
+            .Select(static g => g.MaxBy(static e => (e.Id.Round, e.Id.Ordinal))!)
             .Chunk(WriteBatchSize))
         {
-            await UpsertHoldingsBatchAsync(connection, transaction, round, batch, cancellationToken).ConfigureAwait(false);
+            await UpsertHoldingsBatchAsync(connection, transaction, batch, cancellationToken).ConfigureAwait(false);
         }
     }
 
-    private static async Task UpsertHoldingsBatchAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, ulong round, TokenEffect[] latest, CancellationToken cancellationToken)
+    private static async Task UpsertHoldingsBatchAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, TokenEffect[] latest, CancellationToken cancellationToken)
     {
-
         const string sql = """
             INSERT INTO holdings_by_account (account, token_kind, token_id, amount, opted_in, last_changed_round)
-            SELECT u.account, u.token_kind, u.token_id, u.amount::numeric, u.opted_in, @round
-            FROM unnest(@account, @kind, @id, @amount, @optedin) AS u(account, token_kind, token_id, amount, opted_in)
+            SELECT u.account, u.token_kind, u.token_id, u.amount::numeric, u.opted_in, u.round
+            FROM unnest(@account, @kind, @id, @amount, @optedin, @round) AS u(account, token_kind, token_id, amount, opted_in, round)
             ON CONFLICT (account, token_kind, token_id) DO UPDATE
               SET amount = EXCLUDED.amount,
                   opted_in = EXCLUDED.opted_in,
@@ -182,8 +190,8 @@ public sealed partial class PostgreSqlChainStorage
         // The token-oriented copy is written with the same statement shape, in the same transaction.
         const string byTokenSql = """
             INSERT INTO holdings_by_token (token_kind, token_id, account, amount, last_changed_round, opted_in)
-            SELECT u.token_kind, u.token_id, u.account, u.amount::numeric, @round, u.opted_in
-            FROM unnest(@account, @kind, @id, @amount, @optedin) AS u(account, token_kind, token_id, amount, opted_in)
+            SELECT u.token_kind, u.token_id, u.account, u.amount::numeric, u.round, u.opted_in
+            FROM unnest(@account, @kind, @id, @amount, @optedin, @round) AS u(account, token_kind, token_id, amount, opted_in, round)
             ON CONFLICT (token_kind, token_id, account) DO UPDATE
               SET amount = EXCLUDED.amount,
                   opted_in = EXCLUDED.opted_in,
@@ -196,55 +204,49 @@ public sealed partial class PostgreSqlChainStorage
         var ids = latest.Select(static e => StorageId(e.Token.TokenId)).ToArray();
         var amounts = latest.Select(static e => e.BalanceAfter.ToString()).ToArray();
         var optedIn = latest.Select(static e => e.Type != EffectType.AssetOptOut).ToArray();
+        var rounds = latest.Select(static e => unchecked((long)e.Id.Round)).ToArray();
 
-        await using (var command = new NpgsqlCommand(sql, connection, transaction))
+        foreach (var statement in new[] { sql, byTokenSql })
         {
-            command.Parameters.AddWithValue("round", unchecked((long)round));
+            await using var command = new NpgsqlCommand(statement, connection, transaction);
             AddArray(command, "account", NpgsqlDbType.Bytea, accounts);
             AddArray(command, "kind", NpgsqlDbType.Text, kinds);
             AddArray(command, "id", NpgsqlDbType.Bigint, ids);
             AddArray(command, "amount", NpgsqlDbType.Text, amounts);
             AddArray(command, "optedin", NpgsqlDbType.Boolean, optedIn);
-            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-        }
-
-        await using (var command = new NpgsqlCommand(byTokenSql, connection, transaction))
-        {
-            command.Parameters.AddWithValue("round", unchecked((long)round));
-            AddArray(command, "account", NpgsqlDbType.Bytea, accounts);
-            AddArray(command, "kind", NpgsqlDbType.Text, kinds);
-            AddArray(command, "id", NpgsqlDbType.Bigint, ids);
-            AddArray(command, "amount", NpgsqlDbType.Text, amounts);
-            AddArray(command, "optedin", NpgsqlDbType.Boolean, optedIn);
+            AddArray(command, "round", NpgsqlDbType.Bigint, rounds);
             await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
     }
 
-    private static async Task UpsertTouchedAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, ulong round, IReadOnlyList<TokenEffect> effects, CancellationToken cancellationToken)
+    private static async Task UpsertTouchedAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, IReadOnlyList<TokenEffect> effects, CancellationToken cancellationToken)
     {
-        foreach (var batch in effects.Select(static e => new HoldingKey(e.Account, e.Token)).Distinct().Chunk(WriteBatchSize))
+        var touched = effects
+            .GroupBy(static e => new HoldingKey(e.Account, e.Token))
+            .Select(static g => (Key: g.Key, First: g.Min(static e => e.Id.Round), Last: g.Max(static e => e.Id.Round)));
+        foreach (var batch in touched.Chunk(WriteBatchSize))
         {
-            await UpsertTouchedBatchAsync(connection, transaction, round, batch, cancellationToken).ConfigureAwait(false);
+            await UpsertTouchedBatchAsync(connection, transaction, batch, cancellationToken).ConfigureAwait(false);
         }
     }
 
-    private static async Task UpsertTouchedBatchAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, ulong round, HoldingKey[] touched, CancellationToken cancellationToken)
+    private static async Task UpsertTouchedBatchAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, (HoldingKey Key, ulong First, ulong Last)[] touched, CancellationToken cancellationToken)
     {
-
         const string sql = """
             INSERT INTO accounts_touched_by_token (token_kind, token_id, account, first_round, last_round)
-            SELECT u.token_kind, u.token_id, u.account, @round, @round
-            FROM unnest(@kind, @id, @account) AS u(token_kind, token_id, account)
+            SELECT u.token_kind, u.token_id, u.account, u.first_round, u.last_round
+            FROM unnest(@kind, @id, @account, @first, @last) AS u(token_kind, token_id, account, first_round, last_round)
             ON CONFLICT (token_kind, token_id, account) DO UPDATE
               SET first_round = LEAST(accounts_touched_by_token.first_round, EXCLUDED.first_round),
                   last_round = GREATEST(accounts_touched_by_token.last_round, EXCLUDED.last_round)
             """;
 
         await using var command = new NpgsqlCommand(sql, connection, transaction);
-        command.Parameters.AddWithValue("round", unchecked((long)round));
-        AddArray(command, "kind", NpgsqlDbType.Text, touched.Select(static k => k.Token.Kind.ToStorageName()).ToArray());
-        AddArray(command, "id", NpgsqlDbType.Bigint, touched.Select(static k => StorageId(k.Token.TokenId)).ToArray());
-        AddArray(command, "account", NpgsqlDbType.Bytea, touched.Select(static k => k.Account.ToArray()).ToArray());
+        AddArray(command, "kind", NpgsqlDbType.Text, touched.Select(static k => k.Key.Token.Kind.ToStorageName()).ToArray());
+        AddArray(command, "id", NpgsqlDbType.Bigint, touched.Select(static k => StorageId(k.Key.Token.TokenId)).ToArray());
+        AddArray(command, "account", NpgsqlDbType.Bytea, touched.Select(static k => k.Key.Account.ToArray()).ToArray());
+        AddArray(command, "first", NpgsqlDbType.Bigint, touched.Select(static k => unchecked((long)k.First)).ToArray());
+        AddArray(command, "last", NpgsqlDbType.Bigint, touched.Select(static k => unchecked((long)k.Last)).ToArray());
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 

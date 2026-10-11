@@ -23,13 +23,17 @@ public abstract class StorageContractTests
     /// <summary>Creates an empty, schema-initialised storage for one chain.</summary>
     protected abstract Task<IChainStorage> CreateStorageAsync();
 
-    protected static RoundIndexer CreateIndexer(IChainStorage storage, IChainAdapter adapter) =>
+    protected static RoundIndexer CreateIndexer(IChainStorage storage, IChainAdapter adapter, IndexerOptions? options = null) =>
         new(
             adapter,
             new AlgoEffectNormalizer(),
             storage,
-            Options.Create(new IndexerOptions { FetchConcurrency = 3, BalanceCacheEntries = 1_000 }),
+            Options.Create(options ?? new IndexerOptions { FetchConcurrency = 3, BalanceCacheEntries = 1_000 }),
             NullLogger<RoundIndexer>.Instance);
+
+    /// <summary>Options that commit every <paramref name="rounds"/> rounds even though the test chains are short.</summary>
+    protected static IndexerOptions Batched(int rounds) =>
+        new() { FetchConcurrency = 3, BalanceCacheEntries = 1_000, CommitBatchRounds = rounds, FollowingThresholdRounds = 0 };
 
     private async Task<IChainStorage> IndexedAsync(ulong upTo = LastRound)
     {
@@ -962,6 +966,140 @@ public abstract class StorageContractTests
 
         Assert.NotNull(plain);
         Assert.Equal((TokenStandard.Asa, (ulong?)null, appAccount), (plain.Standard, plain.ControllingAppId, plain.Creator));
+    }
+
+    private static RoundWrite Round(ulong round, params (Address Account, long Delta, ulong After)[] changes) =>
+        new(
+            new ChainStatus(ChainId.AlgorandTestnet, round, TestChain.FakeHash(round), round, IngestionState.Backfilling, DateTimeOffset.UnixEpoch),
+            [.. changes.Select((c, i) => new TokenEffect(new EffectId(round, 1, "tx" + round, [], i), c.Account, Native, EffectType.Payment, c.Delta, Amount.From(c.After), null))]);
+
+    [Fact]
+    public async Task Several_Rounds_Are_Written_As_One_Unit_With_The_Same_Result_As_One_By_One()
+    {
+        var single = await CreateStorageAsync();
+        var batched = await CreateStorageAsync();
+        var genesis = Round(0, (Alice, 100, 100));
+        var rounds = new[]
+        {
+            Round(1, (Alice, -30, 70), (Bob, 30, 30)),
+            Round(2),
+            Round(3, (Bob, -10, 20), (Carol, 10, 10), (Alice, -5, 65)),
+            Round(4, (Carol, -10, 0)),
+        };
+        await single.WriteRoundAsync(genesis.Status, genesis.Effects, CancellationToken.None);
+        await batched.WriteRoundAsync(genesis.Status, genesis.Effects, CancellationToken.None);
+
+        foreach (var round in rounds)
+        {
+            await single.WriteRoundAsync(round.Status, round.Effects, CancellationToken.None);
+        }
+
+        Assert.True(await batched.WriteRoundsAsync(rounds, CancellationToken.None));
+
+        Assert.Equal(4UL, (await batched.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!.IndexedRound);
+        foreach (var account in new[] { Alice, Bob, Carol })
+        {
+            for (ulong round = 0; round <= 4; round++)
+            {
+                Assert.Equal(
+                    (await single.GetBalanceAtRoundAsync(account, Native, round, CancellationToken.None)).Value,
+                    (await batched.GetBalanceAtRoundAsync(account, Native, round, CancellationToken.None)).Value);
+            }
+
+            var expected = (await single.GetHoldingsAsync(account, true, null, 10, CancellationToken.None)).Items;
+            var actual = (await batched.GetHoldingsAsync(account, true, null, 10, CancellationToken.None)).Items;
+            Assert.Equal(expected.Select(static h => (h.Token, h.Amount, h.OptedIn, h.LastChangedRound)), actual.Select(static h => (h.Token, h.Amount, h.OptedIn, h.LastChangedRound)));
+        }
+
+        var holders = await batched.GetHoldersAtRoundAsync(Native, 4, true, null, 10, CancellationToken.None);
+        Assert.Equal(3, holders.Items.Count);
+        Assert.Equal(
+            (await single.GetEffectsAsync(Carol, Native, null, null, null, 10, CancellationToken.None)).Items.Select(static e => e.Id),
+            (await batched.GetEffectsAsync(Carol, Native, null, null, null, 10, CancellationToken.None)).Items.Select(static e => e.Id));
+    }
+
+    [Fact]
+    public async Task A_Refused_Batch_Leaves_Nothing_Behind()
+    {
+        var storage = await CreateStorageAsync();
+        var genesis = Round(0, (Alice, 100, 100));
+        await storage.WriteRoundAsync(genesis.Status, genesis.Effects, CancellationToken.None);
+
+        // A gap in front, a gap inside, a repeated effect identity in the last round, and a replay of published rounds.
+        await Assert.ThrowsAsync<ChainDivergenceException>(() => storage.WriteRoundsAsync([Round(2, (Alice, -1, 99))], CancellationToken.None));
+        await Assert.ThrowsAnyAsync<ArgumentException>(() => storage.WriteRoundsAsync([Round(1, (Alice, -1, 99)), Round(3)], CancellationToken.None));
+        var twice = Round(2, (Alice, -1, 98));
+        await Assert.ThrowsAnyAsync<Exception>(() => storage.WriteRoundsAsync(
+            [Round(1, (Alice, -1, 99)), twice with { Effects = [.. twice.Effects, .. twice.Effects] }],
+            CancellationToken.None));
+        await storage.WriteRoundAsync(Round(1, (Alice, -1, 99)).Status, Round(1, (Alice, -1, 99)).Effects, CancellationToken.None);
+        await Assert.ThrowsAsync<ChainDivergenceException>(() => storage.WriteRoundsAsync([Round(1), Round(2)], CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentException>(() => storage.WriteRoundsAsync([], CancellationToken.None));
+
+        Assert.Equal(1UL, (await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!.IndexedRound);
+        Assert.Equal(99UL, (ulong)(await storage.GetBalanceAtRoundAsync(Alice, Native, 1, CancellationToken.None)).Value);
+        Assert.Single((await storage.GetEffectsAsync(Alice, Native, 1, null, null, 10, CancellationToken.None)).Items);
+    }
+
+    [Fact]
+    public async Task A_Batch_Of_One_Round_Replays_Like_A_Single_Write()
+    {
+        var storage = await CreateStorageAsync();
+        var genesis = Round(0, (Alice, 100, 100));
+
+        Assert.True(await storage.WriteRoundsAsync([genesis], CancellationToken.None));
+        Assert.False(await storage.WriteRoundsAsync([genesis], CancellationToken.None));
+    }
+
+    [Theory]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(100)]
+    public async Task Indexing_In_Batches_Gives_The_Same_Result_As_Round_By_Round(int batch)
+    {
+        var plain = await CreateStorageAsync();
+        var batched = await CreateStorageAsync();
+        await CreateIndexer(plain, Adapter()).RunAsync(LastRound, CancellationToken.None);
+
+        var result = await CreateIndexer(batched, Adapter(), Batched(batch)).RunAsync(LastRound, CancellationToken.None);
+
+        Assert.Equal((1UL, LastRound, (long)LastRound), (result.FirstRound, result.LastRound, result.RoundsIndexed));
+        Assert.Equal(LastRound, (await batched.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!.IndexedRound);
+        foreach (var account in new[] { Alice, Bob, Carol, Dave, Chain.FeeSink, Chain.Pool })
+        {
+            for (ulong round = 0; round <= LastRound; round++)
+            {
+                Assert.Equal(
+                    (await plain.GetBalanceAtRoundAsync(account, Native, round, CancellationToken.None)).Value,
+                    (await batched.GetBalanceAtRoundAsync(account, Native, round, CancellationToken.None)).Value);
+            }
+
+            Assert.Equal(
+                (await plain.GetEffectsAsync(account, Native, null, null, null, 100, CancellationToken.None)).Items.Select(static e => (e.Id, e.Delta, e.BalanceAfter)),
+                (await batched.GetEffectsAsync(account, Native, null, null, null, 100, CancellationToken.None)).Items.Select(static e => (e.Id, e.Delta, e.BalanceAfter)));
+        }
+    }
+
+    [Fact]
+    public async Task An_Asset_Created_And_Destroyed_Inside_One_Batch_Is_Handled()
+    {
+        const ulong asset = 100;
+        var chain = new TestChain();
+        var storage = await CreateStorageAsync();
+        var blocks = new[]
+        {
+            chain.Block(1, [new TestPayment(Alice, Alice, 0, Asset: TestAsset.Creation(asset, 1_000))], rewards: RewardsAt(1)),
+            chain.Block(2, [new TestPayment(Bob, Bob, 0, Asset: TestAsset.OptIn(asset)), new TestPayment(Alice, Bob, 0, Asset: TestAsset.Transfer(asset, 1))], rewards: RewardsAt(2)),
+            chain.Block(3, [new TestPayment(Bob, Alice, 0, Asset: TestAsset.Transfer(asset, 1))], rewards: RewardsAt(3)),
+            chain.Block(4, [new TestPayment(Alice, Alice, 0, Asset: TestAsset.Destroy(asset))], rewards: RewardsAt(4)),
+        };
+
+        await CreateIndexer(storage, Adapter(blocks), Batched(100)).RunAsync(4, CancellationToken.None);
+
+        var token = await storage.GetAsync(TokenKey.Asa(asset), CancellationToken.None);
+        Assert.Equal(4UL, token!.DeletedRound);
+        Assert.Equal(1UL, (ulong)(await storage.GetBalanceAtRoundAsync(Bob, TokenKey.Asa(asset), 2, CancellationToken.None)).Value);
+        Assert.True((await storage.GetBalanceAtRoundAsync(Alice, TokenKey.Asa(asset), 4, CancellationToken.None)).IsZero);
     }
 }
 

@@ -167,6 +167,9 @@ public sealed class ApiTests : IDisposable
         public Task<bool> WriteRoundAsync(ChainStatus roundStatus, IReadOnlyList<AvmBalanceIndexer.Domain.Effects.TokenEffect> effects, CancellationToken cancellationToken) =>
             throw new InvalidOperationException();
 
+        public Task<bool> WriteRoundsAsync(IReadOnlyList<RoundWrite> rounds, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException();
+
         public Task EnsureSchemaAsync(CancellationToken cancellationToken) => throw new InvalidOperationException();
     }
 }

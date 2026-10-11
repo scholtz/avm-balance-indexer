@@ -20,6 +20,8 @@ public sealed class BalanceTracker(IBalanceReadStore store, int maxCacheEntries)
     private readonly int _generationSize = Math.Max(1, maxCacheEntries / 2);
     private static readonly BigInteger Uint256Max = (BigInteger.One << 256) - 1;
 
+    // Balances of rounds that are computed but not yet written; the next round must see them, the cache must not hold them yet.
+    private readonly Dictionary<HoldingKey, Amount> _staged = [];
     private Dictionary<HoldingKey, Amount> _young = [];
     private Dictionary<HoldingKey, Amount> _old = [];
 
@@ -34,7 +36,7 @@ public sealed class BalanceTracker(IBalanceReadStore store, int maxCacheEntries)
         var missing = new List<HoldingKey>();
         foreach (var key in keys)
         {
-            if (_young.TryGetValue(key, out var cached) || _old.TryGetValue(key, out cached))
+            if (_staged.TryGetValue(key, out var cached) || _young.TryGetValue(key, out cached) || _old.TryGetValue(key, out cached))
             {
                 working[key] = cached;
             }
@@ -107,6 +109,32 @@ public sealed class BalanceTracker(IBalanceReadStore store, int maxCacheEntries)
         && next.Id.Round == debit.Id.Round
         && next.Id.IntraRoundOrder == debit.Id.IntraRoundOrder
         && next.Id.InnerPath.SequenceEqual(debit.Id.InnerPath);
+
+    /// <summary>
+    /// Remembers the balances of a computed round that is waiting for a batched write, so the next round starts from them.
+    /// <see cref="CommitStaged"/> moves them to the cache once the batch is durable. When a write fails, the tracker must be
+    /// discarded: the staged balances describe rounds that are not in storage.
+    /// </summary>
+    public void Stage(RoundEffects round)
+    {
+        ArgumentNullException.ThrowIfNull(round);
+        foreach (var (key, amount) in round.FinalBalances)
+        {
+            _staged[key] = amount;
+        }
+    }
+
+    /// <summary>Records the staged balances after the batch that contained them was durably written.</summary>
+    public void CommitStaged()
+    {
+        if (_staged.Count == 0)
+        {
+            return;
+        }
+
+        Commit(new RoundEffects([], new Dictionary<HoldingKey, Amount>(_staged)));
+        _staged.Clear();
+    }
 
     /// <summary>Records the balances of a round that was durably written.</summary>
     public void Commit(RoundEffects round)

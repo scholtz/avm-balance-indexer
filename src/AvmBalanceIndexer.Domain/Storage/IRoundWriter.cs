@@ -21,4 +21,18 @@ public interface IRoundWriter
     /// block hash that differs from the published one.
     /// </exception>
     Task<bool> WriteRoundAsync(ChainStatus roundStatus, IReadOnlyList<TokenEffect> effects, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Persists several consecutive rounds as one unit and publishes the last of them. Nothing of the batch is visible before
+    /// the last round is published, and the cursor never points into the middle of a batch. A backfill commits many rounds per
+    /// call because a commit costs several database round trips regardless of its size.
+    /// </summary>
+    /// <remarks>
+    /// The first round must directly follow the published one (round 0 for an empty database). A batch of exactly one round
+    /// behaves like <see cref="WriteRoundAsync"/>, including the idempotent replay of the latest published round.
+    /// </remarks>
+    /// <returns>True when the batch was applied; false when it was a replay of the latest published round.</returns>
+    /// <exception cref="ChainDivergenceException">The first round does not follow the published cursor.</exception>
+    /// <exception cref="ArgumentException">The batch is not valid, see <see cref="RoundWrite.EnsureValid"/>.</exception>
+    Task<bool> WriteRoundsAsync(IReadOnlyList<RoundWrite> rounds, CancellationToken cancellationToken);
 }

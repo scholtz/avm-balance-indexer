@@ -7,9 +7,23 @@ public sealed class IndexerOptions : IValidatableObject
 {
     public const string SectionName = "Indexer";
 
-    /// <summary>Blocks fetched in parallel ahead of the commit position.</summary>
-    [Range(1, 256)]
-    public int FetchConcurrency { get; set; } = 8;
+    /// <summary>
+    /// Blocks fetched in parallel ahead of the commit position. Downloading is what limits a backfill (a block takes about
+    /// 100 ms from a gossip host, so 8 in flight is under 10 rounds per second); 64 gives about 40.
+    /// </summary>
+    [Range(1, 1024)]
+    public int FetchConcurrency { get; set; } = 64;
+
+    /// <summary>
+    /// While backfilling, this many consecutive rounds are committed in one database transaction (one cursor update, a handful
+    /// of statements). Near the chain tip every round is committed on its own. 1 turns batching off.
+    /// </summary>
+    [Range(1, 1000)]
+    public int CommitBatchRounds { get; set; } = 25;
+
+    /// <summary>A batch is also committed once it holds this many effects, which bounds the memory and statement size of a commit.</summary>
+    [Range(1, 1_000_000)]
+    public int CommitBatchEffects { get; set; } = 20_000;
 
     /// <summary>How long to wait at the chain tip before asking for the latest round again.</summary>
     [Range(typeof(TimeSpan), "00:00:00.100", "00:10:00")]

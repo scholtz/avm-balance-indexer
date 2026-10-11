@@ -78,72 +78,82 @@ public partial class InMemoryChainStorage(ChainContext context) : IChainStorage
     {
         ArgumentNullException.ThrowIfNull(roundStatus);
         ArgumentNullException.ThrowIfNull(effects);
-        if (roundStatus.Chain != context.Chain)
+        return WriteRoundsAsync([new RoundWrite(roundStatus, effects)], cancellationToken);
+    }
+
+    public virtual Task<bool> WriteRoundsAsync(IReadOnlyList<RoundWrite> rounds, CancellationToken cancellationToken)
+    {
+        RoundWrite.EnsureValid(rounds);
+        if (rounds.Any(r => r.Status.Chain != context.Chain))
         {
-            throw new ArgumentException("Wrong chain.", nameof(roundStatus));
+            throw new ArgumentException("Wrong chain.", nameof(rounds));
         }
 
-        var round = roundStatus.IndexedRound;
-        if (effects.Any(e => e.Id.Round != round))
-        {
-            throw new ArgumentException($"All effects must belong to round {round}.", nameof(effects));
-        }
-
+        var firstRound = rounds[0].Status.IndexedRound;
+        var lastStatus = rounds[^1].Status;
         lock (_gate)
         {
             if (_status is null)
             {
-                if (round != 0)
+                if (firstRound != 0)
                 {
-                    throw new ChainDivergenceException($"The first round written must be 0 but round {round} was given.");
+                    throw new ChainDivergenceException($"The first round written must be 0 but round {firstRound} was given.");
                 }
             }
-            else if (round == _status.IndexedRound)
+            else if (rounds.Count == 1 && firstRound == _status.IndexedRound)
             {
-                if (!roundStatus.IndexedBlockHash.Span.SequenceEqual(_status.IndexedBlockHash.Span))
+                if (!lastStatus.IndexedBlockHash.Span.SequenceEqual(_status.IndexedBlockHash.Span))
                 {
-                    throw new ChainDivergenceException($"Round {round} is already published with a different block hash.");
+                    throw new ChainDivergenceException($"Round {firstRound} is already published with a different block hash.");
                 }
 
                 return Task.FromResult(false);
             }
-            else if (round < _status.IndexedRound)
+            else if (firstRound <= _status.IndexedRound)
             {
                 throw new ChainDivergenceException(
-                    $"Round {round} is older than the published round {_status.IndexedRound}; its block hash can no longer be verified, so it is refused.");
+                    $"Round {firstRound} is older than the published round {_status.IndexedRound}; its block hash can no longer be verified, so it is refused.");
             }
-            else if (round != _status.IndexedRound + 1)
+            else if (firstRound != _status.IndexedRound + 1)
             {
-                throw new ChainDivergenceException($"Round {round} would leave a gap after published round {_status.IndexedRound}.");
+                throw new ChainDivergenceException($"Round {firstRound} would leave a gap after published round {_status.IndexedRound}.");
             }
 
-            var seen = new HashSet<(HoldingKey, int, int)>();
-            foreach (var effect in effects)
+            // Check the whole batch before changing anything, so a refused batch leaves no trace.
+            foreach (var write in rounds)
             {
-                if (!seen.Add((new HoldingKey(effect.Account, effect.Token), effect.Id.IntraRoundOrder, effect.Id.Ordinal)))
+                var seen = new HashSet<(HoldingKey, int, int)>();
+                foreach (var effect in write.Effects)
                 {
-                    throw new InvalidOperationException($"Round {round} contains two effects with the same identity (ordinal {effect.Id.Ordinal}).");
+                    if (!seen.Add((new HoldingKey(effect.Account, effect.Token), effect.Id.IntraRoundOrder, effect.Id.Ordinal)))
+                    {
+                        throw new InvalidOperationException($"Round {write.Status.IndexedRound} contains two effects with the same identity (ordinal {effect.Id.Ordinal}).");
+                    }
                 }
             }
 
-            foreach (var effect in effects)
+            foreach (var write in rounds)
             {
-                var key = new HoldingKey(effect.Account, effect.Token);
-                if (!_effects.TryGetValue(key, out var list))
+                var round = write.Status.IndexedRound;
+                foreach (var effect in write.Effects)
                 {
-                    _effects[key] = list = [];
+                    var key = new HoldingKey(effect.Account, effect.Token);
+                    if (!_effects.TryGetValue(key, out var list))
+                    {
+                        _effects[key] = list = [];
+                    }
+
+                    list.Add(effect);
                 }
 
-                list.Add(effect);
+                foreach (var group in write.Effects.GroupBy(static e => new HoldingKey(e.Account, e.Token)))
+                {
+                    var last = group.MaxBy(static e => e.Id.Ordinal)!;
+                    _holdings[group.Key] = new Holding(group.Key.Account, group.Key.Token, last.BalanceAfter, last.Type != EffectType.AssetOptOut, round);
+                }
             }
 
-            foreach (var group in effects.GroupBy(static e => new HoldingKey(e.Account, e.Token)))
-            {
-                var last = group.MaxBy(static e => e.Id.Ordinal)!;
-                _holdings[group.Key] = new Holding(group.Key.Account, group.Key.Token, last.BalanceAfter, last.Type != EffectType.AssetOptOut, round);
-            }
-
-            _status = roundStatus;
+            _status = lastStatus;
         }
 
         return Task.FromResult(true);

@@ -96,18 +96,29 @@ public sealed partial class RoundIndexer(
                 continue;
             }
 
+            var pending = new List<RoundWrite>();
+            var pendingEffects = 0;
             try
             {
                 await foreach (var block in OrderedPrefetch.StreamAsync(
                     next, target, _options.FetchConcurrency, adapter.FetchBlockAsync, cancellationToken).ConfigureAwait(false))
                 {
-                    var written = await IndexBlockAsync(chain, tracker, status, rewards, block, target, cancellationToken).ConfigureAwait(false);
-                    status = written.Status;
+                    var queued = await QueueBlockAsync(chain, tracker, status, rewards, block, target, cancellationToken).ConfigureAwait(false);
+                    status = queued.Status;
+                    pending.Add(queued);
+                    pendingEffects += queued.Effects.Count;
                     rewards = RewardsState.FromHeader(block.Block);
                     next = block.Round + 1;
                     rounds++;
-                    Interlocked.Increment(ref _roundsCommitted);
-                    effects += written.EffectCount;
+                    effects += queued.Effects.Count;
+
+                    // Batching is for backfills; near the tip (or at the end of a bounded run) every round is published at once.
+                    var backfilling = target - block.Round > (ulong)_options.FollowingThresholdRounds;
+                    if (!backfilling || pending.Count >= _options.CommitBatchRounds || pendingEffects >= _options.CommitBatchEffects || block.Round == target)
+                    {
+                        await FlushAsync(tracker, pending, cancellationToken).ConfigureAwait(false);
+                        pendingEffects = 0;
+                    }
 
                     if (rounds % _options.LogEveryRounds == 0)
                     {
@@ -117,10 +128,15 @@ public sealed partial class RoundIndexer(
             }
             catch (BlockNotAvailableException ex) when (stopAfterRound is null)
             {
+                // What was computed so far is written first, so the wait does not hold rounds back.
+                await FlushAsync(tracker, pending, cancellationToken).ConfigureAwait(false);
+
                 // At the tip the archival nodes may not have the newest block yet; wait and ask again. A block far behind the
                 // tip that nobody serves is a stall, not a wait.
                 await WaitIfJustMissingAsync(ex, cancellationToken).ConfigureAwait(false);
             }
+
+            await FlushAsync(tracker, pending, cancellationToken).ConfigureAwait(false);
         }
 
         return new IndexingResult(first, status.IndexedRound, rounds, effects);
@@ -218,7 +234,8 @@ public sealed partial class RoundIndexer(
                 $"The archival source serves a different block {status.IndexedRound} than the one published. The database must be rebuilt.");
     }
 
-    private async Task<(ChainStatus Status, int EffectCount)> IndexBlockAsync(
+    /// <summary>Validates, normalizes and balances one block and stages the result; <see cref="FlushAsync"/> writes it.</summary>
+    private async Task<RoundWrite> QueueBlockAsync(
         string chain,
         BalanceTracker tracker,
         ChainStatus previous,
@@ -259,15 +276,29 @@ public sealed partial class RoundIndexer(
 
         var state = targetRound - block.Round <= (ulong)_options.FollowingThresholdRounds ? IngestionState.Following : IngestionState.Backfilling;
         var status = new ChainStatus(chain, block.Round, block.Hash, targetRound, state, _time.GetUtcNow());
-        if (!await storage.WriteRoundAsync(status, round.Effects, cancellationToken).ConfigureAwait(false))
+        tracker.Stage(round);
+        return new RoundWrite(status, round.Effects);
+    }
+
+    /// <summary>Writes the staged rounds as one unit and lets the tracker cache their balances.</summary>
+    private async Task FlushAsync(BalanceTracker tracker, List<RoundWrite> pending, CancellationToken cancellationToken)
+    {
+        if (pending.Count == 0)
         {
-            // This indexer only ever writes the next round, so finding it published means a second writer is active; its
-            // balances may differ from the ones computed here, which must not be cached.
-            throw new ChainDivergenceException($"Round {block.Round} of {chain} was published by another writer. Only one indexer may write a chain.");
+            return;
         }
 
-        tracker.Commit(round);
-        return (status, round.Effects.Count);
+        if (!await storage.WriteRoundsAsync(pending, cancellationToken).ConfigureAwait(false))
+        {
+            // This indexer only ever writes the next rounds, so finding the first one published means a second writer is active;
+            // its balances may differ from the ones computed here, which must not be cached.
+            throw new ChainDivergenceException(
+                $"Round {pending[0].Status.IndexedRound} of {pending[0].Status.Chain} was published by another writer. Only one indexer may write a chain.");
+        }
+
+        tracker.CommitStaged();
+        Interlocked.Add(ref _roundsCommitted, pending.Count);
+        pending.Clear();
     }
 
     /// <summary>ARC-200 records are only written the first time a token is seen, so busy tokens cost no write per block.</summary>
