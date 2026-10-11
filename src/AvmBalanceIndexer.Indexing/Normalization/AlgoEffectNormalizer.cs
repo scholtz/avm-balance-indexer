@@ -51,7 +51,7 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
             var transactionId = TransactionIdCalculator.Compute(apply, block.GenesisHash, block.GenesisId);
             round.BeginTransaction(index + 1, transactionId);
             // Blocks of the early protocols do not record the id of a created asset; it is the transaction counter at the transaction.
-            var legacyCreatedId = header.TxnCounter is { } counter ? counter - (ulong)transactions.Length + (ulong)index + 1 : 0UL;
+            var legacyCreatedId = LegacyCreatedId(header.TxnCounter, transactions.Length, index, block.ApplyData);
             ApplyTransaction(round, transactions[index], apply, [], 0, legacyCreatedId);
         }
 
@@ -67,6 +67,21 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
         }
 
         return new NormalizedBlock(round.Deltas, round.TokenChanges);
+    }
+
+    /// <summary>
+    /// The id of an asset created at <paramref name="index"/> in a block that does not record it: the transaction counter
+    /// after the block minus the transactions after this one. That only holds while every counted transaction is a top-level
+    /// one, which is true before inner transactions exist (the same protocols that lack the id); zero means unknown.
+    /// </summary>
+    private static ulong LegacyCreatedId(ulong? counter, int transactions, int index, IReadOnlyList<TxnApplyData> apply)
+    {
+        if (counter is not { } after || after < (ulong)transactions || apply.Any(static a => a.InnerTxns.Count > 0))
+        {
+            return 0;
+        }
+
+        return after - (ulong)transactions + (ulong)index + 1;
     }
 
     private static void ApplyStartOfBlock(RoundBuilder round, BlockData block, RewardsState previousRewards)
@@ -262,10 +277,10 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
             round.Add(creator, BigInteger.Zero, token, EffectType.AssetOptOut, null, path, keepZero: true);
             round.Record(info with { DeletedRound = round.Round });
         }
-
         else if (raw.Params is { } changed && round.FindAsset(raw.ConfigAssetId) is { } existing)
         {
-            // Reconfiguring moves no units; it can change the management addresses and with them the ARC-20 classification.
+            // Reconfiguring moves no units, so a missing record (an index that did not start at genesis) is not an error.
+            // It can change the management addresses and with them the ARC-20 classification.
             round.Record(AssetRecords.Reconfigured(existing, changed));
         }
     }

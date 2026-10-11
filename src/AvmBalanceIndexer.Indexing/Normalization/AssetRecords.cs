@@ -34,7 +34,7 @@ public static class AssetRecords
             ControllingAppId: null,
             CreatedRound: round,
             DeletedRound: null,
-            Metadata(parameters.Total, Clean(parameters.Url), parameters));
+            Metadata(parameters.Total, Clean(parameters.Url), parameters, issuingApplication));
         return Classify(info, parameters.DefaultFrozen, parameters.Clawback, issuingApplication);
     }
 
@@ -48,9 +48,9 @@ public static class AssetRecords
         var current = ReadMetadata(info);
         var reconfigured = info with
         {
-            MetadataJson = Metadata(Total(info), current.Url, parameters with { DefaultFrozen = current.DefaultFrozen }),
+            MetadataJson = Metadata(Total(info), current.Url, parameters with { DefaultFrozen = current.DefaultFrozen }, current.IssuingApplication),
         };
-        return Classify(reconfigured, current.DefaultFrozen, parameters.Clawback, info.ControllingAppId ?? 0);
+        return Classify(reconfigured, current.DefaultFrozen, parameters.Clawback, current.IssuingApplication);
     }
 
     // Asset names are arbitrary bytes and often padded with NUL, which PostgreSQL text and jsonb columns reject.
@@ -58,7 +58,8 @@ public static class AssetRecords
 
     /// <summary>
     /// ARC-20 Smart ASAs are created by their controlling application, hold the application account as clawback and start
-    /// frozen. All three are visible on chain, so the classification is verified; the ASA balance stays the only balance stream.
+    /// frozen. All three are visible on chain, which makes the classification evidence-based rather than formally verified
+    /// (another contract can create such an asset); the ASA balance stays the only balance stream.
     /// </summary>
     private static TokenInfo Classify(TokenInfo info, bool defaultFrozen, byte[]? clawback, ulong application)
     {
@@ -71,12 +72,13 @@ public static class AssetRecords
             : info with { Standard = TokenStandard.Asa, StandardVerified = true, ControllingAppId = null };
     }
 
-    private static string Metadata(ulong total, string? url, RawAssetParams parameters) =>
+    private static string Metadata(ulong total, string? url, RawAssetParams parameters, ulong issuingApplication) =>
         JsonSerializer.Serialize(new Dictionary<string, string?>
         {
             ["total"] = total.ToString(CultureInfo.InvariantCulture),
             ["url"] = url,
             ["defaultFrozen"] = parameters.DefaultFrozen ? "true" : "false",
+            ["issuingApplication"] = issuingApplication == 0 ? null : issuingApplication.ToString(CultureInfo.InvariantCulture),
             ["manager"] = Text(parameters.Manager),
             ["reserve"] = Text(parameters.Reserve),
             ["freeze"] = Text(parameters.Freeze),
@@ -86,13 +88,16 @@ public static class AssetRecords
     private static string? Text(byte[]? address) =>
         address is null || address.All(static b => b == 0) ? null : new Algorand.Address(address).EncodeAsString();
 
-    private static (string? Url, bool DefaultFrozen) ReadMetadata(TokenInfo info)
+    // Records written before the addresses were kept have none of these fields; they read as unset.
+    private static (string? Url, bool DefaultFrozen, ulong IssuingApplication) ReadMetadata(TokenInfo info)
     {
         using var document = JsonDocument.Parse(info.MetadataJson ?? "{}");
         var root = document.RootElement;
+        string? Text(string name) => root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
         return (
-            root.TryGetProperty("url", out var url) && url.ValueKind == JsonValueKind.String ? url.GetString() : null,
-            root.TryGetProperty("defaultFrozen", out var frozen) && frozen.GetString() == "true");
+            Text("url"),
+            Text("defaultFrozen") == "true",
+            ulong.TryParse(Text("issuingApplication"), NumberStyles.None, CultureInfo.InvariantCulture, out var application) ? application : 0);
     }
 
     /// <summary>Total supply recorded at creation.</summary>

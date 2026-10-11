@@ -5,13 +5,12 @@ namespace AvmBalanceIndexer.Indexing.Normalization;
 /// <summary>Finds what a block needs to know about assets before it can be normalized.</summary>
 public static class AssetScanner
 {
-    /// <summary>
-    /// Ids of the assets the block destroys or reconfigures, inner transactions included: their stored records are needed
-    /// to normalize it.
-    /// </summary>
+    /// <summary>Ids of the assets the block destroys, inner transactions included.</summary>
     public static IReadOnlySet<ulong> DestroyedAssets(BlockData block) => ReferencedAssets(block, destroyedOnly: true);
 
-    /// <inheritdoc cref="DestroyedAssets"/>
+    /// <summary>Ids of the assets the block destroys or reconfigures, or only those it destroys.</summary>
+    /// <param name="block">The block to scan.</param>
+    /// <param name="destroyedOnly">Leave out the assets that are only reconfigured.</param>
     public static IReadOnlySet<ulong> ReferencedAssets(BlockData block, bool destroyedOnly = false)
     {
         ArgumentNullException.ThrowIfNull(block);

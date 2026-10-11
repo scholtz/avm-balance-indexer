@@ -13,7 +13,7 @@ which a block-only indexer cannot read.
 
 - An asset is an ARC-20 Smart ASA when it was created by an application as an inner transaction, starts frozen, and has that
   application's account as clawback. The application id is the issuing application (`ControllingAppId`), the classification is
-  verified (all three facts are on chain), and the record has `Standard = Arc20`. Everything else is a plain ASA.
+  evidence-based (all three facts are on chain; another contract could create such an asset, so it is not a formal verification of the ARC-20 interface), and the record has `Standard = Arc20`. Everything else is a plain ASA.
 - The management addresses (and the whole record) follow `acfg` reconfigurations; the classification is re-evaluated, so an asset
   whose clawback moves away from the application stops being reported as Smart ASA. The record carries the addresses as text in
   its metadata json.
@@ -27,3 +27,5 @@ which a block-only indexer cannot read.
 - Smart ASAs created by hand (outside the application) with the application's clawback are not recognised: only the creation by the
   application proves the link on chain.
 - No off-chain request is made while indexing.
+- Records written by the previous version carry no addresses or issuing application; they read as unset (a frozen Smart ASA created
+  before would stay a plain ASA), so a database indexed before this change should be rebuilt.

@@ -83,6 +83,27 @@ public class Arc20ClassificationTests
     }
 
     [Fact]
+    public void Moving_The_Clawback_Back_To_The_Application_Restores_The_Classification()
+    {
+        var smart = Assert.Single(Normalize(Chain.Block(5, [CreatedByApplication(App, Smart(AppAccount))])).TokenChanges);
+        var plain = Assert.Single(Normalize(Chain.Block(6, [new TestPayment(Alice, Alice, 0, Asset: TestAsset.Reconfiguration(Asset, Bob, null))]), smart).TokenChanges);
+
+        var restored = Assert.Single(Normalize(Chain.Block(7, [new TestPayment(Alice, Alice, 0, Asset: TestAsset.Reconfiguration(Asset, Bob, AppAccount))]), plain).TokenChanges);
+
+        Assert.Equal((TokenStandard.Arc20, (ulong?)App), (restored.Standard, restored.ControllingAppId));
+    }
+
+    [Fact]
+    public void Records_Written_Before_The_Addresses_Were_Kept_Can_Still_Be_Reconfigured()
+    {
+        var old = new TokenInfo(TokenKey.Asa(Asset), Alice, 0, null, null, TokenStandard.Asa, true, null, 1, null, "{\"total\":\"5\",\"url\":null}");
+
+        var changed = Assert.Single(Normalize(Chain.Block(6, [new TestPayment(Alice, Alice, 0, Asset: TestAsset.Reconfiguration(Asset, Bob, null))]), old).TokenChanges);
+
+        Assert.Equal((TokenStandard.Asa, 5UL), (changed.Standard, AssetRecords.Total(changed)));
+    }
+
+    [Fact]
     public void Reconfiguring_An_Arc20_Asset_Without_Touching_The_Clawback_Keeps_The_Classification()
     {
         var smart = Assert.Single(Normalize(Chain.Block(5, [CreatedByApplication(App, Smart(AppAccount))])).TokenChanges);

@@ -15,6 +15,6 @@ public interface IEffectNormalizer
     /// <summary>Like <see cref="Normalize"/>, with the token records the block creates or destroys.</summary>
     /// <param name="block">The block to process.</param>
     /// <param name="previousRewards">Rewards state of the previous block.</param>
-    /// <param name="assets">Records of the assets the block destroys (see <see cref="AssetScanner.DestroyedAssets"/>).</param>
+    /// <param name="assets">Records of the assets the block destroys or reconfigures (see <see cref="AssetScanner.ReferencedAssets"/>).</param>
     NormalizedBlock NormalizeBlock(BlockData block, RewardsState previousRewards, IAssetDirectory assets);
 }
