@@ -33,7 +33,7 @@ public partial class InMemoryChainStorage(ChainContext context) : IChainStorage
 
     public virtual Task EnsureSchemaAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
-    public Task<ChainStatus?> GetAsync(string chain, CancellationToken cancellationToken)
+    public virtual Task<ChainStatus?> GetAsync(string chain, CancellationToken cancellationToken)
     {
         lock (_gate)
         {

@@ -92,6 +92,7 @@ curl http://localhost:5000/v1/algorand-testnet/status
 | `Algorand:AlgodUrl` / `AlgodToken` | Algod node for the latest round and genesis. Defaults to a public endpoint. |
 | `Algorand:GossipHosts` | Archival gossip node URLs. Empty discovers them through DNS SRV. Use your own nodes in production. |
 | `Algorand:ExpectedGenesisHash` | Base64 genesis hash. Pinned for Algorand MainNet, TestNet and Voi; set it only for another network. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` / `Telemetry:Enabled` | Publishes metrics over OTLP from API and worker (ASP.NET Core, .NET runtime, `AvmBalanceIndexer.Worker` instruments) when an endpoint is set; `Telemetry:Enabled=false` forces it off. The other `OTEL_*` variables apply. |
 | `Indexer:LeaseRetryInterval` | How often a standby replica asks again for the writer lease (default 5 s). |
 | `Worker:HealthPort` / `HealthHost` | Worker probe endpoints `/healthz/live` and `/healthz/ready` (default 8081, 0 = off; use `localhost` as host on Windows). Metrics are on the `AvmBalanceIndexer.Worker` meter. |
 | `Indexer:FetchConcurrency` | Blocks fetched in parallel ahead of the commit position. |
@@ -135,7 +136,7 @@ another chain, 503 while nothing is indexed yet. A walk over the holders of the 
   (HTTP 503). Asynchronous scans are planned (#30).
 - Indexing speed is about 60 rounds per second with default settings, which is far too slow to backfill MainNet in a
   reasonable time. Batching and fetch tuning are follow-up work.
-- Several workers may run per chain: one holds the writer lease (PostgreSQL advisory lock on a dedicated session, Cassandra TTL row) and indexes, the others stand by. Failover takes up to the lease TTL (30 s) on Cassandra and about 30 s (TCP keepalives of the lease session) on PostgreSQL. Worker metrics are published on the `AvmBalanceIndexer.Worker` meter; no exporter is bundled yet.
+- Several workers may run per chain: one holds the writer lease (PostgreSQL advisory lock on a dedicated session, Cassandra TTL row) and indexes, the others stand by. Failover takes up to the lease TTL (30 s) on Cassandra and about 30 s (TCP keepalives of the lease session) on PostgreSQL. Worker metrics are published on the `AvmBalanceIndexer.Worker` meter and exported over OTLP when an endpoint is configured.
 - Block headers are hash-checked against their certificate digest and transactions against the header commitments, but
   certificate signatures are not verified (ADR 0004). A host serving a whole fabricated chain is not detected: run your
   own archival nodes.

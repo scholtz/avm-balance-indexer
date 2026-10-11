@@ -53,6 +53,15 @@ worker:
     requests: { cpu: 500m, memory: 512Mi }
     limits: { cpu: "2", memory: 2Gi }
 
+telemetry:
+  # OTLP endpoint of an OpenTelemetry collector, for example http://otel-collector:4317. Empty turns metrics export off.
+  otlpEndpoint: ""
+  # grpc (collector default port 4317) or http/protobuf (4318).
+  otlpProtocol: grpc
+  # Backends that take OTLP metrics on a full URL, for example Prometheus (set otlpProtocol to http/protobuf):
+  #   http://prometheus:9090/api/v1/otlp/v1/metrics
+  otlpMetricsEndpoint: ""
+
 algorand:
   # Algod node used for the latest round and the genesis allocations. Empty uses the chain public endpoint.
   algodUrl: ""

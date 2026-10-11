@@ -8,6 +8,16 @@ namespace AvmBalanceIndexer.Worker.Tests;
 
 public class HealthListenerTests
 {
+    private sealed class FailingFirstReadsStorage(int failures) : AvmBalanceIndexer.TestSupport.InMemoryChainStorage(new AvmBalanceIndexer.Domain.Chains.ChainContext("algorand-testnet"))
+    {
+        private int _reads;
+
+        public override Task<AvmBalanceIndexer.Domain.Chains.ChainStatus?> GetAsync(string chain, CancellationToken cancellationToken) =>
+            Interlocked.Increment(ref _reads) <= failures
+                ? Task.FromException<AvmBalanceIndexer.Domain.Chains.ChainStatus?>(new IOException("database unreachable"))
+                : Task.FromResult<AvmBalanceIndexer.Domain.Chains.ChainStatus?>(new AvmBalanceIndexer.Domain.Chains.ChainStatus("algorand-testnet", 0, new byte[32], 0, AvmBalanceIndexer.Domain.Chains.IngestionState.Following, DateTimeOffset.UnixEpoch));
+    }
+
     private static int FreePort()
     {
         using var probe = new TcpListener(IPAddress.Loopback, 0);
@@ -80,6 +90,116 @@ public class HealthListenerTests
 
         await listener.StartAsync(CancellationToken.None);
         await listener.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public void Chain_Status_Metrics_Report_Indexed_Round_Lag_And_Age()
+    {
+        var meterName = $"{WorkerHealth.MeterName}.Test.{Guid.NewGuid():N}";
+        using var health = new WorkerHealth(meterName);
+        var written = DateTimeOffset.UnixEpoch.AddHours(1);
+        health.UseClock(() => written.AddSeconds(30));
+        var observed = new Dictionary<string, long>();
+        using var meterListener = new MeterListener();
+        meterListener.InstrumentPublished = (instrument, l) =>
+        {
+            if (instrument.Meter.Name == meterName)
+            {
+                l.EnableMeasurementEvents(instrument);
+            }
+        };
+        meterListener.SetMeasurementEventCallback<long>((instrument, value, _, _) => observed[instrument.Name] = value);
+        meterListener.Start();
+
+        meterListener.RecordObservableInstruments();
+        Assert.DoesNotContain("avm.indexer.indexed_round", observed.Keys);
+
+        health.ReportChainStatus(new AvmBalanceIndexer.Domain.Chains.ChainStatus("algorand-testnet", 100, new byte[32], 130, AvmBalanceIndexer.Domain.Chains.IngestionState.Following, written));
+        meterListener.RecordObservableInstruments();
+
+        Assert.Equal(100, observed["avm.indexer.indexed_round"]);
+        Assert.Equal(130, observed["avm.indexer.target_round"]);
+        Assert.Equal(30, observed["avm.indexer.lag_rounds"]);
+        Assert.Equal(30, observed["avm.indexer.status_age_seconds"]);
+    }
+
+    [Fact]
+    public async Task The_Status_Sampler_Publishes_The_Database_Status_And_Survives_Read_Failures()
+    {
+        var storage = new AvmBalanceIndexer.TestSupport.InMemoryChainStorage(new AvmBalanceIndexer.Domain.Chains.ChainContext("algorand-testnet"));
+        await storage.WriteRoundAsync(
+            new AvmBalanceIndexer.Domain.Chains.ChainStatus("algorand-testnet", 0, AvmBalanceIndexer.TestSupport.TestChain.FakeHash(0), 5, AvmBalanceIndexer.Domain.Chains.IngestionState.Backfilling, DateTimeOffset.UnixEpoch),
+            [],
+            CancellationToken.None);
+        var meterName = $"{WorkerHealth.MeterName}.Test.{Guid.NewGuid():N}";
+        using var health = new WorkerHealth(meterName);
+        using var sampler = new StatusSampler(
+            storage,
+            new AvmBalanceIndexer.Domain.Chains.ChainContext("algorand-testnet"),
+            health,
+            Options.Create(new WorkerOptions { StatusSampleSeconds = 1 }),
+            NullLogger<StatusSampler>.Instance);
+        var observed = new Dictionary<string, long>();
+        using var meterListener = new MeterListener();
+        meterListener.InstrumentPublished = (instrument, l) =>
+        {
+            if (instrument.Meter.Name == meterName)
+            {
+                l.EnableMeasurementEvents(instrument);
+            }
+        };
+        meterListener.SetMeasurementEventCallback<long>((instrument, value, _, _) => observed[instrument.Name] = value);
+        meterListener.Start();
+
+        await sampler.StartAsync(CancellationToken.None);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        while (!observed.ContainsKey("avm.indexer.lag_rounds"))
+        {
+            meterListener.RecordObservableInstruments();
+            await Task.Delay(20, timeout.Token);
+        }
+
+        await sampler.StopAsync(CancellationToken.None);
+
+        Assert.Equal(5, observed["avm.indexer.lag_rounds"]);
+    }
+
+    [Fact]
+    public async Task A_Failing_Status_Read_Is_Counted_And_Does_Not_Stop_The_Sampler()
+    {
+        var meterName = $"{WorkerHealth.MeterName}.Test.{Guid.NewGuid():N}";
+        using var health = new WorkerHealth(meterName);
+        var storage = new FailingFirstReadsStorage(failures: 2);
+        using var sampler = new StatusSampler(
+            storage,
+            new AvmBalanceIndexer.Domain.Chains.ChainContext("algorand-testnet"),
+            health,
+            Options.Create(new WorkerOptions { StatusSampleSeconds = 1 }),
+            NullLogger<StatusSampler>.Instance);
+        var observed = new Dictionary<string, long>();
+        using var meterListener = new MeterListener();
+        meterListener.InstrumentPublished = (instrument, l) =>
+        {
+            if (instrument.Meter.Name == meterName)
+            {
+                l.EnableMeasurementEvents(instrument);
+            }
+        };
+        meterListener.SetMeasurementEventCallback<long>((instrument, value, _, _) => observed[instrument.Name] = value);
+        meterListener.Start();
+
+        await sampler.StartAsync(CancellationToken.None);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        while (!observed.ContainsKey("avm.indexer.indexed_round"))
+        {
+            meterListener.RecordObservableInstruments();
+            await Task.Delay(50, timeout.Token);
+        }
+
+        await sampler.StopAsync(CancellationToken.None);
+
+        Assert.Equal(2, observed["avm.indexer.status_sample_failures"]);
+        Assert.Equal(0, observed["avm.indexer.indexed_round"]);
     }
 
     [Fact]

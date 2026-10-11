@@ -56,6 +56,18 @@ public class HostingExtensionsTests
     }
 
     [Fact]
+    public void Telemetry_Is_Off_Unless_An_Endpoint_Or_The_Switch_Is_Configured()
+    {
+        // Only the registrations are inspected: building a provider would start an exporter that tries to reach the endpoint.
+        static bool Registers(IServiceCollection services) => services.Any(static d => d.ServiceType == typeof(OpenTelemetry.Metrics.MeterProvider));
+
+        Assert.False(Registers(new ServiceCollection().AddAvmTelemetry(Config(("Chain", ChainId.Voi)), "avm-test")));
+        Assert.True(Registers(new ServiceCollection().AddAvmTelemetry(Config(("Chain", ChainId.Voi), (TelemetryExtensions.EndpointVariable, "http://localhost:4317")), "avm-test", "Some.Meter")));
+        Assert.True(Registers(new ServiceCollection().AddAvmTelemetry(Config(("Telemetry:Enabled", "true")), "avm-test")));
+        Assert.False(Registers(new ServiceCollection().AddAvmTelemetry(Config(("Telemetry:Enabled", "false"), (TelemetryExtensions.EndpointVariable, "http://localhost:4317")), "avm-test")));
+    }
+
+    [Fact]
     public async Task Cassandra_Registers_One_Storage_For_The_Configured_Chain_Without_Connecting()
     {
         await using var provider = Build(Config(
