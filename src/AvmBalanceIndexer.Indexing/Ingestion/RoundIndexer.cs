@@ -29,7 +29,9 @@ public sealed partial class RoundIndexer(
     private readonly IndexerOptions _options = options.Value;
     private readonly HashSet<ulong> _knownArc200 = [];
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
+    private static readonly TimeSpan FlushGracePeriod = TimeSpan.FromSeconds(10);
     private long _roundsCommitted;
+    private bool _writeFailed;
 
     /// <summary>Total rounds this instance has committed; lets a supervisor tell progress from a stall without reading storage.</summary>
     public long RoundsCommitted => Interlocked.Read(ref _roundsCommitted);
@@ -44,6 +46,7 @@ public sealed partial class RoundIndexer(
     /// <exception cref="ChainDivergenceException">A block does not link to the published chain.</exception>
     public async Task<IndexingResult> RunAsync(ulong? stopAfterRound, CancellationToken cancellationToken)
     {
+        _writeFailed = false;
         var chain = adapter.Profile.Chain;
         var status = await storage.GetAsync(chain, cancellationToken).ConfigureAwait(false);
         RewardsState rewards;
@@ -96,18 +99,29 @@ public sealed partial class RoundIndexer(
                 continue;
             }
 
+            var pending = new List<RoundWrite>();
+            var pendingEffects = 0;
             try
             {
                 await foreach (var block in OrderedPrefetch.StreamAsync(
                     next, target, _options.FetchConcurrency, adapter.FetchBlockAsync, cancellationToken).ConfigureAwait(false))
                 {
-                    var written = await IndexBlockAsync(chain, tracker, status, rewards, block, target, cancellationToken).ConfigureAwait(false);
-                    status = written.Status;
+                    var queued = await QueueBlockAsync(chain, tracker, status, rewards, block, target, cancellationToken).ConfigureAwait(false);
+                    status = queued.Status;
+                    pending.Add(queued);
+                    pendingEffects += queued.Effects.Count;
                     rewards = RewardsState.FromHeader(block.Block);
                     next = block.Round + 1;
                     rounds++;
-                    Interlocked.Increment(ref _roundsCommitted);
-                    effects += written.EffectCount;
+                    effects += queued.Effects.Count;
+
+                    // Batching is for backfills; near the tip (or at the end of a bounded run) every round is published at once.
+                    var backfilling = target - block.Round > (ulong)_options.FollowingThresholdRounds;
+                    if (!backfilling || pending.Count >= _options.CommitBatchRounds || pendingEffects >= _options.CommitBatchEffects || block.Round == target)
+                    {
+                        await FlushAsync(tracker, pending, cancellationToken).ConfigureAwait(false);
+                        pendingEffects = 0;
+                    }
 
                     if (rounds % _options.LogEveryRounds == 0)
                     {
@@ -115,12 +129,25 @@ public sealed partial class RoundIndexer(
                     }
                 }
             }
+            catch (Exception ex) when (pending.Count > 0 && !_writeFailed && ex is not (OperationCanceledException or ChainDivergenceException) && !(ex is BlockNotAvailableException && stopAfterRound is null))
+            {
+                // A failing fetch or a bad block must not throw away the rounds already computed: with batches of 25, a flaky host
+                // would otherwise keep a backfill from ever completing one. Best effort within a grace period. Cancellation is
+                // excluded on purpose: it also means a lost writer lease, after which this process must not write again.
+                await TryFlushAsync(tracker, pending).ConfigureAwait(false);
+                ExceptionDispatchInfo.Capture(ex).Throw();
+            }
             catch (BlockNotAvailableException ex) when (stopAfterRound is null)
             {
+                // What was computed so far is written first, so the wait does not hold rounds back.
+                await FlushAsync(tracker, pending, cancellationToken).ConfigureAwait(false);
+
                 // At the tip the archival nodes may not have the newest block yet; wait and ask again. A block far behind the
                 // tip that nobody serves is a stall, not a wait.
                 await WaitIfJustMissingAsync(ex, cancellationToken).ConfigureAwait(false);
             }
+
+            await FlushAsync(tracker, pending, cancellationToken).ConfigureAwait(false);
         }
 
         return new IndexingResult(first, status.IndexedRound, rounds, effects);
@@ -218,7 +245,8 @@ public sealed partial class RoundIndexer(
                 $"The archival source serves a different block {status.IndexedRound} than the one published. The database must be rebuilt.");
     }
 
-    private async Task<(ChainStatus Status, int EffectCount)> IndexBlockAsync(
+    /// <summary>Validates, normalizes and balances one block and stages the result; <see cref="FlushAsync"/> writes it.</summary>
+    private async Task<RoundWrite> QueueBlockAsync(
         string chain,
         BalanceTracker tracker,
         ChainStatus previous,
@@ -259,15 +287,54 @@ public sealed partial class RoundIndexer(
 
         var state = targetRound - block.Round <= (ulong)_options.FollowingThresholdRounds ? IngestionState.Following : IngestionState.Backfilling;
         var status = new ChainStatus(chain, block.Round, block.Hash, targetRound, state, _time.GetUtcNow());
-        if (!await storage.WriteRoundAsync(status, round.Effects, cancellationToken).ConfigureAwait(false))
+        tracker.Stage(round);
+        return new RoundWrite(status, round.Effects);
+    }
+
+    private async Task TryFlushAsync(BalanceTracker tracker, List<RoundWrite> pending)
+    {
+        using var grace = new CancellationTokenSource(FlushGracePeriod);
+        try
         {
-            // This indexer only ever writes the next round, so finding it published means a second writer is active; its
-            // balances may differ from the ones computed here, which must not be cached.
-            throw new ChainDivergenceException($"Round {block.Round} of {chain} was published by another writer. Only one indexer may write a chain.");
+            await FlushAsync(tracker, pending, grace.Token).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // The original failure is what the caller reports; the rounds are simply computed again after a restart.
+            LogFlushFailed(logger, ex, pending.Count);
+        }
+    }
+
+    /// <summary>Writes the staged rounds as one unit and lets the tracker cache their balances.</summary>
+    private async Task FlushAsync(BalanceTracker tracker, List<RoundWrite> pending, CancellationToken cancellationToken)
+    {
+        if (pending.Count == 0)
+        {
+            return;
         }
 
-        tracker.Commit(round);
-        return (status, round.Effects.Count);
+        bool applied;
+        try
+        {
+            applied = await storage.WriteRoundsAsync(pending, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            _writeFailed = true;
+            throw;
+        }
+
+        if (!applied)
+        {
+            // This indexer only ever writes the next rounds, so finding the first one published means a second writer is active;
+            // its balances may differ from the ones computed here, which must not be cached.
+            throw new ChainDivergenceException(
+                $"Round {pending[0].Status.IndexedRound} of {pending[0].Status.Chain} was published by another writer. Only one indexer may write a chain.");
+        }
+
+        tracker.CommitStaged();
+        Interlocked.Add(ref _roundsCommitted, pending.Count);
+        pending.Clear();
     }
 
     /// <summary>ARC-200 records are only written the first time a token is seen, so busy tokens cost no write per block.</summary>
@@ -307,6 +374,9 @@ public sealed partial class RoundIndexer(
 
         return new AssetDirectory(records);
     }
+
+    [LoggerMessage(EventId = 1203, Level = LogLevel.Warning, Message = "Could not write {Rounds} computed rounds while stopping; they are indexed again on restart")]
+    private static partial void LogFlushFailed(ILogger logger, Exception exception, int rounds);
 
     [LoggerMessage(EventId = 1200, Level = LogLevel.Information, Message = "{Chain}: indexed round {Round} of {Target}")]
     private static partial void LogProgress(ILogger logger, string chain, ulong round, ulong target);

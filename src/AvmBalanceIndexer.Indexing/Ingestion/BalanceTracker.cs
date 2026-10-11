@@ -20,6 +20,8 @@ public sealed class BalanceTracker(IBalanceReadStore store, int maxCacheEntries)
     private readonly int _generationSize = Math.Max(1, maxCacheEntries / 2);
     private static readonly BigInteger Uint256Max = (BigInteger.One << 256) - 1;
 
+    // Balances of rounds that are computed but not yet written; the next round must see them, the cache must not hold them yet.
+    private readonly Dictionary<HoldingKey, Amount> _staged = [];
     private Dictionary<HoldingKey, Amount> _young = [];
     private Dictionary<HoldingKey, Amount> _old = [];
 
@@ -34,7 +36,7 @@ public sealed class BalanceTracker(IBalanceReadStore store, int maxCacheEntries)
         var missing = new List<HoldingKey>();
         foreach (var key in keys)
         {
-            if (_young.TryGetValue(key, out var cached) || _old.TryGetValue(key, out cached))
+            if (_staged.TryGetValue(key, out var cached) || _young.TryGetValue(key, out cached) || _old.TryGetValue(key, out cached))
             {
                 working[key] = cached;
             }
@@ -108,15 +110,50 @@ public sealed class BalanceTracker(IBalanceReadStore store, int maxCacheEntries)
         && next.Id.IntraRoundOrder == debit.Id.IntraRoundOrder
         && next.Id.InnerPath.SequenceEqual(debit.Id.InnerPath);
 
+    /// <summary>
+    /// Remembers the balances of a computed round that is waiting for a batched write, so the next round starts from them.
+    /// <see cref="CommitStaged"/> moves them to the cache once the batch is durable. When a write fails, the tracker must be
+    /// discarded: the staged balances describe rounds that are not in storage.
+    /// </summary>
+    public void Stage(RoundEffects round)
+    {
+        ArgumentNullException.ThrowIfNull(round);
+        foreach (var (key, amount) in round.FinalBalances)
+        {
+            _staged[key] = amount;
+        }
+    }
+
+    /// <summary>
+    /// Records the staged balances after the batch that contained them was durably written. A batch larger than a generation
+    /// keeps its most recent entries instead of being dropped altogether.
+    /// </summary>
+    public void CommitStaged()
+    {
+        foreach (var (key, amount) in _staged)
+        {
+            _young[key] = amount;
+            _old.Remove(key);
+            if (_young.Count >= _generationSize)
+            {
+                _old = _young;
+                _young = [];
+            }
+        }
+
+        _staged.Clear();
+    }
+
     /// <summary>Records the balances of a round that was durably written.</summary>
     public void Commit(RoundEffects round)
     {
         ArgumentNullException.ThrowIfNull(round);
 
-        if (round.FinalBalances.Count >= _generationSize)
+        var balances = round.FinalBalances;
+        if (balances.Count >= _generationSize)
         {
             // A round this large would not fit a generation. Forget what it changed instead of caching it; storage has it.
-            foreach (var key in round.FinalBalances.Keys)
+            foreach (var (key, _) in balances)
             {
                 _young.Remove(key);
                 _old.Remove(key);
@@ -125,7 +162,7 @@ public sealed class BalanceTracker(IBalanceReadStore store, int maxCacheEntries)
             return;
         }
 
-        foreach (var (key, amount) in round.FinalBalances)
+        foreach (var (key, amount) in balances)
         {
             _young[key] = amount;
             _old.Remove(key);

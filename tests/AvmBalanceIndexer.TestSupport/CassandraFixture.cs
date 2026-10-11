@@ -21,6 +21,10 @@ public sealed class CassandraFixture : IAsyncLifetime
     private int _port;
     private string _datacenter = "dc1";
     private int _keyspaceCounter;
+    private readonly Queue<CassandraChainStorage> _created = new();
+
+    // A node with hundreds of tables from finished tests degrades (schema and memtable pressure), so only the newest keyspaces are kept.
+    private const int KeptKeyspaces = 12;
     private readonly System.Collections.Concurrent.ConcurrentBag<CassandraSessionSource> _sources = [];
     private readonly System.Collections.Concurrent.ConcurrentDictionary<CassandraChainStorage, (CassandraSessionSource Source, CassandraOptions Options)> _storages = new();
 
@@ -101,17 +105,50 @@ public sealed class CassandraFixture : IAsyncLifetime
     public async Task<CassandraChainStorage> CreateStorageAsync(string chain = ChainId.AlgorandTestnet, bool applySchema = true, TimeSpan? readDeadline = null, TimeSpan? leaseTtl = null)
     {
         await EnsureStartedAsync().ConfigureAwait(false);
+        await RetireOldKeyspacesAsync().ConfigureAwait(false);
         var options = NewOptions();
         var source = new CassandraSessionSource(options);
         _sources.Add(source);
         var storage = new CassandraChainStorage(source, new ChainContext(chain), options, readDeadline, leaseTtl);
         _storages[storage] = (source, options);
+        lock (_created)
+        {
+            _created.Enqueue(storage);
+        }
+
         if (applySchema)
         {
             await storage.EnsureSchemaAsync(CancellationToken.None).ConfigureAwait(false);
         }
 
         return storage;
+    }
+
+    private async Task RetireOldKeyspacesAsync()
+    {
+        while (true)
+        {
+            CassandraChainStorage? old;
+            lock (_created)
+            {
+                old = _created.Count >= KeptKeyspaces ? _created.Dequeue() : null;
+            }
+
+            if (old is null || !_storages.TryGetValue(old, out var entry))
+            {
+                return;
+            }
+
+            try
+            {
+                var session = await entry.Source.GetSessionAsync(CancellationToken.None).ConfigureAwait(false);
+                await session.ExecuteAsync(new global::Cassandra.SimpleStatement($"DROP KEYSPACE IF EXISTS {entry.Options.Keyspace}")).ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                // Best effort: a keyspace that could not be dropped is only clutter.
+            }
+        }
     }
 
     /// <summary>Keyspace a storage created by this fixture lives in.</summary>

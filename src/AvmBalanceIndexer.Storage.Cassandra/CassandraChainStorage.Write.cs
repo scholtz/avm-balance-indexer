@@ -9,68 +9,79 @@ namespace AvmBalanceIndexer.Storage.Cassandra;
 
 public sealed partial class CassandraChainStorage
 {
-    public async Task<bool> WriteRoundAsync(ChainStatus roundStatus, IReadOnlyList<TokenEffect> effects, CancellationToken cancellationToken)
+    public Task<bool> WriteRoundAsync(ChainStatus roundStatus, IReadOnlyList<TokenEffect> effects, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(roundStatus);
         ArgumentNullException.ThrowIfNull(effects);
-        EnsureChain(roundStatus.Chain);
+        return WriteRoundsAsync([new RoundWrite(roundStatus, effects)], cancellationToken);
+    }
 
-        var round = roundStatus.IndexedRound;
-        if (effects.Any(e => e.Id.Round != round))
+    public async Task<bool> WriteRoundsAsync(IReadOnlyList<RoundWrite> rounds, CancellationToken cancellationToken)
+    {
+        RoundWrite.EnsureValid(rounds);
+        foreach (var write in rounds)
         {
-            throw new ArgumentException($"All effects must belong to round {round}.", nameof(effects));
-        }
+            EnsureChain(write.Status.Chain);
 
-        // Upserts would silently merge two effects with one identity; the contract is to fail the round instead.
-        var identities = new HashSet<(Address, TokenKey, int, int)>();
-        foreach (var effect in effects)
-        {
-            if (!identities.Add((effect.Account, effect.Token, effect.Id.IntraRoundOrder, effect.Id.Ordinal)))
+            // Upserts would silently merge two effects with one identity; the contract is to fail the round instead.
+            var identities = new HashSet<(Address, TokenKey, int, int)>();
+            foreach (var effect in write.Effects)
             {
-                throw new ArgumentException(
-                    $"Two effects of {effect.Account}/{effect.Token} share the identity ({round}, {effect.Id.IntraRoundOrder}, {effect.Id.Ordinal}).",
-                    nameof(effects));
+                if (!identities.Add((effect.Account, effect.Token, effect.Id.IntraRoundOrder, effect.Id.Ordinal)))
+                {
+                    throw new ArgumentException(
+                        $"Two effects of {effect.Account}/{effect.Token} share the identity ({write.Status.IndexedRound}, {effect.Id.IntraRoundOrder}, {effect.Id.Ordinal}).",
+                        nameof(rounds));
+                }
             }
         }
 
+        var firstRound = rounds[0].Status.IndexedRound;
+        var last = rounds[^1].Status;
+
         // The cursor this instance published last is trusted for the next round: a writer that raced us is caught by the
         // compare-and-set below, which saves a SERIAL read (a Paxos round) per block while following the chain.
-        var published = LastPublished is { } own && own.Round + 1 == round
+        var published = LastPublished is { } own && own.Round + 1 == firstRound
             ? own
             : await ReadCursorAsync(serial: true, cancellationToken).ConfigureAwait(false);
         if (published is null)
         {
-            if (round != 0)
+            if (firstRound != 0)
             {
-                throw new ChainDivergenceException($"The first round written must be 0 but round {round} was given.");
+                throw new ChainDivergenceException($"The first round written must be 0 but round {firstRound} was given.");
             }
         }
-        else if (round == published.Value.Round)
+        else if (rounds.Count == 1 && firstRound == published.Value.Round)
         {
-            if (!roundStatus.IndexedBlockHash.Span.SequenceEqual(published.Value.Hash))
+            if (!last.IndexedBlockHash.Span.SequenceEqual(published.Value.Hash))
             {
-                throw new ChainDivergenceException($"Round {round} is already published with a different block hash.");
+                throw new ChainDivergenceException($"Round {firstRound} is already published with a different block hash.");
             }
 
             // Idempotent replay of the latest published round: nothing to do.
             return false;
         }
-        else if (round < published.Value.Round)
+        else if (firstRound <= published.Value.Round)
         {
             throw new ChainDivergenceException(
-                $"Round {round} is older than the published round {published.Value.Round}; its block hash can no longer be verified, so it is refused.");
+                $"Round {firstRound} is older than the published round {published.Value.Round}; its block hash can no longer be verified, so it is refused.");
         }
-        else if (round != published.Value.Round + 1)
+        else if (firstRound != published.Value.Round + 1)
         {
-            throw new ChainDivergenceException($"Round {round} would leave a gap after published round {published.Value.Round}.");
+            throw new ChainDivergenceException($"Round {firstRound} would leave a gap after published round {published.Value.Round}.");
         }
 
-        if (effects.Count > 0)
+        // Rounds are written one after the other (a later round reads what an earlier one wrote), all of them before the single
+        // publication: the compare-and-set per batch instead of per round is what makes a Cassandra backfill affordable.
+        foreach (var write in rounds)
         {
-            await WriteEffectsAsync(round, effects, cancellationToken).ConfigureAwait(false);
+            if (write.Effects.Count > 0)
+            {
+                await WriteEffectsAsync(write.Status.IndexedRound, write.Effects, cancellationToken).ConfigureAwait(false);
+            }
         }
 
-        await PublishAsync(roundStatus, published, cancellationToken).ConfigureAwait(false);
+        await PublishAsync(last, published, cancellationToken).ConfigureAwait(false);
         return true;
     }
 

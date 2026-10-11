@@ -97,7 +97,8 @@ curl http://localhost:5000/v1/algorand-testnet/status
 | `Scans:MaxActive` / `Retention` / `Concurrency` / `PollInterval` / `StaleAfter` / `PageSize` | Asynchronous holder scans: admission limit (20), how long a scan and its result are kept (24 h), scans one worker replica runs at once (2), how often an idle worker looks for work (5 s), when a silent owner loses a running scan (2 min), holders per step (1000). |
 | `Indexer:LeaseRetryInterval` | How often a standby replica asks again for the writer lease (default 5 s). |
 | `Worker:HealthPort` / `HealthHost` | Worker probe endpoints `/healthz/live` and `/healthz/ready` (default 8081, 0 = off; use `localhost` as host on Windows). Metrics are on the `AvmBalanceIndexer.Worker` meter. |
-| `Indexer:FetchConcurrency` | Blocks fetched in parallel ahead of the commit position. |
+| `Indexer:FetchConcurrency` | Blocks fetched in parallel ahead of the commit position (default 64; each block in flight is held decoded, typically 20 to 100 KB). Downloading from the gossip hosts is what limits a backfill: about 9 rounds/s at 8, 25 at 32 and 45 to 60 at 192 on busy MainNet blocks. |
+| `Indexer:CommitBatchRounds` / `CommitBatchEffects` | While backfilling, up to this many consecutive rounds (default 25) or effects (default 20,000) are written in one transaction; near the tip every round is committed alone. 1 turns batching off. |
 
 ## Tests
 
@@ -143,8 +144,10 @@ another chain, 503 while nothing is indexed yet. A walk over the holders of the 
 - Holders at the latest round are one ordered index scan. Holders at an older round read each holder's latest balance from its
   own history, one lookup per account, so a page is cheap but a huge token at a past round can exceed the read timeout
   (HTTP 503): use an asynchronous scan for it.
-- Indexing speed is about 60 rounds per second with default settings, which is far too slow to backfill MainNet in a
-  reasonable time. Batching and fetch tuning are follow-up work.
+- Backfill speed is limited by downloading blocks from gossip hosts (about 100 ms per block and host, 25 to 60 rounds/s on
+  busy MainNet blocks with 32 to 192 in flight; empty early blocks are much faster). The database is no longer the limit:
+  committing 25 rounds per transaction raised the PostgreSQL write path (Cassandra saves one compare-and-set per batch instead of per round; not benchmarked) from about 330 to about 3,900 rounds/s in the benchmark
+  (`BackfillBenchmark`, `AVM_BENCH=1`). Running several chains or your own archival nodes is the way to go faster.
 - Several workers may run per chain: one holds the writer lease (PostgreSQL advisory lock on a dedicated session, Cassandra TTL row) and indexes, the others stand by. Failover takes up to the lease TTL (30 s) on Cassandra and about 30 s (TCP keepalives of the lease session) on PostgreSQL. Worker metrics are published on the `AvmBalanceIndexer.Worker` meter and exported over OTLP when an endpoint is configured.
 - Block headers are hash-checked against their certificate digest and transactions against the header commitments, but
   certificate signatures are not verified (ADR 0004). A host serving a whole fabricated chain is not detected: run your
