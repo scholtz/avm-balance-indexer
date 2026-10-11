@@ -41,6 +41,7 @@ public class AssetRoundsTests(ITestOutputHelper output)
         var sums = new Dictionary<ulong, Dictionary<(Address, ulong), BigInteger>>();
         var ledger = new Dictionary<ulong, IReadOnlyDictionary<(Address Account, ulong AssetId), ulong>>();
         var kinds = new HashSet<EffectType>();
+        var innerEffects = 0;
         for (var round = first; round <= last; round++)
         {
             var normalized = normalizer.NormalizeBlock(blocks[round], RewardsState.FromHeader(blocks[round - 1].Block), await LiveAssetDirectory.LoadAsync(reference, adapter, blocks[round]));
@@ -48,6 +49,7 @@ public class AssetRoundsTests(ITestOutputHelper output)
             foreach (var delta in normalized.Deltas.Where(static d => d.Token.Kind == TokenKind.Asa))
             {
                 kinds.Add(delta.Type);
+                innerEffects += delta.Id.InnerPath.Count > 0 ? 1 : 0;
                 var key = (delta.Account, delta.Token.TokenId);
                 perAccount[key] = perAccount.GetValueOrDefault(key) + delta.Delta;
             }
@@ -83,7 +85,7 @@ public class AssetRoundsTests(ITestOutputHelper output)
             }
         }
 
-        output.WriteLine($"mainnet rounds {first}-{last}: {checkedHoldings} holdings checked, effect types {string.Join(", ", kinds.Order())}, {problems.Count} problems");
+        output.WriteLine($"mainnet rounds {first}-{last}: {checkedHoldings} holdings checked, effect types {string.Join(", ", kinds.Order())}, {innerEffects} effects of inner transactions, {problems.Count} problems");
         foreach (var problem in problems)
         {
             output.WriteLine(problem);
@@ -92,5 +94,6 @@ public class AssetRoundsTests(ITestOutputHelper output)
         Assert.True(problems.Count == 0, string.Join(Environment.NewLine, problems.Take(20)));
         Assert.True(checkedHoldings > 0, "No holding could be compared.");
         Assert.Contains(EffectType.AssetTransfer, kinds);
+        Assert.True(innerEffects > 0, "The window has no inner-transaction asset effects, so it proves nothing about them.");
     }
 }
