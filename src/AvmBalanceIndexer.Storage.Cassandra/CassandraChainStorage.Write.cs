@@ -33,7 +33,11 @@ public sealed partial class CassandraChainStorage
             }
         }
 
-        var published = await ReadCursorAsync(serial: true, cancellationToken).ConfigureAwait(false);
+        // The cursor this instance published last is trusted for the next round: a writer that raced us is caught by the
+        // compare-and-set below, which saves a SERIAL read (a Paxos round) per block while following the chain.
+        var published = LastPublished is { } own && own.Round + 1 == round
+            ? own
+            : await ReadCursorAsync(serial: true, cancellationToken).ConfigureAwait(false);
         if (published is null)
         {
             if (round != 0)
@@ -268,8 +272,11 @@ public sealed partial class CassandraChainStorage
         var result = await ExecuteAsync(statement, cancellationToken).ConfigureAwait(false);
         if (!result.First().GetValue<bool>("[applied]"))
         {
+            LastPublished = null;
             throw new ChainDivergenceException($"Round {status.IndexedRound} could not be published because another writer moved the cursor first.");
         }
+
+        LastPublished = (status.IndexedRound, status.IndexedBlockHash.ToArray());
     }
 
     /// <summary>

@@ -31,6 +31,14 @@ public sealed partial class CassandraChainStorage : IChainStorage
     private readonly int _replicationFactor;
     private readonly bool _createKeyspace;
     private readonly ConcurrentDictionary<string, Task<PreparedStatement>> _prepared = new();
+    private readonly object _cursorLock = new();
+    private (ulong Round, byte[] Hash)? _lastPublished;
+
+    private (ulong Round, byte[] Hash)? LastPublished
+    {
+        get { lock (_cursorLock) { return _lastPublished; } }
+        set { lock (_cursorLock) { _lastPublished = value; } }
+    }
 
     public CassandraChainStorage(CassandraSessionSource source, ChainContext chain, CassandraOptions options)
     {

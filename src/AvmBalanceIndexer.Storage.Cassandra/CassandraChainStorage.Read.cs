@@ -251,6 +251,11 @@ public sealed partial class CassandraChainStorage
                 }
 
                 items.Add(shards[next].Current);
+                if (items.Count > pageSize)
+                {
+                    break;
+                }
+
                 heads[next] = await shards[next].MoveNextAsync().ConfigureAwait(false);
             }
 

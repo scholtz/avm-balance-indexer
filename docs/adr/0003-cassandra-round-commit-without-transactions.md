@@ -16,8 +16,9 @@ the same contract suite (`StorageContractTests`) as PostgreSQL.
   completion, and then published with a lightweight transaction on `chain_status`:
   `UPDATE ... IF indexed_round = <previous> AND indexed_block_hash = <previous hash>` (`INSERT ... IF NOT EXISTS` for
   round 0). Losing the compare-and-set raises `ChainDivergenceException`, so two writers racing on one round cannot
-  both publish. All reads are bounded by the published round, and the cursor is read with `LOCAL_SERIAL` so a
-  published cursor is never read stale.
+  both publish. All reads are bounded by the published round. The writer reads the cursor with `LOCAL_SERIAL` (and
+  after its own publication trusts what it published, since the compare-and-set catches a competing writer); API reads
+  use `LOCAL_QUORUM`, which sees every acknowledged publication.
 - **Replay converges.** Keys are deterministic `(round, intra_round_order, ordinal)`, so a crash before publication
   leaves rows that replaying the same round overwrites with identical values. Duplicate effect identities in one
   round are rejected before anything is written (an upsert would merge them silently).

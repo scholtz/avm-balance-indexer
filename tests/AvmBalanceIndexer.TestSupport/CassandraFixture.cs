@@ -44,6 +44,23 @@ public sealed class CassandraFixture : IAsyncLifetime
 
     public async Task DisposeAsync()
     {
+        if (_container is null)
+        {
+            // A shared node outlives the run; leave no keyspaces behind.
+            foreach (var (_, (source, options)) in _storages)
+            {
+                try
+                {
+                    var session = await source.GetSessionAsync(CancellationToken.None).ConfigureAwait(false);
+                    await session.ExecuteAsync(new global::Cassandra.SimpleStatement($"DROP KEYSPACE IF EXISTS {options.Keyspace}")).ConfigureAwait(false);
+                }
+                catch (Exception)
+                {
+                    // Best effort cleanup.
+                }
+            }
+        }
+
         foreach (var source in _sources)
         {
             await source.DisposeAsync().ConfigureAwait(false);
