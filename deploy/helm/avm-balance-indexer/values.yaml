@@ -40,6 +40,9 @@ api:
   requestTimeoutSeconds: 60
   # Take the client address from X-Forwarded-For. Only when the API is reachable exclusively through your ingress.
   trustForwardedHeaders: false
+  # Proxies to believe (CIDR list, for example ["10.0.0.0/8"]) and how many hops to peel off X-Forwarded-For (CDN + ingress = 2).
+  knownProxyNetworks: []
+  forwardedHeadersLimit: 1
   # Serve the OpenAPI description at /openapi/v1.json.
   publishOpenApi: true
   resources:

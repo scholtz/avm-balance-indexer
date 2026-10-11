@@ -75,6 +75,57 @@ public sealed class ApiHardeningTests : IDisposable
     }
 
     [Fact]
+    public async Task The_Retry_After_Header_Tells_The_Real_Wait()
+    {
+        using var client = Create(settings: ("Api:RateLimitPerMinute", "1"));
+        (await client.GetAsync(Status)).Dispose();
+
+        using var limited = await client.GetAsync(Status);
+
+        var wait = int.Parse(limited.Headers.GetValues("Retry-After").Single(), System.Globalization.CultureInfo.InvariantCulture);
+        Assert.InRange(wait, 1, 60);
+    }
+
+    [Fact]
+    public async Task The_Api_Description_Is_Limited_Like_The_Data_Endpoints()
+    {
+        using var client = Create(settings: ("Api:RateLimitPerMinute", "1"));
+        (await client.GetAsync(new Uri("/openapi/v1.json", UriKind.Relative))).Dispose();
+
+        using var limited = await client.GetAsync(new Uri("/openapi/v1.json", UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, limited.StatusCode);
+    }
+
+    [Fact]
+    public async Task Error_Responses_Are_Not_Sniffed_Either()
+    {
+        using var client = Create(new NotStartedStorage());
+
+        using var response = await client.GetAsync(Status);
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.Equal("nosniff", response.Headers.GetValues("X-Content-Type-Options").Single());
+    }
+
+    [Theory]
+    [InlineData("203.0.113.9", "203.0.113.9")]
+    [InlineData("::ffff:203.0.113.9", "203.0.113.9")]
+    [InlineData("2001:db8:1:2:aaaa:bbbb:cccc:dddd", "2001:db8:1:2::/64")]
+    [InlineData("2001:db8:1:2:1111:2222:3333:4444", "2001:db8:1:2::/64")]
+    public void A_Client_Is_Identified_By_Its_Address_Or_Its_IPv6_Subnet(string address, string expected)
+    {
+        Assert.Equal(expected, Program.ClientKey(System.Net.IPAddress.Parse(address)));
+        Assert.Equal("unknown", Program.ClientKey(null));
+    }
+
+    [Fact]
+    public void A_Malformed_Proxy_Network_Stops_The_Start_Instead_Of_Silently_Trusting_Everyone()
+    {
+        Assert.ThrowsAny<Exception>(() => Create(settings: [("Api:TrustForwardedHeaders", "true"), ("Api:KnownProxyNetworks:0", "not-a-network")]));
+    }
+
+    [Fact]
     public async Task A_Limit_Of_Zero_Turns_The_Limiter_Off()
     {
         using var client = Create(settings: ("Api:RateLimitPerMinute", "0"));
@@ -165,6 +216,17 @@ public sealed class ApiHardeningTests : IDisposable
         Assert.True(responses.TryGetProperty("404", out _));
         Assert.True(responses.TryGetProperty("429", out _));
         Assert.Equal(HttpStatusCode.NotFound, disabled.StatusCode);
+    }
+
+    private sealed class NotStartedStorage : InMemoryChainStorage
+    {
+        public NotStartedStorage()
+            : base(new ChainContext(ChainId.AlgorandTestnet))
+        {
+        }
+
+        public override Task<ChainStatus?> GetAsync(string chain, CancellationToken cancellationToken) =>
+            Task.FromException<ChainStatus?>(new ChainNotStartedException(chain));
     }
 
     private sealed class SlowStorage : InMemoryChainStorage

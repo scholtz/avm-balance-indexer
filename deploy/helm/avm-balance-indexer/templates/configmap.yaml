@@ -18,6 +18,10 @@ data:
   Api__RateLimitPerMinute: {{ .Values.api.rateLimitPerMinute | quote }}
   Api__RequestTimeoutSeconds: {{ .Values.api.requestTimeoutSeconds | quote }}
   Api__TrustForwardedHeaders: {{ .Values.api.trustForwardedHeaders | quote }}
+  Api__ForwardedHeadersLimit: {{ .Values.api.forwardedHeadersLimit | quote }}
+  {{- range $i, $network := .Values.api.knownProxyNetworks }}
+  Api__KnownProxyNetworks__{{ $i }}: {{ $network | quote }}
+  {{- end }}
   Api__PublishOpenApi: {{ .Values.api.publishOpenApi | quote }}
   Scans__MaxActive: {{ .Values.scans.maxActive | quote }}
   Scans__Retention: {{ .Values.scans.retention | quote }}

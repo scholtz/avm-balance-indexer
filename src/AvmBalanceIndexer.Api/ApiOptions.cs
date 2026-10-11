@@ -21,9 +21,16 @@ public sealed class ApiOptions
     /// </summary>
     public bool TrustForwardedHeaders { get; set; }
 
+    /// <summary>
+    /// Networks (CIDR, for example <c>10.0.0.0/8</c>) whose proxies are believed. Empty trusts every sender, which is only right when the API
+    /// cannot be reached except through the proxy.
+    /// </summary>
+    public string[] KnownProxyNetworks { get; set; } = [];
+
+    /// <summary>How many proxy hops to peel off <c>X-Forwarded-For</c> (a CDN in front of an ingress is two).</summary>
+    [Range(1, 10)]
+    public int ForwardedHeadersLimit { get; set; } = 1;
+
     /// <summary>Serve the OpenAPI description at <c>/openapi/v1.json</c>.</summary>
     public bool PublishOpenApi { get; set; } = true;
 }
-
-/// <summary>The body of every error response.</summary>
-public sealed record ErrorResponse(string Error);

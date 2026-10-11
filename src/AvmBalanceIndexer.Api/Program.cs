@@ -2,6 +2,9 @@ using AvmBalanceIndexer.Api;
 using AvmBalanceIndexer.Domain.Chains;
 using AvmBalanceIndexer.Domain.Storage;
 using AvmBalanceIndexer.Hosting;
+using System.ComponentModel.DataAnnotations;
+using System.Net;
+using System.Net.Sockets;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -12,6 +15,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddOptions<ApiOptions>().Bind(builder.Configuration.GetSection(ApiOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
 var api = builder.Configuration.GetSection(ApiOptions.SectionName).Get<ApiOptions>() ?? new ApiOptions();
+Validator.ValidateObject(api, new ValidationContext(api), validateAllProperties: true);
 builder.Services.AddOpenApi();
 builder.Services.AddResponseCompression(options =>
 {
@@ -19,20 +23,21 @@ builder.Services.AddResponseCompression(options =>
     options.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(["application/problem+json"]);
 });
 builder.Services.AddRequestTimeouts(options =>
-    options.AddPolicy("data", TimeSpan.FromSeconds(Math.Clamp(api.RequestTimeoutSeconds, 1, 600))));
+    options.AddPolicy("data", TimeSpan.FromSeconds(api.RequestTimeoutSeconds)));
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
     options.OnRejected = async (context, cancellationToken) =>
     {
-        context.HttpContext.Response.Headers.RetryAfter = "60";
+        var wait = context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter) ? (int)Math.Ceiling(retryAfter.TotalSeconds) : 60;
+        context.HttpContext.Response.Headers.RetryAfter = Math.Max(1, wait).ToString(System.Globalization.CultureInfo.InvariantCulture);
         await context.HttpContext.Response.WriteAsJsonAsync(new ErrorResponse("Too many requests; slow down."), cancellationToken);
     };
     options.AddPolicy("client", httpContext =>
         api.RateLimitPerMinute == 0
             ? RateLimitPartition.GetNoLimiter("unlimited")
             : RateLimitPartition.GetFixedWindowLimiter(
-                httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                ClientKey(httpContext.Connection.RemoteIpAddress),
                 _ => new FixedWindowRateLimiterOptions { PermitLimit = api.RateLimitPerMinute, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
 });
 if (api.TrustForwardedHeaders)
@@ -40,10 +45,15 @@ if (api.TrustForwardedHeaders)
     builder.Services.Configure<ForwardedHeadersOptions>(options =>
     {
         options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
-
-        // Behind an ingress the proxy address is not known in advance; the option is only meant for such deployments.
+        options.ForwardLimit = api.ForwardedHeadersLimit;
         options.KnownIPNetworks.Clear();
         options.KnownProxies.Clear();
+        foreach (var network in api.KnownProxyNetworks)
+        {
+            options.KnownIPNetworks.Add(System.Net.IPNetwork.Parse(network));
+        }
+
+        // Without a list the sender is believed whoever it is: only for an API that is reachable through the proxy alone.
     });
 }
 builder.Services.AddHealthChecks().AddCheck<StorageHealthCheck>("storage", tags: ["ready"]);
@@ -61,19 +71,24 @@ if (api.TrustForwardedHeaders)
     app.UseForwardedHeaders();
 }
 
-app.UseExceptionHandler();
 app.Use(async (context, next) =>
 {
-    context.Response.Headers.XContentTypeOptions = "nosniff";
+    // OnStarting, so the header is on error responses too (the exception handler clears headers it did not write).
+    context.Response.OnStarting(static state =>
+    {
+        ((HttpResponse)state).Headers.XContentTypeOptions = "nosniff";
+        return Task.CompletedTask;
+    }, context.Response);
     await next();
 });
+app.UseExceptionHandler();
 app.UseResponseCompression();
 app.UseRateLimiter();
 app.UseRequestTimeouts();
 
 if (api.PublishOpenApi)
 {
-    app.MapOpenApi().DisableRateLimiting();
+    app.MapOpenApi().RequireRateLimiting("client");
 }
 
 // Liveness only proves the process responds; readiness also requires the database.
@@ -122,4 +137,32 @@ v1.MapScanEndpoints();
 
 app.Run();
 
-public partial class Program;
+public partial class Program
+{
+    /// <summary>
+    /// The rate-limit identity of a client: IPv4-mapped IPv6 addresses count as the IPv4 address, and an IPv6 client is its /64 (the
+    /// smallest block a subscriber normally owns), so rotating addresses inside it does not buy a fresh allowance.
+    /// </summary>
+    internal static string ClientKey(IPAddress? address)
+    {
+        if (address is null)
+        {
+            return "unknown";
+        }
+
+        if (address.IsIPv4MappedToIPv6)
+        {
+            address = address.MapToIPv4();
+        }
+
+        if (address.AddressFamily != AddressFamily.InterNetworkV6)
+        {
+            return address.ToString();
+        }
+
+        Span<byte> bytes = stackalloc byte[16];
+        address.TryWriteBytes(bytes, out _);
+        bytes[8..].Clear();
+        return new IPAddress(bytes).ToString() + "/64";
+    }
+}
