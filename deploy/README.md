@@ -20,9 +20,9 @@ helm upgrade --install avm-testnet deploy/helm/avm-balance-indexer \
 
 ## Chain data source
 
-Each release runs one API deployment and one indexer worker. The worker fetches blocks from archival gossip nodes
+Each release runs one API deployment and the indexer workers. The worker fetches blocks from archival gossip nodes
 (`algorand.gossipHosts`, or DNS SRV discovery when empty) and asks an algod node for the latest round
 (`algorand.algodUrl`). For production, point both at your own archival nodes instead of the public endpoints.
 The genesis hash is pinned for Algorand MainNet, TestNet and Voi; the worker refuses to start if the algod genesis or any
 block does not match it. Set `algorand.expectedGenesisHash` only for another network.
-Keep `worker.replicaCount` at 1; the worker is the single ordered writer and has no leader election yet.
+The worker is the single ordered writer, but several replicas may run (`worker.replicaCount`, default 2): they compete for a writer lease, one indexes and the others stand by and take over when it is lost. Probes use `worker.healthPort`.

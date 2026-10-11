@@ -30,12 +30,12 @@ public sealed partial class HealthListener(IOptions<WorkerOptions> options, Work
         }
 
         using var listener = new HttpListener();
-        listener.Prefixes.Add($"http://{options.Value.HealthHost}:{port}/");
         try
         {
+            listener.Prefixes.Add($"http://{options.Value.HealthHost}:{port}/");
             listener.Start();
         }
-        catch (HttpListenerException ex)
+        catch (Exception ex) when (ex is HttpListenerException or ArgumentException)
         {
             // Probes are an aid; an occupied or forbidden port must not stop indexing.
             LogCannotListen(logger, ex, port);
@@ -52,10 +52,23 @@ public sealed partial class HealthListener(IOptions<WorkerOptions> options, Work
             }
             catch (Exception ex) when (ex is HttpListenerException or ObjectDisposedException or InvalidOperationException)
             {
-                return;
+                if (stoppingToken.IsCancellationRequested || !listener.IsListening)
+                {
+                    return;
+                }
+
+                // A single aborted accept must not switch the probes off for the rest of the process lifetime.
+                continue;
             }
 
-            Respond(context);
+            try
+            {
+                Respond(context);
+            }
+            catch (Exception ex) when (ex is HttpListenerException or IOException or ObjectDisposedException)
+            {
+                // The prober went away mid-response.
+            }
         }
     }
 

@@ -19,7 +19,8 @@ public sealed partial class CassandraChainStorage : IWriterLeaseProvider
             _chain,
             owner,
             (int)_leaseTtl.TotalSeconds).ConfigureAwait(false);
-        statement.SetSerialConsistencyLevel(ConsistencyLevel.LocalSerial);
+        // SERIAL, not LOCAL_SERIAL: with several datacenters the lease must be exclusive across all of them.
+        statement.SetSerialConsistencyLevel(ConsistencyLevel.Serial);
         var result = await ExecuteAsync(statement, cancellationToken).ConfigureAwait(false);
         return result.First().GetValue<bool>("[applied]") ? new Lease(this, owner) : null;
     }
@@ -55,7 +56,7 @@ public sealed partial class CassandraChainStorage : IWriterLeaseProvider
                         CancellationToken.None,
                         _storage._chain,
                         _owner).ConfigureAwait(false);
-                    statement.SetSerialConsistencyLevel(ConsistencyLevel.LocalSerial);
+                    statement.SetSerialConsistencyLevel(ConsistencyLevel.Serial);
                     await _storage.ExecuteAsync(statement, CancellationToken.None).ConfigureAwait(false);
                 }
                 catch (Exception ex) when (ex is DriverException or TimeoutException)
@@ -71,23 +72,37 @@ public sealed partial class CassandraChainStorage : IWriterLeaseProvider
         private async Task RenewAsync()
         {
             var ttl = _storage._leaseTtl;
-            var lastRenewal = System.Diagnostics.Stopwatch.StartNew();
+            var safe = ttl * 0.8;
+
+            // The TTL runs from the moment a renewal is applied on the server, which is at the latest when the request was sent
+            // back; measuring from the send time never overestimates how long the lease is still valid.
+            var lastRenewalSent = System.Diagnostics.Stopwatch.GetTimestamp();
             try
             {
                 using var timer = new PeriodicTimer(ttl / 3);
                 while (await timer.WaitForNextTickAsync(_stop.Token).ConfigureAwait(false))
                 {
+                    var sent = System.Diagnostics.Stopwatch.GetTimestamp();
+                    var remaining = safe - System.Diagnostics.Stopwatch.GetElapsedTime(lastRenewalSent);
+                    if (remaining <= TimeSpan.Zero)
+                    {
+                        await _lost.CancelAsync().ConfigureAwait(false);
+                        return;
+                    }
+
+                    using var attempt = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);
+                    attempt.CancelAfter(remaining);
                     try
                     {
                         var statement = await _storage.BindAsync(
                             $"UPDATE {_storage.Table("writer_lease")} USING TTL ? SET owner = ? WHERE chain = ? IF owner = ?",
-                            _stop.Token,
+                            attempt.Token,
                             (int)ttl.TotalSeconds,
                             _owner,
                             _storage._chain,
                             _owner).ConfigureAwait(false);
-                        statement.SetSerialConsistencyLevel(ConsistencyLevel.LocalSerial);
-                        var result = await _storage.ExecuteAsync(statement, _stop.Token).ConfigureAwait(false);
+                        statement.SetSerialConsistencyLevel(ConsistencyLevel.Serial);
+                        var result = await _storage.ExecuteAsync(statement, attempt.Token).ConfigureAwait(false);
                         if (!result.First().GetValue<bool>("[applied]"))
                         {
                             // Someone else owns the row (or it expired under us): the lease is gone.
@@ -95,16 +110,12 @@ public sealed partial class CassandraChainStorage : IWriterLeaseProvider
                             return;
                         }
 
-                        lastRenewal.Restart();
+                        lastRenewalSent = sent;
                     }
-                    catch (Exception ex) when (ex is DriverException or TimeoutException)
+                    catch (Exception) when (!_stop.IsCancellationRequested)
                     {
-                        // Unknown outcome: keep trying until the row could have expired.
-                        if (lastRenewal.Elapsed > ttl * 0.8)
-                        {
-                            await _lost.CancelAsync().ConfigureAwait(false);
-                            return;
-                        }
+                        // Unknown outcome (driver error, timeout of this attempt, anything else): keep trying until the row could
+                        // have expired; the check at the top of the loop then reports the lease lost.
                     }
                 }
             }

@@ -254,6 +254,37 @@ public class IndexerWorkerTests : IDisposable
     }
 
     [Fact]
+    public async Task Losing_The_Lease_During_A_Retry_Backoff_Is_A_Failover_Not_A_Crash()
+    {
+        var storage = NewStorage();
+        var health = new WorkerHealth();
+        var adapter = new FlakyAdapter(Scenario.Adapter(), failuresBeforeSuccess: 1);
+        var options = Options.Create(new IndexerOptions
+        {
+            FetchConcurrency = 1,
+            FollowPollInterval = TimeSpan.FromMilliseconds(5),
+            RetryInitialBackoff = TimeSpan.FromSeconds(30),
+            RetryMaxBackoff = TimeSpan.FromSeconds(30),
+            MaxConsecutiveFailures = 10,
+            LeaseRetryInterval = TimeSpan.FromMilliseconds(5),
+        });
+        var indexer = new RoundIndexer(adapter, new AlgoEffectNormalizer(), storage, options, NullLogger<RoundIndexer>.Instance);
+        var lifetime = new FakeLifetime();
+        var worker = new IndexerWorker(indexer, storage, new ChainContext(ChainId.AlgorandTestnet), options, lifetime, storage, health, NullLogger<IndexerWorker>.Instance);
+
+        await worker.StartAsync(CancellationToken.None);
+        await WaitUntilAsync(() => adapter.Failures == 1 && health.State == WorkerState.Leader);
+        await Task.Delay(50);
+        storage.RevokeLease();
+        await WaitUntilAsync(() => health.LeasesLost == 1 && storage.LeasesGranted == 2);
+        await WaitForRoundAsync(storage, Scenario.LastRound);
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.False(lifetime.StopRequested);
+        Assert.Equal(0, Environment.ExitCode);
+    }
+
+    [Fact]
     public async Task A_Lease_That_Cannot_Be_Requested_Because_The_Database_Is_Down_Is_Waited_For()
     {
         var storage = new LeaseFlakyStorage(failures: 3);

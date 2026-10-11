@@ -92,8 +92,8 @@ public sealed partial class PostgreSqlChainStorage : IWriterLeaseProvider
             }
             catch (Exception)
             {
+                // A broken connection is discarded by Npgsql when it is disposed; the pool is left alone.
                 await _lost.CancelAsync().ConfigureAwait(false);
-                NpgsqlConnection.ClearPool(_connection);
             }
         }
     }

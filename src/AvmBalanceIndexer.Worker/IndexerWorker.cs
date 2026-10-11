@@ -80,6 +80,7 @@ public sealed partial class IndexerWorker(
                 continue;
             }
 
+            var lost = false;
             await using (lease.ConfigureAwait(false))
             {
                 health.BecameLeader();
@@ -90,7 +91,14 @@ public sealed partial class IndexerWorker(
                 {
                     health.LostLease();
                     LogLeaseLost(logger, chain.Chain);
+                    lost = true;
                 }
+            }
+
+            if (lost)
+            {
+                // A lease that keeps failing must not turn into a tight acquire/lose loop.
+                await Task.Delay(settings.LeaseRetryInterval, stoppingToken).ConfigureAwait(false);
             }
         }
     }
@@ -140,7 +148,16 @@ public sealed partial class IndexerWorker(
 
                 health.ReportTransientFailure();
                 LogTransientFailure(logger, ex, backoff, failures);
-                await Task.Delay(backoff, stoppingToken).ConfigureAwait(false);
+                try
+                {
+                    await Task.Delay(backoff, stoppingToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    // Shutdown, or the lease was lost while waiting.
+                    return;
+                }
+
                 backoff = TimeSpan.FromTicks(Math.Min(backoff.Ticks * 2, settings.RetryMaxBackoff.Ticks));
             }
         }
@@ -154,7 +171,9 @@ public sealed partial class IndexerWorker(
         exception is BlockFetchException or HttpRequestException or TimeoutException or IOException
         || exception is Algorand.ApiException { StatusCode: >= 500 or 408 or 429 }
         || (exception is TaskCanceledException && !stoppingToken.IsCancellationRequested)
-        || exception is DbException { IsTransient: true };
+        || exception is DbException { IsTransient: true }
+        || exception is StorageTimeoutException
+        || AvmBalanceIndexer.Storage.Cassandra.CassandraErrors.IsTransient(exception);
 
     [LoggerMessage(EventId = 1300, Level = LogLevel.Information, Message = "Indexer worker started for {Chain}")]
     private static partial void LogStarted(ILogger logger, string chain);

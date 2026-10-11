@@ -58,6 +58,21 @@ public class HealthListenerTests
     }
 
     [Fact]
+    public async Task An_Invalid_Prefix_Switches_The_Endpoints_Off_Without_Stopping_The_Host()
+    {
+        using var health = new WorkerHealth();
+        using var listener = new HealthListener(
+            Options.Create(new WorkerOptions { HealthPort = FreePort(), HealthHost = "not a host" }),
+            health,
+            NullLogger<HealthListener>.Instance);
+
+        await listener.StartAsync(CancellationToken.None);
+        await listener.StopAsync(CancellationToken.None);
+
+        Assert.Null(listener.ExecuteTask?.Exception);
+    }
+
+    [Fact]
     public async Task A_Port_Of_Zero_Turns_The_Endpoints_Off()
     {
         using var health = new WorkerHealth();
