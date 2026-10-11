@@ -136,3 +136,13 @@ prove it), size it to one PR, and add `enhancement` plus your team label. Cite s
 - Each replica must apply the schema before asking for anything that needs a table (the writer lease needs `writer_lease`).
 - Review loops keep finding real issues in lease, timeout and migration code until round 3 -> budget for three rounds there and
   write the failure-path test (lost lease, timeout, missing column) together with the code.
+- Transactions are read from raw msgpack, the Algorand5 SDK only decodes header and certificate (ADR 0010): it cannot decode every
+  real block (MainNet 64000338). When the SDK misbehaves, open a descriptive issue in scholtz/dotnet-algorand-sdk and link it.
+- Tests on the first 1000 rounds hide era-specific rules (early blocks have no `caid`, v16+ ids always include the genesis hash,
+  v26+ commitments) -> every new decoding or normalization rule needs `NormalizerEraTests`-style samples across eras, not only recent rounds.
+- Relative live oracles (balance difference between two ledger observations) cannot check an account's first appearance in the window; say so.
+- Public indexers lie about deleted objects (destroyed assets report total 0); derive such facts from the creating block.
+- Shared test databases degrade with the number of tests: dispose or drop per-test resources (Cassandra keyspaces, PostgreSQL pools).
+- Edit files with the Write tool or a script file, not inline heredocs: escape sequences such as backslash-zero came out as real NUL bytes.
+- Measure before tuning (`BackfillBenchmark`, `AVM_BENCH=1`): CPU was 2 ms/round, download latency and per-round commits were the limits.
+
