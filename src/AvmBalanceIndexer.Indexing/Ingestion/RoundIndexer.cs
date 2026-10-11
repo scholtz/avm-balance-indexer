@@ -4,6 +4,7 @@ using AvmBalanceIndexer.Domain.Storage;
 using AvmBalanceIndexer.Domain.Tokens;
 using AvmBalanceIndexer.Indexing.Adapters;
 using AvmBalanceIndexer.Indexing.Normalization;
+using System.Runtime.ExceptionServices;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -129,7 +130,7 @@ public sealed partial class RoundIndexer(
         var latest = await adapter.GetLatestRoundAsync(cancellationToken).ConfigureAwait(false);
         if (missing.Round + (ulong)_options.FollowingThresholdRounds <= latest)
         {
-            throw missing;
+            ExceptionDispatchInfo.Capture(missing).Throw();
         }
 
         LogWaitingForBlock(logger, missing.Round);

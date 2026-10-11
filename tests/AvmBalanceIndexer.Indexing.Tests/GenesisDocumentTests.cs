@@ -41,6 +41,28 @@ public class GenesisDocumentTests
         Assert.Throws<InvalidDataException>(() => GenesisDocument.Parse(json));
     }
 
+    [Fact]
+    public void An_Allocation_Without_A_Balance_Funds_The_Account_With_Nothing()
+    {
+        var json = $$$"""
+            {"alloc":[{"addr":"{{{FeeSink}}}","state":{"onl":2}},{"addr":"{{{RewardsPool}}}"}],"id":"v1.0","network":"x"}
+            """;
+
+        var genesis = GenesisDocument.Parse(json);
+
+        Assert.All(genesis.Accounts, static a => Assert.Equal(0UL, a.Balance));
+    }
+
+    [Fact]
+    public void An_Invalid_Address_Is_Reported_By_Name()
+    {
+        var json = """{"alloc":[{"addr":"NOT-AN-ADDRESS","state":{"algo":1}}],"id":"v1.0"}""";
+
+        var error = Assert.Throws<InvalidDataException>(() => GenesisDocument.Parse(json));
+
+        Assert.Contains("NOT-AN-ADDRESS", error.Message, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("{}")]
     [InlineData("not json")]

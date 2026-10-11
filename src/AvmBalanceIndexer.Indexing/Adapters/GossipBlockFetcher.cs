@@ -83,7 +83,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
                 notFound++;
                 LogNotOnHost(_logger, round, host, attempt + 1);
             }
-            catch (Exception ex) when (ex is HttpRequestException or BlockValidationException or TimeoutException or IOException)
+            catch (Exception ex) when (ex is HttpRequestException or BlockValidationException or TimeoutException or IOException or UriFormatException)
             {
                 last = ex;
                 if (ex is BlockValidationException)
@@ -165,7 +165,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
     private async Task<byte[]> ReadBoundedAsync(HttpContent content, string host, ulong round, CancellationToken cancellationToken)
     {
         await using var stream = await content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-        using var buffer = new MemoryStream();
+        using var buffer = new MemoryStream((int)Math.Min(content.Headers.ContentLength ?? 262_144, _options.MaxBlockBytes));
         var chunk = new byte[81_920];
         int read;
         while ((read = await stream.ReadAsync(chunk, cancellationToken).ConfigureAwait(false)) > 0)

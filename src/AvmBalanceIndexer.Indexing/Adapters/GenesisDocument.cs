@@ -38,13 +38,23 @@ public sealed record GenesisDocument(string SchemaId, string Network, IReadOnlyL
             foreach (var alloc in root.GetProperty("alloc").EnumerateArray())
             {
                 var text = alloc.GetProperty("addr").GetString() ?? throw new InvalidDataException("Genesis allocation without address.");
-                var address = new Address(new Algorand.Address(text).Bytes);
+                Address address;
+                try
+                {
+                    address = new Address(new Algorand.Address(text).Bytes);
+                }
+                catch (Exception ex) when (ex is ArgumentException or FormatException)
+                {
+                    throw new InvalidDataException($"Genesis lists an invalid account address \"{text}\".", ex);
+                }
+
                 if (!seen.Add(address))
                 {
                     throw new InvalidDataException($"Genesis lists account {text} twice.");
                 }
 
-                var balance = alloc.GetProperty("state").GetProperty("algo").GetUInt64();
+                // An allocation without an algo field funds the account with nothing.
+                var balance = alloc.TryGetProperty("state", out var state) && state.TryGetProperty("algo", out var algo) ? algo.GetUInt64() : 0UL;
                 var comment = alloc.TryGetProperty("comment", out var c) ? c.GetString() : null;
                 accounts.Add(new GenesisAccount(address, balance, comment));
             }

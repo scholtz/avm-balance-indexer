@@ -237,7 +237,8 @@ public sealed partial class PostgreSqlChainStorage
         }
 
         // Pages over the accounts that ever touched the token and reads each one's latest balance at or before the round
-        // from its own effect history (one index lookup per account). Cost is proportional to the page, not to the history.
+        // from its own effect history (one index lookup per account). Cost is proportional to the accounts scanned to fill the
+        // page, which is the page size plus any zero-balance accounts skipped when zero balances are excluded.
         await using var command = new NpgsqlCommand(
             """
             SELECT t.account, COALESCE(b.balance_after, 0), COALESCE(b.round, t.first_round)
@@ -411,9 +412,17 @@ public sealed partial class PostgreSqlChainStorage
     private static async Task<NpgsqlTransaction> BeginSnapshotAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
     {
         var transaction = await connection.BeginTransactionAsync(IsolationLevel.RepeatableRead, cancellationToken).ConfigureAwait(false);
-        await using var command = new NpgsqlCommand("SET TRANSACTION READ ONLY", connection, transaction);
-        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-        return transaction;
+        try
+        {
+            await using var command = new NpgsqlCommand("SET TRANSACTION READ ONLY", connection, transaction);
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            return transaction;
+        }
+        catch
+        {
+            await transaction.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
     }
 
     private async Task<ulong> ReadIndexedRoundAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, CancellationToken cancellationToken)

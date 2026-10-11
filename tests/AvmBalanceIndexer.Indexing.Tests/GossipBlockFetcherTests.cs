@@ -202,6 +202,19 @@ public class GossipBlockFetcherTests
     }
 
     [Fact]
+    public async Task A_Malformed_Host_Is_Skipped_Instead_Of_Failing_The_Fetch()
+    {
+        var fetcher = CreateFetcher(
+            (_, _) => Task.FromResult(Ok(Chain.Encode(9, []))),
+            hosts: ["not a url", "http://b.test:4160"],
+            maxAttempts: 4);
+
+        var block = await fetcher.FetchBlockAsync(9, CancellationToken.None);
+
+        Assert.Equal(9UL, block.Round);
+    }
+
+    [Fact]
     public async Task Every_Host_Is_Tried_Once_Before_Any_Is_Repeated()
     {
         var calls = new List<string>();
