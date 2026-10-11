@@ -36,7 +36,7 @@ public partial class InMemoryChainStorage : IScanJobStore
         }
     }
 
-    public Task<ScanJob?> ClaimNextAsync(string owner, DateTimeOffset now, DateTimeOffset staleBefore, CancellationToken cancellationToken)
+    public virtual Task<ScanJob?> ClaimNextAsync(string owner, DateTimeOffset now, DateTimeOffset staleBefore, CancellationToken cancellationToken)
     {
         lock (_scanGate)
         {
@@ -110,7 +110,8 @@ public partial class InMemoryChainStorage : IScanJobStore
             var rows = _scanResults[id];
             var skip = (int)(after + 1);
             var items = rows.Skip(skip).Take(pageSize).ToList();
-            var next = skip + items.Count < rows.Count ? (skip + items.Count - 1).ToString(CultureInfo.InvariantCulture) : null;
+            var delivered = skip + items.Count - 1;
+            var next = delivered >= 0 && (skip + items.Count < rows.Count || !entry.Job.IsFinished) ? delivered.ToString(CultureInfo.InvariantCulture) : null;
             return Task.FromResult(new Page<Holding>(items, next, entry.Job.Round));
         }
     }

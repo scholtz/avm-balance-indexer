@@ -57,6 +57,11 @@ public static class ScanEndpoints
             return error!;
         }
 
+        if (await storage.GetAsync(token, cancellationToken).ConfigureAwait(false) is null)
+        {
+            return Results.NotFound(new { error = "The token is not known.", token = new TokenRef(token.Kind.ToStorageName(), token.TokenId) });
+        }
+
         var settings = options.Value;
         var now = clock.GetUtcNow();
         var indexed = (await storage.GetAsync(chain.Chain, cancellationToken).ConfigureAwait(false))?.IndexedRound

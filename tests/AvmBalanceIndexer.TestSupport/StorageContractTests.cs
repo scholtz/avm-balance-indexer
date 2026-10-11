@@ -305,6 +305,37 @@ public abstract class StorageContractTests
     }
 
     [Fact]
+    public async Task A_Reader_Can_Follow_A_Running_Scan_With_The_Cursor_It_Is_Given()
+    {
+        var store = await ScanStoreAsync();
+        var job = NewJob();
+        await store.CreateAsync(job, CancellationToken.None);
+        await store.ClaimNextAsync("a", T0.AddSeconds(1), T0 - TimeSpan.FromMinutes(2), CancellationToken.None);
+
+        var empty = await store.GetResultAsync(job.Id, null, 10, CancellationToken.None);
+        Assert.Empty(empty.Items);
+        Assert.Null(empty.NextCursor);
+
+        await store.AppendAsync(job.Id, "a", [Row(0), Row(1)], "c1", T0.AddSeconds(2), CancellationToken.None);
+        var first = await store.GetResultAsync(job.Id, null, 10, CancellationToken.None);
+        var caughtUp = await store.GetResultAsync(job.Id, first.NextCursor, 10, CancellationToken.None);
+        Assert.Equal(2, first.Items.Count);
+        Assert.NotNull(first.NextCursor);
+        Assert.Empty(caughtUp.Items);
+        Assert.Equal(first.NextCursor, caughtUp.NextCursor);
+
+        await store.AppendAsync(job.Id, "a", [Row(2)], ScanJob.EndOfList, T0.AddSeconds(3), CancellationToken.None);
+        var more = await store.GetResultAsync(job.Id, first.NextCursor, 10, CancellationToken.None);
+        Assert.Equal(Row(2).Account, Assert.Single(more.Items).Account);
+        Assert.NotNull(more.NextCursor);
+
+        await store.CompleteAsync(job.Id, "a", T0.AddSeconds(4), CancellationToken.None);
+        var finished = await store.GetResultAsync(job.Id, more.NextCursor, 10, CancellationToken.None);
+        Assert.Empty(finished.Items);
+        Assert.Null(finished.NextCursor);
+    }
+
+    [Fact]
     public async Task Cancelling_A_Scan_Stops_Its_Owner_And_Removes_It_From_The_Queue()
     {
         var store = await ScanStoreAsync();

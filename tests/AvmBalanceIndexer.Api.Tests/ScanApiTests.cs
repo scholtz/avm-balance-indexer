@@ -125,6 +125,11 @@ public sealed class ScanApiTests : IAsyncLifetime
         Assert.Equal(1, rest.GetProperty("items").GetArrayLength());
         Assert.False(rest.GetProperty("complete").GetBoolean());
 
+        // Caught up with a scan that is still running: the cursor to come back with is not dropped.
+        var (_, caughtUp) = await GetAsync($"/v1/algorand-testnet/scans/{id}/holders?cursor={Uri.EscapeDataString(rest.GetProperty("nextCursor").GetString()!)}");
+        Assert.Equal(0, caughtUp.GetProperty("items").GetArrayLength());
+        Assert.Equal(rest.GetProperty("nextCursor").GetString(), caughtUp.GetProperty("nextCursor").GetString());
+
         await _storage.CompleteAsync(id, "worker", DateTimeOffset.UtcNow, CancellationToken.None);
         var (_, done) = await GetAsync($"/v1/algorand-testnet/scans/{id}/holders?limit=10");
         Assert.True(done.GetProperty("complete").GetBoolean());
@@ -175,6 +180,15 @@ public sealed class ScanApiTests : IAsyncLifetime
         var (response, _) = await PostAsync(new Uri(path, UriKind.Relative));
 
         Assert.Equal(expected, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task A_Token_Nobody_Has_Seen_Is_A_404_And_No_Scan_Is_Queued()
+    {
+        var (response, _) = await PostAsync(new Uri("/v1/algorand-testnet/tokens/asa/999999/holders/scans", UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal(0, await _storage.CountActiveAsync(DateTimeOffset.UtcNow, CancellationToken.None));
     }
 
     [Fact]

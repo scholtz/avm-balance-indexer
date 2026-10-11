@@ -48,7 +48,13 @@ public sealed record ScanJob(
     DateTimeOffset UpdatedAt,
     DateTimeOffset ExpiresAt)
 {
+    /// <summary>Stored as the cursor once the last page of holders was appended, so a resumed scan completes instead of starting over.</summary>
+    public const string EndOfList = "end";
+
     public bool IsFinished => State is ScanState.Completed or ScanState.Failed or ScanState.Cancelled;
+
+    /// <summary>All holders are stored; only the completion is missing.</summary>
+    public bool IsFullyRead => Cursor == EndOfList;
 }
 
 /// <summary>
@@ -84,7 +90,11 @@ public interface IScanJobStore
     /// <summary>Cancels a pending or running job. Returns false when the job is unknown or already finished.</summary>
     Task<bool> CancelAsync(Guid id, DateTimeOffset now, CancellationToken cancellationToken);
 
-    /// <summary>The result rows in order. The cursor is opaque; <see cref="Page{T}.IndexedRound"/> carries the scanned round.</summary>
+    /// <summary>
+    /// The result rows in order. The cursor is opaque; <see cref="Page{T}.IndexedRound"/> carries the scanned round. The returned
+    /// cursor continues after the last row delivered whenever more rows exist <em>or may still arrive</em> (the job is not finished), so
+    /// a reader can follow a running scan; it is null once a finished scan has no more rows.
+    /// </summary>
     Task<Page<Holding>> GetResultAsync(Guid id, string? cursor, int limit, CancellationToken cancellationToken);
 
     /// <summary>Removes expired jobs with their results; returns how many jobs were removed.</summary>

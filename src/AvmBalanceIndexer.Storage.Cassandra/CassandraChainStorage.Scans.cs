@@ -16,8 +16,22 @@ public sealed partial class CassandraChainStorage : IScanJobStore
     public async Task CreateAsync(ScanJob job, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(job);
-        // Every write to a job row is a lightweight transaction, creation and deletion included: Paxos writes carry server-side
-        // timestamps, and mixing them with client-timestamped writes lets a plain write silently shadow a conditional one.
+        // The index entries come first and are plain writes: a crash after them leaves an entry without a job (cleaned up later), never a
+        // job nobody can find. Every write to the job row itself is a lightweight transaction, creation and deletion included: Paxos
+        // writes carry server-side timestamps, and mixing them with client-timestamped writes lets a plain write silently shadow a
+        // conditional one.
+        await ExecuteAsync(
+            $"INSERT INTO {Table("scan_job_index")} (chain, id, created_at) VALUES (?, ?, ?)",
+            cancellationToken,
+            _chain,
+            job.Id,
+            job.CreatedAt).ConfigureAwait(false);
+        await ExecuteAsync(
+            $"INSERT INTO {Table("scan_active")} (chain, id, created_at) VALUES (?, ?, ?)",
+            cancellationToken,
+            _chain,
+            job.Id,
+            job.CreatedAt).ConfigureAwait(false);
         var create = await BindAsync(
             $"""
             INSERT INTO {Table("scan_job")} (id, token_kind, token_id, round, include_zero, state, holders_found, created_at, updated_at, expires_at)
@@ -37,13 +51,6 @@ public sealed partial class CassandraChainStorage : IScanJobStore
         {
             throw new InvalidOperationException($"Scan job {job.Id} already exists.");
         }
-
-        await ExecuteAsync(
-            $"INSERT INTO {Table("scan_job_index")} (chain, id, created_at) VALUES (?, ?, ?)",
-            cancellationToken,
-            _chain,
-            job.Id,
-            job.CreatedAt).ConfigureAwait(false);
     }
 
     public async Task<ScanJob?> GetJobAsync(Guid id, CancellationToken cancellationToken) =>
@@ -51,14 +58,14 @@ public sealed partial class CassandraChainStorage : IScanJobStore
 
     public async Task<int> CountActiveAsync(DateTimeOffset now, CancellationToken cancellationToken)
     {
-        var jobs = await ReadAllJobsAsync(cancellationToken).ConfigureAwait(false);
+        var jobs = await ReadActiveJobsAsync(cancellationToken).ConfigureAwait(false);
         return jobs.Count(j => !j.Job.IsFinished && j.Job.ExpiresAt > now);
     }
 
     public async Task<ScanJob?> ClaimNextAsync(string owner, DateTimeOffset now, DateTimeOffset staleBefore, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(owner);
-        var candidates = (await ReadAllJobsAsync(cancellationToken).ConfigureAwait(false))
+        var candidates = (await ReadActiveJobsAsync(cancellationToken).ConfigureAwait(false))
             .Where(j => j.Job.ExpiresAt > now && (j.Job.State == ScanState.Pending || (j.Job.State == ScanState.Running && j.Job.UpdatedAt < staleBefore)))
             .OrderBy(static j => j.Job.CreatedAt);
         foreach (var (job, _) in candidates)
@@ -144,6 +151,7 @@ public sealed partial class CassandraChainStorage : IScanJobStore
                 current.Job.State.ToString()).ConfigureAwait(false);
             if (await ExecuteConditionalAsync(statement, cancellationToken).ConfigureAwait(false))
             {
+                await ForgetActiveAsync(id, cancellationToken).ConfigureAwait(false);
                 return true;
             }
         }
@@ -200,39 +208,65 @@ public sealed partial class CassandraChainStorage : IScanJobStore
             items.RemoveAt(items.Count - 1);
         }
 
-        return new Page<Holding>(items, hasMore ? seqs[items.Count - 1].ToString(CultureInfo.InvariantCulture) : null, current.Job.Round);
+        var delivered = items.Count > 0 ? seqs[items.Count - 1] : after;
+        var next = delivered >= 0 && (hasMore || !current.Job.IsFinished) ? delivered.ToString(CultureInfo.InvariantCulture) : null;
+        return new Page<Holding>(items, next, current.Job.Round);
     }
 
     public async Task<int> DeleteExpiredAsync(DateTimeOffset now, CancellationToken cancellationToken)
     {
         var removed = 0;
-        var indexed = await ExecuteAsync($"SELECT id FROM {Table("scan_job_index")} WHERE chain = ?", cancellationToken, _chain).ConfigureAwait(false);
-        foreach (var id in indexed.Select(static row => row.GetValue<Guid>("id")).ToArray())
+        var indexed = await ExecuteAsync($"SELECT id, created_at FROM {Table("scan_job_index")} WHERE chain = ?", cancellationToken, _chain).ConfigureAwait(false);
+        foreach (var entry in indexed.Select(static row => (Id: row.GetValue<Guid>("id"), CreatedAt: row.GetValue<DateTimeOffset>("created_at"))).ToArray())
         {
-            var current = await ReadJobAsync(id, cancellationToken).ConfigureAwait(false);
-            if (current is { } live && live.Job.ExpiresAt > now)
+            var current = await ReadJobAsync(entry.Id, cancellationToken).ConfigureAwait(false);
+            if (current is null)
+            {
+                // The index entry is written before the job; give a creation in progress time to finish before calling it an orphan.
+                if (now - entry.CreatedAt > OrphanGrace)
+                {
+                    await ForgetAsync(entry.Id, cancellationToken).ConfigureAwait(false);
+                }
+
+                continue;
+            }
+
+            if (current.Value.Job.ExpiresAt > now)
             {
                 continue;
             }
 
-            // Results first, then the job, then the index entry: a crash in between leaves something the next run finishes.
-            if (current is { } expired)
+            // Results first (every bucket that still holds rows, which also catches rows a displaced owner wrote past its checkpoint),
+            // then the job, then the markers: a crash in between leaves something the next run finishes.
+            for (var bucket = 0; ; bucket++)
             {
-                var buckets = (expired.Job.HoldersFound + ScanBucketSize - 1) / ScanBucketSize;
-                for (var bucket = 0; bucket < buckets; bucket++)
+                var any = (await ExecuteAsync($"SELECT seq FROM {Table("scan_result")} WHERE job_id = ? AND bucket = ? LIMIT 1", cancellationToken, entry.Id, bucket).ConfigureAwait(false)).Any();
+                if (!any && (long)bucket * ScanBucketSize >= current.Value.Job.HoldersFound)
                 {
-                    await ExecuteAsync($"DELETE FROM {Table("scan_result")} WHERE job_id = ? AND bucket = ?", cancellationToken, id, bucket).ConfigureAwait(false);
+                    break;
                 }
 
-                var delete = await BindAsync($"DELETE FROM {Table("scan_job")} WHERE id = ? IF EXISTS", cancellationToken, id).ConfigureAwait(false);
-                await ExecuteConditionalAsync(delete, cancellationToken).ConfigureAwait(false);
-                removed++;
+                if (any)
+                {
+                    await ExecuteAsync($"DELETE FROM {Table("scan_result")} WHERE job_id = ? AND bucket = ?", cancellationToken, entry.Id, bucket).ConfigureAwait(false);
+                }
             }
 
-            await ExecuteAsync($"DELETE FROM {Table("scan_job_index")} WHERE chain = ? AND id = ?", cancellationToken, _chain, id).ConfigureAwait(false);
+            var delete = await BindAsync($"DELETE FROM {Table("scan_job")} WHERE id = ? IF EXISTS", cancellationToken, entry.Id).ConfigureAwait(false);
+            await ExecuteConditionalAsync(delete, cancellationToken).ConfigureAwait(false);
+            await ForgetAsync(entry.Id, cancellationToken).ConfigureAwait(false);
+            removed++;
         }
 
         return removed;
+    }
+
+    private static readonly TimeSpan OrphanGrace = TimeSpan.FromMinutes(10);
+
+    private async Task ForgetAsync(Guid id, CancellationToken cancellationToken)
+    {
+        await ExecuteAsync($"DELETE FROM {Table("scan_job_index")} WHERE chain = ? AND id = ?", cancellationToken, _chain, id).ConfigureAwait(false);
+        await ForgetActiveAsync(id, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<bool> FinishAsync(Guid id, string owner, ScanState state, string? error, DateTimeOffset now, CancellationToken cancellationToken)
@@ -245,7 +279,13 @@ public sealed partial class CassandraChainStorage : IScanJobStore
             now,
             id,
             owner).ConfigureAwait(false);
-        return await ExecuteConditionalAsync(statement, cancellationToken).ConfigureAwait(false);
+        var applied = await ExecuteConditionalAsync(statement, cancellationToken).ConfigureAwait(false);
+        if (applied)
+        {
+            await ForgetActiveAsync(id, cancellationToken).ConfigureAwait(false);
+        }
+
+        return applied;
     }
 
     private async Task<bool> ExecuteConditionalAsync(BoundStatement statement, CancellationToken cancellationToken)
@@ -260,14 +300,34 @@ public sealed partial class CassandraChainStorage : IScanJobStore
         return rows.FirstOrDefault() is { } row ? MapJob(row) : null;
     }
 
-    private async Task<List<(ScanJob Job, string? Owner)>> ReadAllJobsAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// The jobs that are pending or running, from a small marker table that only contains them (finished and expired jobs are not read
+    /// on every poll). A marker whose job already finished is removed when it is met.
+    /// </summary>
+    private async Task<List<(ScanJob Job, string? Owner)>> ReadActiveJobsAsync(CancellationToken cancellationToken)
     {
-        var ids = (await ExecuteAsync($"SELECT id FROM {Table("scan_job_index")} WHERE chain = ?", cancellationToken, _chain).ConfigureAwait(false))
+        var ids = (await ExecuteAsync($"SELECT id FROM {Table("scan_active")} WHERE chain = ?", cancellationToken, _chain).ConfigureAwait(false))
             .Select(static row => row.GetValue<Guid>("id"))
             .ToArray();
         var jobs = await RunBoundedAsync(ids, id => ReadJobAsync(id, cancellationToken), cancellationToken).ConfigureAwait(false);
-        return [.. jobs.Where(static j => j is not null).Select(static j => j!.Value)];
+        var active = new List<(ScanJob Job, string? Owner)>(jobs.Length);
+        for (var i = 0; i < jobs.Length; i++)
+        {
+            if (jobs[i] is { } job && !job.Job.IsFinished)
+            {
+                active.Add(job);
+            }
+            else
+            {
+                await ExecuteAsync($"DELETE FROM {Table("scan_active")} WHERE chain = ? AND id = ?", cancellationToken, _chain, ids[i]).ConfigureAwait(false);
+            }
+        }
+
+        return active;
     }
+
+    private Task<RowSet> ForgetActiveAsync(Guid id, CancellationToken cancellationToken) =>
+        ExecuteAsync($"DELETE FROM {Table("scan_active")} WHERE chain = ? AND id = ?", cancellationToken, _chain, id);
 
     private static TokenKind ParseKind(string stored) =>
         TokenKindExtensions.TryParseStorageName(stored, out var kind) ? kind : throw new InvalidDataException($"The database holds an unknown token kind \"{stored}\".");

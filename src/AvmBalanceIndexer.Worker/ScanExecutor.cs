@@ -50,8 +50,10 @@ public sealed partial class ScanExecutor(
             {
                 return;
             }
-            catch (Exception ex) when (IsTransient(ex))
+            catch (Exception ex)
             {
+                // Scans are a side feature: whatever goes wrong here (the tables are not there yet because the writer has not applied the
+                // schema, the database is away, a bug) must never stop the indexer that shares this process. Wait and try again.
                 LogUnavailable(logger, ex);
             }
 
@@ -66,6 +68,10 @@ public sealed partial class ScanExecutor(
         }
     }
 
+    /// <summary>
+    /// One job from claim to completion. The job row is the single source of truth: after any failure whose outcome is unknown the step
+    /// starts over from what the row says (stored count and cursor), so a retry can neither repeat nor skip rows.
+    /// </summary>
     private async Task RunAsync(ScanJob job, CancellationToken stoppingToken)
     {
         var settings = options.Value;
@@ -78,21 +84,31 @@ public sealed partial class ScanExecutor(
             {
                 try
                 {
-                    var page = await storage.GetHoldersAtRoundAsync(job.Token, job.Round, job.IncludeZero, cursor, settings.PageSize, stoppingToken).ConfigureAwait(false);
-                    if (!await jobs.AppendAsync(job.Id, _owner, page.Items, page.NextCursor, clock.GetUtcNow(), stoppingToken).ConfigureAwait(false))
+                    if (cursor != ScanJob.EndOfList)
                     {
-                        LogReleased(logger, job.Id);
-                        return;
+                        var page = await storage.GetHoldersAtRoundAsync(job.Token, job.Round, job.IncludeZero, cursor, settings.PageSize, stoppingToken).ConfigureAwait(false);
+                        var next = page.NextCursor ?? ScanJob.EndOfList;
+                        if (!await jobs.AppendAsync(job.Id, _owner, page.Items, next, clock.GetUtcNow(), stoppingToken).ConfigureAwait(false))
+                        {
+                            LogReleased(logger, job.Id);
+                            return;
+                        }
+
+                        cursor = next;
+                        retries = 0;
+                        continue;
                     }
 
-                    retries = 0;
-                    cursor = page.NextCursor;
-                    if (cursor is null)
+                    if (await jobs.CompleteAsync(job.Id, _owner, clock.GetUtcNow(), stoppingToken).ConfigureAwait(false))
                     {
-                        await jobs.CompleteAsync(job.Id, _owner, clock.GetUtcNow(), stoppingToken).ConfigureAwait(false);
                         LogCompleted(logger, job.Id);
-                        return;
                     }
+                    else
+                    {
+                        LogReleased(logger, job.Id);
+                    }
+
+                    return;
                 }
                 catch (Exception ex) when (IsTransient(ex) && !stoppingToken.IsCancellationRequested)
                 {
@@ -103,6 +119,22 @@ public sealed partial class ScanExecutor(
 
                     LogStepRetry(logger, ex, job.Id, retries);
                     await Task.Delay(settings.RetryDelay, stoppingToken).ConfigureAwait(false);
+
+                    // Where did the last step really get to? The job row says; it also tells whether it is still ours.
+                    if (await jobs.GetJobAsync(job.Id, stoppingToken).ConfigureAwait(false) is not { State: ScanState.Running } current)
+                    {
+                        LogReleased(logger, job.Id);
+                        return;
+                    }
+
+                    cursor = current.Cursor;
+
+                    // A heartbeat, so that long retries do not make the scan look abandoned. Rejected when another replica took it over.
+                    if (!await jobs.AppendAsync(job.Id, _owner, [], cursor, clock.GetUtcNow(), stoppingToken).ConfigureAwait(false))
+                    {
+                        LogReleased(logger, job.Id);
+                        return;
+                    }
                 }
             }
         }
@@ -113,7 +145,15 @@ public sealed partial class ScanExecutor(
         catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
         {
             LogFailed(logger, ex, job.Id);
-            await jobs.FailAsync(job.Id, _owner, Describe(ex), clock.GetUtcNow(), CancellationToken.None).ConfigureAwait(false);
+            try
+            {
+                await jobs.FailAsync(job.Id, _owner, Describe(ex), clock.GetUtcNow(), CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception failure)
+            {
+                // The job stays running and is picked up again after StaleAfter.
+                LogUnavailable(logger, failure);
+            }
         }
     }
 

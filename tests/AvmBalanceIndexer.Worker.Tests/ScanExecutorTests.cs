@@ -160,6 +160,57 @@ public class ScanExecutorTests
     }
 
     [Fact]
+    public async Task A_Scan_Whose_Last_Page_Was_Stored_But_Never_Completed_Is_Completed_Without_Repeating_Rows()
+    {
+        var storage = await IndexedAsync();
+        var job = NewJob();
+        await storage.CreateAsync(job, CancellationToken.None);
+        var all = await storage.GetHoldersAtRoundAsync(TokenKey.Native, 4, true, null, 100, CancellationToken.None);
+        await storage.ClaimNextAsync("dead-replica", Now.AddMinutes(-30), Now.AddHours(-1), CancellationToken.None);
+        await storage.AppendAsync(job.Id, "dead-replica", all.Items, ScanJob.EndOfList, Now.AddMinutes(-30), CancellationToken.None);
+        using var executor = Executor(storage);
+
+        await executor.StartAsync(CancellationToken.None);
+        await WaitForAsync(storage, job.Id, static j => j.State == ScanState.Completed);
+        await executor.StopAsync(CancellationToken.None);
+
+        Assert.Equal(all.Items, await ReadAllAsync(storage, job.Id));
+    }
+
+    [Fact]
+    public async Task A_Step_Whose_Outcome_Was_Lost_Is_Not_Repeated()
+    {
+        var storage = await IndexedAsync();
+        var job = NewJob();
+        await storage.CreateAsync(job, CancellationToken.None);
+        storage.LoseResponseOfAppend = 2;
+        using var executor = Executor(storage, pageSize: 2, retries: 3);
+
+        await executor.StartAsync(CancellationToken.None);
+        await WaitForAsync(storage, job.Id, static j => j.State == ScanState.Completed);
+        await executor.StopAsync(CancellationToken.None);
+
+        var expected = await storage.GetHoldersAtRoundAsync(TokenKey.Native, 4, true, null, 100, CancellationToken.None);
+        Assert.Equal(expected.Items, await ReadAllAsync(storage, job.Id));
+    }
+
+    [Fact]
+    public async Task A_Scan_Queue_That_Is_Not_Ready_Does_Not_Stop_The_Executor()
+    {
+        var storage = await IndexedAsync();
+        storage.FailClaims = 3;
+        var job = NewJob();
+        await storage.CreateAsync(job, CancellationToken.None);
+        using var executor = Executor(storage);
+
+        await executor.StartAsync(CancellationToken.None);
+        await WaitForAsync(storage, job.Id, static j => j.State == ScanState.Completed);
+        await executor.StopAsync(CancellationToken.None);
+
+        Assert.True(storage.FailClaims <= 0);
+    }
+
+    [Fact]
     public async Task Idle_Executors_Remove_Expired_Scans()
     {
         var storage = await IndexedAsync();
@@ -197,6 +248,22 @@ public class ScanExecutorTests
 
         public Action? OnAppend { get; set; }
 
+        /// <summary>The n-th append is applied but reported to the caller as a failed request (the response was lost).</summary>
+        public int LoseResponseOfAppend { get; set; }
+
+        public int FailClaims { get; set; }
+
+        public override Task<ScanJob?> ClaimNextAsync(string owner, DateTimeOffset now, DateTimeOffset staleBefore, CancellationToken cancellationToken)
+        {
+            if (FailClaims-- > 0)
+            {
+                // Not a classified transient error: a missing table or a bug must not take the process down either.
+                return Task.FromException<ScanJob?>(new InvalidOperationException("the scan tables do not exist yet"));
+            }
+
+            return base.ClaimNextAsync(owner, now, staleBefore, cancellationToken);
+        }
+
         public int FailReads
         {
             get => Volatile.Read(ref _failReads);
@@ -217,8 +284,13 @@ public class ScanExecutorTests
         public override async Task<bool> AppendAsync(Guid id, string owner, IReadOnlyList<Holding> items, string? nextCursor, DateTimeOffset now, CancellationToken cancellationToken)
         {
             var applied = await base.AppendAsync(id, owner, items, nextCursor, now, cancellationToken);
-            Interlocked.Increment(ref _appendCalls);
+            var call = Interlocked.Increment(ref _appendCalls);
             OnAppend?.Invoke();
+            if (call == LoseResponseOfAppend)
+            {
+                throw new IOException("the response was lost");
+            }
+
             return applied;
         }
     }

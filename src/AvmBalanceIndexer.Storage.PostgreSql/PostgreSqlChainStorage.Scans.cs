@@ -151,12 +151,17 @@ public sealed partial class PostgreSqlChainStorage : IScanJobStore
             throw new ArgumentException("Invalid cursor.", nameof(cursor));
         }
 
+        if (await GetJobAsync(id, cancellationToken).ConfigureAwait(false) is not { } job)
+        {
+            return new Page<Holding>([], null, 0);
+        }
+
         await using var command = _dataSource.CreateCommand(
             """
-            SELECT r.seq, r.account, r.amount, r.opted_in, r.last_changed_round, j.token_kind, j.token_id, j.round
-            FROM scan_job j JOIN scan_result r ON r.job_id = j.id
-            WHERE j.id = @id AND r.seq > @after
-            ORDER BY r.seq
+            SELECT seq, account, amount, opted_in, last_changed_round
+            FROM scan_result
+            WHERE job_id = @id AND seq > @after
+            ORDER BY seq
             LIMIT @limit
             """);
         command.Parameters.AddWithValue("id", id);
@@ -165,19 +170,17 @@ public sealed partial class PostgreSqlChainStorage : IScanJobStore
 
         var items = new List<Holding>();
         var seqs = new List<long>();
-        ulong round = 0;
         await using (var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
         {
             while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             {
                 items.Add(new Holding(
                     new Address((byte[])reader[1]),
-                    new TokenKey(ParseKind(reader.GetString(5)), (ulong)reader.GetInt64(6)),
+                    job.Token,
                     ToAmount(reader.GetFieldValue<BigInteger>(2)),
                     reader.GetBoolean(3),
                     (ulong)reader.GetInt64(4)));
                 seqs.Add(reader.GetInt64(0));
-                round = (ulong)reader.GetInt64(7);
             }
         }
 
@@ -187,7 +190,10 @@ public sealed partial class PostgreSqlChainStorage : IScanJobStore
             items.RemoveAt(items.Count - 1);
         }
 
-        return new Page<Holding>(items, hasMore ? seqs[items.Count - 1].ToString(CultureInfo.InvariantCulture) : null, round);
+        // A reader that follows a running scan needs a position even when it has caught up.
+        var delivered = items.Count > 0 ? seqs[items.Count - 1] : after;
+        var next = delivered >= 0 && (hasMore || !job.IsFinished) ? delivered.ToString(CultureInfo.InvariantCulture) : null;
+        return new Page<Holding>(items, next, job.Round);
     }
 
     public async Task<int> DeleteExpiredAsync(DateTimeOffset now, CancellationToken cancellationToken)

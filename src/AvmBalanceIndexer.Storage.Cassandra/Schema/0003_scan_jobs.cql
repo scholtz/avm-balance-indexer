@@ -25,6 +25,14 @@ CREATE TABLE IF NOT EXISTS scan_job_index (
   PRIMARY KEY ((chain), id)
 );
 
+-- The jobs that are pending or running, so the queue poll does not read the whole history. Plain writes only.
+CREATE TABLE IF NOT EXISTS scan_active (
+  chain text,
+  id uuid,
+  created_at timestamp,
+  PRIMARY KEY ((chain), id)
+);
+
 CREATE TABLE IF NOT EXISTS scan_result (
   job_id uuid,
   bucket int,
