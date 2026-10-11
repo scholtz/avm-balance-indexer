@@ -33,10 +33,37 @@ public static class ScanEndpoints
     {
         ArgumentNullException.ThrowIfNull(v1);
 
-        v1.MapPost("/tokens/{kind}/{tokenId}/holders/scans", Create).WithName("CreateHolderScan");
-        v1.MapGet("/scans/{id}", GetJob).WithName("GetHolderScan");
-        v1.MapGet("/scans/{id}/holders", GetHolders).WithName("GetHolderScanResult");
-        v1.MapDelete("/scans/{id}", Cancel).WithName("CancelHolderScan");
+        v1.MapPost("/tokens/{kind}/{tokenId}/holders/scans", Create)
+            .WithName("CreateHolderScan")
+            .WithTags("Scans")
+            .WithSummary("Start an asynchronous export of every holder of a token at a round")
+            .WithDescription("Accepted at once; poll the scan and read the result pages. The body is optional: { \"round\": 123, \"includeZero\": false }.")
+            .Accepts<ScanRequest>(true, "application/json")
+            .Produces<ScanResponse>(StatusCodes.Status202Accepted)
+            .WithErrors(StatusCodes.Status400BadRequest, StatusCodes.Status404NotFound)
+            .WithCommonErrors();
+        v1.MapGet("/scans/{id}", GetJob)
+            .WithName("GetHolderScan")
+            .WithTags("Scans")
+            .WithSummary("State and progress of a scan")
+            .Produces<ScanResponse>()
+            .WithErrors(StatusCodes.Status400BadRequest, StatusCodes.Status404NotFound)
+            .WithCommonErrors();
+        v1.MapGet("/scans/{id}/holders", GetHolders)
+            .WithName("GetHolderScanResult")
+            .WithTags("Scans")
+            .WithSummary("Result pages of a scan (also while it is running)")
+            .WithDescription("Without a nextCursor and with complete=false, repeat the same request a moment later.")
+            .Produces<ScanHoldersResponse>()
+            .WithErrors(StatusCodes.Status400BadRequest, StatusCodes.Status404NotFound)
+            .WithCommonErrors();
+        v1.MapDelete("/scans/{id}", Cancel)
+            .WithName("CancelHolderScan")
+            .WithTags("Scans")
+            .WithSummary("Cancel a scan")
+            .Produces<ScanResponse>()
+            .WithErrors(StatusCodes.Status400BadRequest, StatusCodes.Status404NotFound, StatusCodes.Status409Conflict)
+            .WithCommonErrors();
         return v1;
     }
 
