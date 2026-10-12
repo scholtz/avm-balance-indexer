@@ -24,6 +24,8 @@ chain deployment, and docs/operations.md names `ReplicationFactor` 1 a developme
   then upgrades everything to the new tag. Testnet deploys only the head of `main` after green CI; production needs a `vX.Y.Z` tag on a commit of `main` with a green CI run, and the
   protected `production` environment.
 
+- **Secrets come from GitHub only.** The deploy job creates the image pull secret and the optional algod token secret with `kubectl apply` on every run; the kube config is the only manual setup.
+
 ## Consequences
 
 - A node loss loses the data of all chains on it until the directory is restored; indexing can be replayed from the chain (MainNet takes long).

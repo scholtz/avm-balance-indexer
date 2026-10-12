@@ -33,6 +33,10 @@ on:
         description: Tag of the images to run
         type: string
         required: true
+      secret-suffix:
+        description: Suffix of the optional per-chain algod settings (TESTNET, MAINNET or VOI)
+        type: string
+        required: true
       require-head-of-main:
         description: Refuse to deploy when ref is no longer the head of main (an older run must not roll back a newer one)
         type: boolean
@@ -41,6 +45,8 @@ on:
       KUBE_CONFIG:
         required: true
       DOCKERHUB_USERNAME:
+        required: true
+      DOCKERHUB_TOKEN:
         required: true
 
 permissions:
@@ -99,9 +105,30 @@ jobs:
             printf '%s' "$KUBE_CONFIG" | base64 -d > ~/.kube/config
           fi
           chmod 600 ~/.kube/config
+          # Needs cluster rights; with a namespace-scoped kube config the namespace has to exist already.
+          kubectl get namespace "$NAMESPACE" > /dev/null 2>&1 || kubectl create namespace "$NAMESPACE"
           kubectl -n "$NAMESPACE" get pods > /dev/null
+      # Every Kubernetes secret the release needs is created here from GitHub secrets: nothing is edited in the cluster by hand.
+      - name: Kubernetes secrets
+        env:
+          RELEASE: ${{ inputs.release }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          ALGOD_TOKEN: ${{ secrets[format('ALGOD_TOKEN_{0}', inputs.secret-suffix)] }}
+        run: |
+          apply() { kubectl -n "$NAMESPACE" apply -f -; }
+          # Lets the cluster pull the images even when the Docker Hub repositories are private.
+          kubectl -n "$NAMESPACE" create secret docker-registry dockerhub-pull \
+            --docker-server=https://index.docker.io/v1/ --docker-username="$DOCKERHUB_USERNAME" --docker-password="$DOCKERHUB_TOKEN" \
+            --dry-run=client -o yaml | apply
+          # Token of the algod node when it needs one (GitHub secret ALGOD_TOKEN_TESTNET / _MAINNET / _VOI); the chart is told about it below.
+          if [ -n "$ALGOD_TOKEN" ]; then
+            kubectl -n "$NAMESPACE" create secret generic "${RELEASE}-algod" --from-literal=token="$ALGOD_TOKEN" --dry-run=client -o yaml | apply
+          fi
       - name: Upgrade the release
         env:
+          ALGOD_TOKEN: ${{ secrets[format('ALGOD_TOKEN_{0}', inputs.secret-suffix)] }}
+          ALGOD_URL: ${{ vars[format('ALGOD_URL_{0}', inputs.secret-suffix)] }}
           RELEASE: ${{ inputs.release }}
           VALUES: ${{ inputs.values }}
           CHAIN: ${{ inputs.chain }}
@@ -115,7 +142,9 @@ jobs:
           fi
           common=(--namespace "$NAMESPACE" -f "deploy/helm/values/$VALUES"
             --set-string "image.repository=docker.io/${DOCKERHUB_USERNAME}/avm-balance-indexer"
-            --set-string "cassandra.embedded.node=$CASSANDRA_NODE" --atomic --timeout 25m)
+            --set-string "cassandra.embedded.node=$CASSANDRA_NODE" --set "imagePullSecrets[0].name=dockerhub-pull" --atomic --timeout 25m)
+          if [ -n "$ALGOD_TOKEN" ]; then common+=(--set-string "algorand.existingSecret=${RELEASE}-algod"); fi
+          if [ -n "$ALGOD_URL" ]; then common+=(--set-string "algorand.algodUrl=$ALGOD_URL"); fi
 
           # Upgrade rules of docs/operations.md: the worker first (it applies schema changes; Recreate so that no old writer runs meanwhile),
           # the API only after the new worker is ready. A first installation has nothing to protect and goes in one step.

@@ -31,7 +31,8 @@ On the `production` environment enable *Required reviewers* so that a release ta
 | Secret | Used by | Content |
 |---|---|---|
 | `DOCKERHUB_USERNAME` | image publish, deploy | Docker Hub account or organisation that owns the repositories. |
-| `DOCKERHUB_TOKEN` | image publish | Docker Hub access token with *Read & Write* (Account settings, Security, New access token). Not your password. |
+| `DOCKERHUB_TOKEN` | image publish, deploy | Docker Hub access token with *Read & Write* (Account settings, Security, New access token). Not your password. It also becomes the image pull secret in the cluster. |
+| `ALGOD_TOKEN_TESTNET`, `ALGOD_TOKEN_MAINNET`, `ALGOD_TOKEN_VOI` | deploy, optional | API token of your own algod node for that chain (section 3). |
 | `KUBE_CONFIG` | deploy | Kube config file of the deployer account (section 2), either the YAML itself or its base64 encoding. |
 
 One **variable** (not a secret; Settings, Secrets and variables, Actions, Variables): `CASSANDRA_NODE`, the name of the node (`kubectl get nodes`) that owns
@@ -46,6 +47,8 @@ Prerequisites in the cluster: an ingress controller (the chart leaves `ingress.c
 [cert-manager](https://cert-manager.io) with a `ClusterIssuer` named `letsencrypt-prod` (or change/remove `ingress.tls.clusterIssuer` in the overlays and provide the
 TLS secret `<release>-<chain>-tls` yourself), DNS records for the three host names pointing at the ingress, and the data directories' disk (`/mnt/nvme1`) on the node that
 runs Cassandra.
+
+The kube config is the only thing prepared by hand. Use any kube config that may manage the objects of the chart in the namespace `avm-balance-indexer` (a cluster-admin one also lets the job create the namespace). To get a least-privilege one:
 
 1. As a cluster admin apply the namespace and a namespace-scoped account: `kubectl apply -f deploy/rbac/deployer.yaml`. It may manage the chart's objects in
    `avm-balance-indexer` and nothing else (no cluster-wide rights, so the workflow cannot create the namespace).
@@ -76,22 +79,18 @@ runs Cassandra.
    If you use your own kube config with rights in the namespace, paste that instead; the workflow only needs permission for the objects listed in `deploy/rbac/deployer.yaml`.
 3. Cassandra stores its data in a directory of **one** node: set the variable `CASSANDRA_NODE` (section 1). The directory is created on first start and handed to uid 999.
 
-## 3. Kubernetes secrets
+## 3. Kubernetes secrets: created by the pipeline
 
-With the shipped overlays **no Kubernetes Secret has to be created by hand**: the embedded Cassandra has no login (a NetworkPolicy lets only the release's own pods reach port 9042),
-the images are public and the public algod/gossip endpoints need no token. Helm stores its release state as Secrets in the namespace; the deployer account may do that.
-Create secrets only when you switch one of these options on:
+Nothing in the cluster is edited by hand: the deploy job creates and updates every Kubernetes Secret from the GitHub secrets, on each run (`kubectl apply`, so a changed GitHub secret reaches the cluster with the next deployment).
 
-| Need | Secret (in namespace `avm-balance-indexer`) | Chart value | Create it with |
-|---|---|---|---|
-| Private Docker Hub repositories | `dockerhub-pull`, type `kubernetes.io/dockerconfigjson` | `imagePullSecrets: [{name: dockerhub-pull}]` | `kubectl -n avm-balance-indexer create secret docker-registry dockerhub-pull --docker-username=<user> --docker-password=<access token>` (a token with *Read-only* rights is enough) |
-| External Cassandra with login (instead of the embedded one) | keys `username`, `password` | `storage.cassandra.existingSecret`, plus `storage.cassandra.contactPoints`, `cassandra.embedded.enabled=false` | `kubectl -n avm-balance-indexer create secret generic cassandra-credentials --from-literal=username=<u> --from-literal=password=<p>` |
-| PostgreSQL instead of Cassandra | key `connectionString` | `storage.provider=PostgreSql`, `storage.postgreSql.existingSecret` | `kubectl -n avm-balance-indexer create secret generic postgres --from-literal=connectionString='Host=...;Username=...;Password=...;Database=...'` |
-| Algod node that needs a token | key `token` | `algorand.existingSecret`, `algorand.algodUrl` | `kubectl -n avm-balance-indexer create secret generic algod --from-literal=token=<token>` |
-| Own TLS certificate (no cert-manager) | `<release>-<chain>-tls`, type `kubernetes.io/tls` | `ingress.tls.enabled=true`, `ingress.tls.clusterIssuer=""` | `kubectl -n avm-balance-indexer create secret tls testnet-algorand-testnet-tls --cert=tls.crt --key=tls.key` |
+| Kubernetes Secret (namespace `avm-balance-indexer`) | Created from | Used for |
+|---|---|---|
+| `dockerhub-pull` | `DOCKERHUB_USERNAME` + `DOCKERHUB_TOKEN` | pulling the images, also from private Docker Hub repositories (`imagePullSecrets`) |
+| `<release>-algod` (key `token`), only when the GitHub secret exists | `ALGOD_TOKEN_TESTNET`, `ALGOD_TOKEN_MAINNET`, `ALGOD_TOKEN_VOI` | an algod node that needs an API token (`algorand.existingSecret`); set the node address in the Actions variable `ALGOD_URL_TESTNET` / `_MAINNET` / `_VOI` (without them the chain's public endpoint is used and no token is needed) |
+| Helm release state | Helm itself | `sh.helm.release.*` Secrets, written with the deployer's rights |
 
-Create the secret **before** the deployment that uses it, and set the chart value in the overlay file (a commit to `main`, or `--set` for a manual `helm upgrade`).
-The chart refuses to render when a required secret name is missing (`required` checks), so a forgotten value fails the workflow before anything changes.
+The embedded Cassandra has no login and needs no Secret; certificates come from cert-manager (the `ClusterIssuer` of `ingress.tls.clusterIssuer`). The namespace is created by the job when it is missing and the kube config may do so;
+otherwise `deploy/rbac/deployer.yaml` (section 2) creates it. External databases (PostgreSQL, a Cassandra with login) are not wired through the pipeline; the chart supports them with `existingSecret` values for a manual `helm upgrade`.
 
 ## 4. First deployment and day-to-day
 
