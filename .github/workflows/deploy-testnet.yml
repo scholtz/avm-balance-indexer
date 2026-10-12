@@ -74,6 +74,7 @@ jobs:
       release: testnet
       values: stage-testnet.yaml
       chain: algorand-testnet
+      secret-suffix: TESTNET
       host: testnet.balance-indexer.biatec.io
       image-tag: ${{ needs.plan.outputs.tag }}
       require-head-of-main: ${{ github.event_name != 'workflow_dispatch' }}

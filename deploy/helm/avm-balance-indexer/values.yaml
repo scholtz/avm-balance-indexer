@@ -12,6 +12,8 @@ image:
 
 # Pull secrets for a private registry (names of existing kubernetes.io/dockerconfigjson Secrets).
 imagePullSecrets: []
+# Changes whenever the content of a referenced Secret changes (the deploy workflow sets a hash), so that the pods restart and read it.
+secretsChecksum: ""
 
 storage:
   # PostgreSql | Cassandra  -- selected per deployment, never dual-written.
