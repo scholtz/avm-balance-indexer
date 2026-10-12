@@ -23,8 +23,8 @@ chain deployment, and docs/operations.md names `ReplicationFactor` 1 a developme
 - **Pipelines follow the upgrade rules of operations.md**: the deploy job upgrades the worker first (strategy `Recreate`, so no old writer runs while a migration is applied), waits for it,
   then upgrades everything to the new tag. Testnet deploys only the head of `main` after green CI; production needs a `vX.Y.Z` tag on a commit of `main` with a green CI run, and the
   protected `production` environment.
-
-- **Secrets come from GitHub only.** The deploy job creates the image pull secret and the optional algod token secret with `kubectl apply` on every run; the kube config is the only manual setup.
+- **Secrets come from GitHub.** The deploy job creates the optional image pull secret and algod token secret with server-side apply on every run and restarts the pods when they change (hash in the pod template).
+  The kube config (and, for a least-privilege account, `deploy/rbac/deployer.yaml`) is the only manual setup.
 
 ## Consequences
 

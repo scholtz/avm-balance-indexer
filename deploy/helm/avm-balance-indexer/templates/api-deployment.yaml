@@ -13,6 +13,9 @@ spec:
       annotations:
         # New configuration (for example the telemetry endpoint) restarts the pods.
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- if .Values.secretsChecksum }}
+        checksum/secrets: {{ .Values.secretsChecksum | quote }}
+        {{- end }}
       labels: {{- include "avm.labels" . | nindent 8 }}
         app.kubernetes.io/component: api
     spec:

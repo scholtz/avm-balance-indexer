@@ -46,8 +46,8 @@ on:
         required: true
       DOCKERHUB_USERNAME:
         required: true
-      DOCKERHUB_TOKEN:
-        required: true
+      DOCKERHUB_PULL_TOKEN:
+        required: false
 
 permissions:
   contents: read
@@ -106,29 +106,39 @@ jobs:
           fi
           chmod 600 ~/.kube/config
           # Needs cluster rights; with a namespace-scoped kube config the namespace has to exist already.
-          kubectl get namespace "$NAMESPACE" > /dev/null 2>&1 || kubectl create namespace "$NAMESPACE"
+          if ! kubectl -n "$NAMESPACE" get pods > /dev/null 2>&1 && [ "$(kubectl auth can-i create namespaces)" = yes ]; then
+            kubectl create namespace "$NAMESPACE"
+          fi
           kubectl -n "$NAMESPACE" get pods > /dev/null
       # Every Kubernetes secret the release needs is created here from GitHub secrets: nothing is edited in the cluster by hand.
       - name: Kubernetes secrets
         env:
           RELEASE: ${{ inputs.release }}
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          PULL_TOKEN: ${{ secrets.DOCKERHUB_PULL_TOKEN }}
           ALGOD_TOKEN: ${{ secrets[format('ALGOD_TOKEN_{0}', inputs.secret-suffix)] }}
+          ALGOD_URL: ${{ vars[format('ALGOD_URL_{0}', inputs.secret-suffix)] }}
         run: |
-          apply() { kubectl -n "$NAMESPACE" apply -f -; }
-          # Lets the cluster pull the images even when the Docker Hub repositories are private.
-          kubectl -n "$NAMESPACE" create secret docker-registry dockerhub-pull \
-            --docker-server=https://index.docker.io/v1/ --docker-username="$DOCKERHUB_USERNAME" --docker-password="$DOCKERHUB_TOKEN" \
-            --dry-run=client -o yaml | apply
+          # Server-side apply keeps the secret out of the last-applied-configuration annotation.
+          apply() { kubectl -n "$NAMESPACE" apply --server-side --force-conflicts -f -; }
+          # Only for private Docker Hub repositories: GitHub secret DOCKERHUB_PULL_TOKEN, a read-only access token.
+          if [ -n "$PULL_TOKEN" ]; then
+            kubectl -n "$NAMESPACE" create secret docker-registry "${RELEASE}-dockerhub-pull" \
+              --docker-server=https://index.docker.io/v1/ --docker-username="$DOCKERHUB_USERNAME" --docker-password="$PULL_TOKEN" \
+              --dry-run=client -o yaml | apply
+          fi
           # Token of the algod node when it needs one (GitHub secret ALGOD_TOKEN_TESTNET / _MAINNET / _VOI); the chart is told about it below.
           if [ -n "$ALGOD_TOKEN" ]; then
+            if [ -z "$ALGOD_URL" ]; then
+              echo "::error::ALGOD_TOKEN is set but the Actions variable ALGOD_URL is not: the token would be sent to the public endpoint"; exit 1
+            fi
             kubectl -n "$NAMESPACE" create secret generic "${RELEASE}-algod" --from-literal=token="$ALGOD_TOKEN" --dry-run=client -o yaml | apply
           fi
       - name: Upgrade the release
         env:
           ALGOD_TOKEN: ${{ secrets[format('ALGOD_TOKEN_{0}', inputs.secret-suffix)] }}
           ALGOD_URL: ${{ vars[format('ALGOD_URL_{0}', inputs.secret-suffix)] }}
+          PULL_TOKEN: ${{ secrets.DOCKERHUB_PULL_TOKEN }}
           RELEASE: ${{ inputs.release }}
           VALUES: ${{ inputs.values }}
           CHAIN: ${{ inputs.chain }}
@@ -142,8 +152,11 @@ jobs:
           fi
           common=(--namespace "$NAMESPACE" -f "deploy/helm/values/$VALUES"
             --set-string "image.repository=docker.io/${DOCKERHUB_USERNAME}/avm-balance-indexer"
-            --set-string "cassandra.embedded.node=$CASSANDRA_NODE" --set "imagePullSecrets[0].name=dockerhub-pull" --atomic --timeout 25m)
+            --set-string "cassandra.embedded.node=$CASSANDRA_NODE" --atomic --timeout 25m)
+          # Pods restart when a secret changes: its hash is part of the pod template.
+          if [ -n "$PULL_TOKEN" ]; then common+=(--set "imagePullSecrets[0].name=${RELEASE}-dockerhub-pull"); fi
           if [ -n "$ALGOD_TOKEN" ]; then common+=(--set-string "algorand.existingSecret=${RELEASE}-algod"); fi
+          common+=(--set-string "secretsChecksum=$(printf '%s|%s' "$ALGOD_TOKEN" "$PULL_TOKEN" | sha256sum | cut -c1-16)")
           if [ -n "$ALGOD_URL" ]; then common+=(--set-string "algorand.algodUrl=$ALGOD_URL"); fi
 
           # Upgrade rules of docs/operations.md: the worker first (it applies schema changes; Recreate so that no old writer runs meanwhile),

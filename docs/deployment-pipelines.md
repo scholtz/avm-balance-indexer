@@ -31,7 +31,8 @@ On the `production` environment enable *Required reviewers* so that a release ta
 | Secret | Used by | Content |
 |---|---|---|
 | `DOCKERHUB_USERNAME` | image publish, deploy | Docker Hub account or organisation that owns the repositories. |
-| `DOCKERHUB_TOKEN` | image publish, deploy | Docker Hub access token with *Read & Write* (Account settings, Security, New access token). Not your password. It also becomes the image pull secret in the cluster. |
+| `DOCKERHUB_TOKEN` | image publish, deploy | Docker Hub access token with *Read & Write* (Account settings, Security, New access token). Not your password. Only the pipeline uses it; it never enters the cluster. |
+| `DOCKERHUB_PULL_TOKEN` | deploy, optional | A second, **read-only** Docker Hub access token; set it only when the repositories are private. Stored in the cluster as the image pull secret. |
 | `ALGOD_TOKEN_TESTNET`, `ALGOD_TOKEN_MAINNET`, `ALGOD_TOKEN_VOI` | deploy, optional | API token of your own algod node for that chain (section 3). |
 | `KUBE_CONFIG` | deploy | Kube config file of the deployer account (section 2), either the YAML itself or its base64 encoding. |
 
@@ -51,7 +52,7 @@ runs Cassandra.
 The kube config is the only thing prepared by hand. Use any kube config that may manage the objects of the chart in the namespace `avm-balance-indexer` (a cluster-admin one also lets the job create the namespace). To get a least-privilege one:
 
 1. As a cluster admin apply the namespace and a namespace-scoped account: `kubectl apply -f deploy/rbac/deployer.yaml`. It may manage the chart's objects in
-   `avm-balance-indexer` and nothing else (no cluster-wide rights, so the workflow cannot create the namespace).
+   `avm-balance-indexer` and nothing else (no cluster-wide rights; the file creates the namespace, because this account cannot).
 2. Build the kube config for that account (replace the server address and the cluster name):
 
    ```sh
@@ -81,16 +82,21 @@ The kube config is the only thing prepared by hand. Use any kube config that may
 
 ## 3. Kubernetes secrets: created by the pipeline
 
-Nothing in the cluster is edited by hand: the deploy job creates and updates every Kubernetes Secret from the GitHub secrets, on each run (`kubectl apply`, so a changed GitHub secret reaches the cluster with the next deployment).
+Nothing in the cluster is edited by hand: the deploy job creates and updates every Kubernetes Secret from the GitHub secrets, on each run (server-side apply, so the values are not copied into an annotation). A changed GitHub secret reaches the cluster with the next deployment, and the pods restart because the chart carries a hash of the secrets.
 
 | Kubernetes Secret (namespace `avm-balance-indexer`) | Created from | Used for |
 |---|---|---|
-| `dockerhub-pull` | `DOCKERHUB_USERNAME` + `DOCKERHUB_TOKEN` | pulling the images, also from private Docker Hub repositories (`imagePullSecrets`) |
-| `<release>-algod` (key `token`), only when the GitHub secret exists | `ALGOD_TOKEN_TESTNET`, `ALGOD_TOKEN_MAINNET`, `ALGOD_TOKEN_VOI` | an algod node that needs an API token (`algorand.existingSecret`); set the node address in the Actions variable `ALGOD_URL_TESTNET` / `_MAINNET` / `_VOI` (without them the chain's public endpoint is used and no token is needed) |
+| `<release>-dockerhub-pull`, only when the GitHub secret exists | `DOCKERHUB_USERNAME` + `DOCKERHUB_PULL_TOKEN` | pulling the images from private Docker Hub repositories (`imagePullSecrets`); public repositories need nothing |
+| `<release>-algod` (key `token`), only when the GitHub secret exists | `DOCKERHUB_PULL_TOKEN` | deploy, optional | A second, **read-only** Docker Hub access token; set it only when the repositories are private. Stored in the cluster as the image pull secret. |
+| `ALGOD_TOKEN_TESTNET`, `ALGOD_TOKEN_MAINNET`, `ALGOD_TOKEN_VOI` | an algod node that needs an API token (`algorand.existingSecret`); set the node address in the Actions variable `ALGOD_URL_TESTNET` / `_MAINNET` / `_VOI` (without them the chain's public endpoint is used and no token is needed) |
 | Helm release state | Helm itself | `sh.helm.release.*` Secrets, written with the deployer's rights |
 
 The embedded Cassandra has no login and needs no Secret; certificates come from cert-manager (the `ClusterIssuer` of `ingress.tls.clusterIssuer`). The namespace is created by the job when it is missing and the kube config may do so;
-otherwise `deploy/rbac/deployer.yaml` (section 2) creates it. External databases (PostgreSQL, a Cassandra with login) are not wired through the pipeline; the chart supports them with `existingSecret` values for a manual `helm upgrade`.
+otherwise `deploy/rbac/deployer.yaml` (section 2) creates it.
+
+Not wired through the pipeline (the chart supports them with `existingSecret` values and a manual `helm upgrade`): PostgreSQL instead of Cassandra (secret with key `connectionString`, value `storage.postgreSql.existingSecret`),
+a Cassandra with login (keys `username` and `password`, `storage.cassandra.existingSecret`, plus `storage.cassandra.contactPoints` and `cassandra.embedded.enabled=false`), and your own TLS certificate
+(`kubernetes.io/tls` Secret `<release>-<chain>-tls` with `ingress.tls.clusterIssuer=""`).
 
 ## 4. First deployment and day-to-day
 
