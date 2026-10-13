@@ -5,8 +5,8 @@ How the code reaches the Kubernetes cluster, and every secret that has to exist 
 
 | Workflow | Starts when | Does |
 |---|---|---|
-| [`deploy-testnet.yml`](../.github/workflows/deploy-testnet.yml) | CI succeeded on a push to `main` (or by hand) | pushes the images `main-<sha7>` and `testnet`, upgrades release `testnet` |
-| [`deploy-production.yml`](../.github/workflows/deploy-production.yml) | a tag `vX.Y.Z` on a commit of `main` (or by hand with an existing image tag) | pushes `vX.Y.Z` and `latest`, upgrades release `mainnet`, then `voi` |
+| [`deploy-testnet.yml`](../.github/workflows/deploy-testnet.yml) | CI succeeded on a push to `main` (or by hand) | pushes the images `<version>-abi-<date>-<sha7>` and `testnet`, upgrades release `testnet` |
+| [`deploy-production.yml`](../.github/workflows/deploy-production.yml) | a tag `vX.Y.Z` on a commit of `main` (or by hand with an existing image tag) | pushes `<version>-abi-<date>-<sha7>`, `vX.Y.Z` and `latest`, upgrades release `mainnet`, then `voi` |
 | [`docker-publish.yml`](../.github/workflows/docker-publish.yml), [`helm-deploy.yml`](../.github/workflows/helm-deploy.yml) | called by the two above | build and push to Docker Hub; `helm upgrade --install --wait` in the namespace `avm-balance-indexer`, then a smoke test of `https://<host>/v1/<chain>/status` |
 
 What ends up where (one namespace, `avm-balance-indexer`, three releases):
@@ -19,8 +19,10 @@ What ends up where (one namespace, `avm-balance-indexer`, three releases):
 
 The mainnet and voi host names follow the testnet pattern; change them in `deploy/helm/values/prod-*.yaml` if you want others.
 
-Images: `docker.io/<DOCKERHUB_USERNAME>/avm-balance-indexer-api` and `.../avm-balance-indexer-worker`. Testnet deploys the immutable
-tag `main-<sha7>`; `testnet` and `latest` only move along for people who pull by hand.
+Images: `docker.io/<DOCKERHUB_USERNAME>/avm-balance-indexer-api` and `.../avm-balance-indexer-worker`. Both environments deploy the immutable
+tag `<version>-abi-<commit date>-<short commit>`, for example `1.0-abi-2026-10-13-abcdef1` (`abi` = avm balance indexer). `<version>` is the major.minor in the file [`VERSION`](../VERSION): raise it by hand in a
+commit when a release changes the API or the data, and use a matching release tag (`VERSION` 1.0 needs `v1.0.N`; the workflow refuses others). The date is the commit's, so a rebuild gives the same tag (ADR 0014). The same string is the image label `org.opencontainers.image.version`.
+`testnet`, `latest` and the release tag `vX.Y.Z` only move along for people who pull by hand.
 
 ## 1. GitHub secrets
 
@@ -110,7 +112,7 @@ a Cassandra with login (keys `username` and `password`, `storage.cassandra.exist
 Upgrades follow the rules of [operations.md](operations.md) automatically: when the release already exists, the deploy job first upgrades the worker alone
 (`worker.strategy=Recreate`, so no old writer runs while a migration is applied), waits until it is ready, and then moves the API and everything else to the new tag. Indexing pauses for the
 seconds a worker restart takes. Deployments of one release never overlap (a run waits for the running one; of several waiting runs only the newest is kept, so start a rollback when nothing else is pending), testnet only ever deploys the head of `main`, and a production tag is refused unless CI succeeded on its commit.
-For a rollback give *Deploy production* the image tag **and** the `ref` (tag or commit) whose chart and values belong to it.
+For a rollback give *Deploy production* the image tag; the chart and values come from the commit in it (or from `ref` for older tags such as `main-<sha7>`).
 
 A failed upgrade is rolled back by Helm (`--atomic`). Each production job (MainNet, then Voi) asks the environment's reviewers for its own approval. The pods need a namespace without Pod Security enforcement
 stricter than `privileged` for the Cassandra pod (it uses a hostPath volume and a root init container). Pre-release tags (`v1.2.3-rc1`) do not deploy.

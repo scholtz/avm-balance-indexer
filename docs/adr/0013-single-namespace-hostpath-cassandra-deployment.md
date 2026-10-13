@@ -19,7 +19,7 @@ chain deployment, and docs/operations.md names `ReplicationFactor` 1 a developme
   (`/mnt/nvme1/avm-balance-indexer/<release>`). No login (reachable only through the NetworkPolicy), `replicationFactor` 1. Because the data belongs to one machine, the chart
   refuses to render without `cassandra.embedded.node` (or a nodeSelector); the pipeline takes it from the Actions variable `CASSANDRA_NODE`. Availability and backup of the data are the
   operator's job (disk snapshots or `nodetool snapshot`); a database operator (K8ssandra) stays the recommended route once a cluster exists, and replaces this option without code changes.
-- **Images on Docker Hub** as `<repository>-api` and `<repository>-worker` (Docker Hub allows `user/repository` only). Testnet runs the immutable tag `main-<sha7>`, production the release tag.
+- **Images on Docker Hub** as `<repository>-api` and `<repository>-worker` (Docker Hub allows `user/repository` only). Both environments run the immutable tag described in ADR 0014.
 - **Pipelines follow the upgrade rules of operations.md**: the deploy job upgrades the worker first (strategy `Recreate`, so no old writer runs while a migration is applied), waits for it,
   then upgrades everything to the new tag. Testnet deploys only the head of `main` after green CI; production needs a `vX.Y.Z` tag on a commit of `main` with a green CI run, and the
   protected `production` environment.
