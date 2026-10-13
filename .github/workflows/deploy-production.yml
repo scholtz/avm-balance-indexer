@@ -14,7 +14,7 @@ on:
         description: Existing image tag to deploy (for example 1.0-abi-2026-10-13-abcdef1 or v1.2.3)
         required: true
       ref:
-        description: Commit or tag of main whose chart and values are used (default is the image tag, which then has to be a git tag)
+        description: Commit or tag of main whose chart and values are used (default is the commit in the image tag, or the tag itself for vX.Y.Z)
         default: ""
 
 permissions:
@@ -49,15 +49,20 @@ jobs:
             # CI (build, tests, live checks) must have passed on exactly this commit.
             passed="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${sha}&status=success" --jq '.total_count')"
             [ "${passed:-0}" -gt 0 ] || { echo "::error::CI has not succeeded on ${sha}; wait for it (or re-run it) and push the tag again"; exit 1; }
-            # <VERSION file>-abi-<UTC date>-<short commit>; the release tag vX.Y.Z and latest are pushed as well.
+            # <VERSION file>-abi-<commit date>-<short commit>; the release tag vX.Y.Z and latest are pushed as well.
             version="$(tr -d '[:space:]' < VERSION)"
             [[ "$version" =~ ^[0-9]+\.[0-9]+$ ]] || { echo "::error::VERSION must hold major.minor, found '${version}'"; exit 1; }
-            echo "tag=${version}-abi-$(date -u +%F)-${sha:0:7}" >> "$GITHUB_OUTPUT"
+            [[ "${GITHUB_REF_NAME}" == "v${version}."* ]] || { echo "::error::Tag ${GITHUB_REF_NAME} does not match VERSION ${version} (expected v${version}.N); raise VERSION first"; exit 1; }
+            echo "tag=${version}-abi-$(git show -s --format=%cs "$sha")-${sha:0:7}" >> "$GITHUB_OUTPUT"
             echo "release=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
             echo "build=true" >> "$GITHUB_OUTPUT"
           else
             # The chart and values of a rollback must match the image: say which commit (or tag) they come from.
-            [ -n "$REQUESTED" ] || REQUESTED="$IMAGE_TAG"
+            if [ -z "$REQUESTED" ]; then
+              # <version>-abi-<date>-<sha7>: the commit is the last segment; a release tag names itself.
+              REQUESTED="$IMAGE_TAG"
+              [[ "$IMAGE_TAG" =~ -abi-[0-9-]+-([0-9a-f]{7})$ ]] && REQUESTED="${BASH_REMATCH[1]}"
+            fi
             sha="$(git rev-parse --verify --quiet "${REQUESTED}^{commit}")" || { echo "::error::'${REQUESTED}' is not a commit or tag of this repository; pass the ref input"; exit 1; }
             git merge-base --is-ancestor "$sha" origin/main || { echo "::error::${REQUESTED} is not on main; only commits of main are deployed"; exit 1; }
             echo "tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
