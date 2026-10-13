@@ -11,6 +11,10 @@ on:
         description: Commit to build
         type: string
         required: true
+      version:
+        description: Full version string, stored as the image label org.opencontainers.image.version
+        type: string
+        default: ""
       tags:
         description: Image tags to push, one per line
         type: string
@@ -65,5 +69,6 @@ jobs:
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ inputs.ref }}
+            org.opencontainers.image.version=${{ inputs.version }}
           cache-from: type=gha,scope=${{ matrix.component }}
           cache-to: type=gha,mode=max,scope=${{ matrix.component }}

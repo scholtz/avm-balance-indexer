@@ -5,8 +5,8 @@ How the code reaches the Kubernetes cluster, and every secret that has to exist 
 
 | Workflow | Starts when | Does |
 |---|---|---|
-| [`deploy-testnet.yml`](../.github/workflows/deploy-testnet.yml) | CI succeeded on a push to `main` (or by hand) | pushes the images `main-<sha7>` and `testnet`, upgrades release `testnet` |
-| [`deploy-production.yml`](../.github/workflows/deploy-production.yml) | a tag `vX.Y.Z` on a commit of `main` (or by hand with an existing image tag) | pushes `vX.Y.Z` and `latest`, upgrades release `mainnet`, then `voi` |
+| [`deploy-testnet.yml`](../.github/workflows/deploy-testnet.yml) | CI succeeded on a push to `main` (or by hand) | pushes the images `<version>-abi-<date>-<sha7>` and `testnet`, upgrades release `testnet` |
+| [`deploy-production.yml`](../.github/workflows/deploy-production.yml) | a tag `vX.Y.Z` on a commit of `main` (or by hand with an existing image tag) | pushes `<version>-abi-<date>-<sha7>`, `vX.Y.Z` and `latest`, upgrades release `mainnet`, then `voi` |
 | [`docker-publish.yml`](../.github/workflows/docker-publish.yml), [`helm-deploy.yml`](../.github/workflows/helm-deploy.yml) | called by the two above | build and push to Docker Hub; `helm upgrade --install --wait` in the namespace `avm-balance-indexer`, then a smoke test of `https://<host>/v1/<chain>/status` |
 
 What ends up where (one namespace, `avm-balance-indexer`, three releases):
@@ -19,8 +19,10 @@ What ends up where (one namespace, `avm-balance-indexer`, three releases):
 
 The mainnet and voi host names follow the testnet pattern; change them in `deploy/helm/values/prod-*.yaml` if you want others.
 
-Images: `docker.io/<DOCKERHUB_USERNAME>/avm-balance-indexer-api` and `.../avm-balance-indexer-worker`. Testnet deploys the immutable
-tag `main-<sha7>`; `testnet` and `latest` only move along for people who pull by hand.
+Images: `docker.io/<DOCKERHUB_USERNAME>/avm-balance-indexer-api` and `.../avm-balance-indexer-worker`. Both environments deploy the immutable
+tag `<version>-abi-<UTC date>-<short commit>`, for example `1.0-abi-2026-10-13-abcdef1` (`abi` = avm balance indexer). `<version>` is the major.minor in the file [`VERSION`](../VERSION): raise it by hand in a
+commit when a release changes the API or the data (the date and the commit id make every build unique). The same string is the image label `org.opencontainers.image.version`.
+`testnet`, `latest` and the release tag `vX.Y.Z` only move along for people who pull by hand.
 
 ## 1. GitHub secrets
 

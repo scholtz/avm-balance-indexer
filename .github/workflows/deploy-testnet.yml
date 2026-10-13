@@ -27,6 +27,7 @@ jobs:
     outputs:
       sha: ${{ steps.sha.outputs.sha }}
       tag: ${{ steps.sha.outputs.tag }}
+      version: ${{ steps.sha.outputs.version }}
       current: ${{ steps.sha.outputs.current }}
     steps:
       - id: sha
@@ -41,7 +42,11 @@ jobs:
             sha="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${ref}" --jq .sha)"
           fi
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
-          echo "tag=main-${sha:0:7}" >> "$GITHUB_OUTPUT"
+          # <VERSION file>-abi-<UTC date>-<short commit>, for example 1.0-abi-2026-10-13-abcdef1
+          version="$(gh api "repos/${GITHUB_REPOSITORY}/contents/VERSION?ref=${sha}" --jq .content | base64 -d | tr -d '[:space:]')"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+$ ]] || { echo "::error::VERSION must hold major.minor, found '${version}'"; exit 1; }
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=${version}-abi-$(date -u +%F)-${sha:0:7}" >> "$GITHUB_OUTPUT"
           # A slower CI run of an older commit must not roll the testnet back: only the head of main is deployed.
           head="$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq .sha)"
           if [ "$sha" = "$head" ] || [ "${{ github.event_name }}" = workflow_dispatch ]; then
@@ -58,6 +63,7 @@ jobs:
     uses: ./.github/workflows/docker-publish.yml
     with:
       ref: ${{ needs.plan.outputs.sha }}
+      version: ${{ needs.plan.outputs.tag }}
       tags: |
         ${{ needs.plan.outputs.tag }}
         testnet
