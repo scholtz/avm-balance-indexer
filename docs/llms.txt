@@ -1,0 +1,44 @@
+# AVM Balance Indexer
+
+> Self-hosted HTTP API and client SDKs that answer, for Algorand MainNet, Algorand TestNet and Voi: what does an account hold, what did it hold at the end of any round, who holds a token, and which balance changes did an account have for a token. Native ALGO/VOI, ASAs (including ARC-20 Smart ASAs) and ARC-200 application tokens. Read-only; it does not sign or send transactions.
+
+Public deployments (one chain each): https://mainnet.balance-indexer.biatec.io (algorand-mainnet), https://testnet.balance-indexer.biatec.io (algorand-testnet), https://voi.balance-indexer.biatec.io (voi).
+API base: `{deployment}/v1/{chain}`. No authentication. About 600 data requests per minute per client address. No CORS headers (call from a backend or your own proxy).
+
+## Use an SDK instead of raw HTTP
+
+- [TypeScript](https://github.com/scholtz/avm-balance-indexer/blob/main/sdk/typescript/AGENTS.md): `npm install @scholtz/avm-balance-indexer`, `AvmBalanceIndexer.voi()`
+- [Python](https://github.com/scholtz/avm-balance-indexer/blob/main/sdk/python/AGENTS.md): `pip install avm-balance-indexer`, `AvmBalanceIndexer.voi()`
+- [.NET](https://github.com/scholtz/avm-balance-indexer/blob/main/sdk/dotnet/AGENTS.md): `dotnet add package AvmBalanceIndexer.Client`, `AvmBalanceIndexerClient.Voi()`
+- [Go](https://github.com/scholtz/avm-balance-indexer/blob/main/sdk/go/AGENTS.md): `go get github.com/scholtz/avm-balance-indexer/sdk/go`, `avm.New(avm.Voi, nil)`
+- [Rust](https://github.com/scholtz/avm-balance-indexer/blob/main/sdk/rust/AGENTS.md): `cargo add avm-balance-indexer`, `AvmBalanceIndexer::new(ChainId::Voi)`
+- Every SDK defaults to the public deployment of the chain and accepts a custom base URL (self-hosted, gateway, local port-forward), headers, timeout and your own HTTP client.
+- [SDK overview](https://github.com/scholtz/avm-balance-indexer/blob/main/sdk/README.md)
+
+## Contract
+
+- [OpenAPI 3.0 specification](https://github.com/scholtz/avm-balance-indexer/blob/main/sdk/openapi/avm-balance-indexer.v1.json) (a running service serves it at `/openapi/v1.json`)
+
+## Endpoints (all GET unless noted; `{kind}` is algo | asa | arc200, native token = algo/0)
+
+- `/v1/{chain}/status`: ingestion state (NotStarted, Bootstrapping, Backfilling, Following, Replaying, Failed), indexedRound, targetRound, lag
+- `/v1/{chain}/accounts/{address}/tokens?includeZero&cursor&limit`: current holdings of an account
+- `/v1/{chain}/accounts/{address}/tokens/{kind}/{tokenId}/balance?round`: balance at the end of a round (latest published round if omitted); a missing holding is "0"
+- `/v1/{chain}/accounts/{address}/tokens/{kind}/{tokenId}/transactions?fromRound&toRound&cursor&limit`: balance effects, newest first
+- `/v1/{chain}/tokens/{kind}/{tokenId}/holders?round&includeZero&cursor&limit`: holders in account order
+- `/v1/{chain}/tokens/{kind}/{tokenId}`: token metadata (symbol, name, decimals, standard)
+- `POST /v1/{chain}/tokens/{kind}/{tokenId}/holders/scans`, `GET|DELETE /v1/{chain}/scans/{id}`, `GET /v1/{chain}/scans/{id}/holders`: asynchronous export of every holder of a token of any size
+
+## Rules that prevent mistakes
+
+- Amounts and deltas are decimal strings (arbitrary size): use a big integer, never a float. Rounds and ids are 64-bit integers.
+- `limit` is 1 to 1000; `cursor` is opaque (`nextCursor` of the previous page, with the same `round`). Pass the `round` of the first page to the following pages for a consistent walk (the SDK iterators do this).
+- Answers are consistent as of `indexedRound`. A round beyond it is a 404 with `requestedRound` and `indexedRound`. Errors: 400 invalid input, 404 unknown token/round/chain, 429 (`Retry-After`), 503 (nothing indexed yet, or a read timed out), 504.
+- One deployment serves exactly one chain; asking it for another chain is a 404.
+- Holders of a very large token at a past round can time out: use the scan export (SDK: export holders).
+
+## Optional
+
+- [Product description](https://github.com/scholtz/avm-balance-indexer/blob/main/PRODUCT-DESCRIPTION.md)
+- [Operations runbook](https://github.com/scholtz/avm-balance-indexer/blob/main/docs/operations.md)
+- [Publishing the SDKs](https://github.com/scholtz/avm-balance-indexer/blob/main/docs/sdk-publishing.md)

@@ -1,0 +1,9 @@
+package: avmbalanceindexer
+output: generated.go
+generate:
+  models: true
+  client: true
+output-options:
+  skip-prune: true
+  nullable-type: false
+  client-type-name: GeneratedClient

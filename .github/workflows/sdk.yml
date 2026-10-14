@@ -1,0 +1,171 @@
+name: SDKs
+
+# Checks the client SDKs under sdk/: versions, generated code (regenerated and diffed), build, tests and packaging per language.
+# Also called by sdk-publish.yml, so nothing is published that did not pass.
+
+# On main it runs as part of sdk-publish.yml (workflow_call), so there is no push trigger of its own.
+on:
+  pull_request:
+    paths:
+      - "sdk/**"
+      - ".github/workflows/sdk.yml"
+      - ".github/workflows/sdk-publish.yml"
+      - "src/AvmBalanceIndexer.Api/**"
+      - "src/AvmBalanceIndexer.Domain/**"
+      - "tests/AvmBalanceIndexer.Api.Tests/**"
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  consistency:
+    name: Versions and generated code
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: All manifests carry sdk/VERSION
+        run: bash sdk/scripts/check-versions.sh
+      - name: A change of SDK code should raise the version
+        if: github.event_name == 'pull_request'
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          changed="$(git diff --name-only "$BASE"...HEAD -- sdk ':!sdk/**/*.md' ':!sdk/**/tests/**' ':!sdk/**/test/**' ':!sdk/**/examples/**' ':!sdk/go/client_test.go' ':!sdk/rust/tests/**')"
+          if [ -n "$changed" ] && git diff --quiet "$BASE"...HEAD -- sdk/VERSION; then
+            echo "::warning title=SDK version::SDK code changed but sdk/VERSION did not; nothing is published until the version is raised (sdk/scripts/set-version.sh)."
+          fi
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+          dotnet-version: 9.0.x
+      - name: The OpenAPI document is the one the API publishes (test in the API suite)
+        run: dotnet test tests/AvmBalanceIndexer.Api.Tests --filter "FullyQualifiedName~OpenApiSpecTests" -v q
+      - uses: actions/cache@v4
+        with:
+          path: sdk/.cache
+          key: sdk-generate-${{ hashFiles('sdk/scripts/generate.sh') }}
+      - name: Regenerate every SDK and fail on any difference
+        run: |
+          bash sdk/scripts/generate.sh
+          git status --porcelain -- sdk
+          if [ -n "$(git status --porcelain -- sdk)" ]; then
+            echo "::error::Generated SDK code is out of date. Run sdk/scripts/generate.sh and commit the result."
+            git diff --stat -- sdk
+            exit 1
+          fi
+
+  typescript:
+    name: TypeScript (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [20, 22]
+    defaults:
+      run:
+        working-directory: sdk/typescript
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: sdk/typescript/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: What would be published
+        run: npm pack --dry-run
+
+  python:
+    name: Python ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.9", "3.13"]
+    defaults:
+      run:
+        working-directory: sdk/python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install -e ".[dev]" twine
+      - run: python -m pytest -q
+      - name: Build and check the distributions
+        run: |
+          python -m build
+          python -m twine check dist/*
+
+  dotnet:
+    name: .NET
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk/dotnet
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+          dotnet-version: 8.0.x
+      - run: dotnet build AvmBalanceIndexer.Client.slnx -c Release
+      - run: dotnet test AvmBalanceIndexer.Client.slnx -c Release --no-build
+      - name: Pack (both target frameworks)
+        run: dotnet pack src/AvmBalanceIndexer.Client -c Release --no-build -o ../../artifacts
+
+  go:
+    name: Go ${{ matrix.go }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go: ["1.22", stable]
+    defaults:
+      run:
+        working-directory: sdk/go
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          cache-dependency-path: sdk/go/go.sum
+      - name: Formatting
+        run: test -z "$(gofmt -l .)"
+      - run: go vet ./...
+      - run: go test -race ./...
+      - name: go.mod is tidy
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
+  rust:
+    name: Rust
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk/rust
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            sdk/rust/target
+          key: sdk-rust-${{ hashFiles('sdk/rust/Cargo.toml') }}
+      - run: cargo test
+      - run: cargo clippy --all-targets -- -D warnings
+      - name: The examples build
+        run: cargo build --examples
+      - name: What would be published
+        run: cargo package --allow-dirty

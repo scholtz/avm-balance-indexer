@@ -14,10 +14,9 @@ internal static class ApiMetadata
         return builder;
     }
 
-    /// <summary>The errors every data endpoint can return: rate limiting, a store that has nothing yet, and a request that took too long (no body).</summary>
+    /// <summary>The errors every data endpoint can return: rate limiting, a store that has nothing yet, and a request that took too long.</summary>
     public static RouteHandlerBuilder WithCommonErrors(this RouteHandlerBuilder builder)
     {
-        builder.WithErrors(StatusCodes.Status429TooManyRequests, StatusCodes.Status503ServiceUnavailable);
-        return builder.Produces(StatusCodes.Status504GatewayTimeout);
+        return builder.WithErrors(StatusCodes.Status429TooManyRequests, StatusCodes.Status503ServiceUnavailable, StatusCodes.Status504GatewayTimeout);
     }
 }

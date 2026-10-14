@@ -342,6 +342,17 @@ Use `/v1/{chain}` so callers always identify `algorand-testnet`, `algorand-mainn
 
 Return `indexedRound` with query responses. Reject future rounds explicitly. Document that holders are a paginated end-of-round result computed by aggregating token effects through the requested round.
 
+## Client SDKs
+
+Callers integrate through generated, typed client libraries instead of hand-written HTTP calls. Deliver SDKs for **TypeScript, Python, .NET, Go and Rust** under `sdk/`:
+
+- The contract is the OpenAPI 3.0 document of the API, committed as `sdk/openapi/avm-balance-indexer.v1.json`. A test in the API suite fails when it differs from the published `/openapi/v1.json`.
+- Client code and models are generated from that document (committed, regenerated in CI and diffed). A small hand-written layer per language adds the product behaviour: the public deployments of `algorand-testnet`, `algorand-mainnet` and `voi` are the **defaults** when the caller sets no URL;
+  a **custom base URL**, headers, timeout and HTTP client support self-hosted and gateway deployments; one client per chain; pagination helpers that pin the round of the first page; a holder export built on the asynchronous scan API; typed errors with status, message and `Retry-After`; amounts stay decimal strings.
+- Every SDK has developer documentation (install, quick start, configuration, pagination, errors, reference, development) and AI-integration instructions (`AGENTS.md`, plus `docs/llms.txt` for the service).
+- CI builds and tests every SDK against a mock server (default and custom URLs, query serialisation, errors, timeouts, pagination, scan export) and checks that all manifests carry `sdk/VERSION`.
+- A publish workflow releases npm, PyPI, NuGet, crates.io packages and tags the Go module when SDK code changes and the version is new; it skips registries whose secret is not configured. See `docs/sdk-publishing.md`.
+
 ## Main risks / decisions
 
 - **Historical holder query cost:** without snapshots, historical holder queries must scan and aggregate all relevant token effects or fan out across all touched accounts. Benchmark high-activity assets and define latency/async-query limits. Per-account historical balance can remain fast by storing the balance after every effect.

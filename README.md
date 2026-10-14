@@ -15,7 +15,8 @@ Full design: [PRODUCT-DESCRIPTION.md](PRODUCT-DESCRIPTION.md). Decisions: [docs/
 | Cassandra provider | Done: schema, idempotent round writer with compare-and-set publication, current and historical balances, holders, history. Runs the same contract suite as PostgreSQL and is verified against the ledger for the first 1000 rounds of TestNet and MainNet like PostgreSQL. |
 | ASA effects (transfer, opt-in/out, close-to, clawback, create, destroy) | Done, verified against the ledger holdings of recent MainNet rounds (`AssetRoundsTests`). ARC-20 Smart ASAs are recognised from chain data and the management addresses follow reconfigurations (`Arc20AssetsTests`); the balance stays an ASA balance. |
 | ARC-200 transfers from application logs | Done; 778 transfers of 111 recent Voi rounds match the Voi ARC indexer (`Arc200RoundsTests`). Balances are derived from logged events only. |
-| Read API | Done: status, holdings, balance at a round, holders, history, token metadata. |
+| Read API | Done: status, holdings, balance at a round, holders, history, token metadata, asynchronous holder export. Published as an OpenAPI 3.0 document. |
+| Client SDKs | Done: TypeScript, Python, .NET, Go and Rust, generated from the OpenAPI document, with the public deployments as defaults ([sdk/](sdk/README.md)). |
 | Voi | Genesis pinned and verified; first 1000 rounds indexed (no balance-moving transactions) and a 2500-round recent window with real payments checked against the public indexer (`VoiRecentRoundsTests`). Voi serves no ledger deltas, so a proposer-payout or hidden-rewards check as on Algorand is not possible. |
 
 ## How indexing works
@@ -43,6 +44,7 @@ src/
   AvmBalanceIndexer.Hosting/             shared DI and configuration wiring
   AvmBalanceIndexer.Api/                 ASP.NET Core /v1/{chain} read API
   AvmBalanceIndexer.Worker/              indexer worker (single ordered writer per chain)
+sdk/                                     client SDKs (typescript, python, dotnet, go, rust), OpenAPI document, generator script
 tests/
   AvmBalanceIndexer.Domain.Tests/        domain unit tests
   AvmBalanceIndexer.Indexing.Tests/      decoder, fetcher, normalizer, rewards pool, tracker unit tests
@@ -131,7 +133,7 @@ They take a few minutes.
 Amounts and deltas are decimal strings. Every list response has `indexedRound` (as of the response) and `nextCursor` (opaque; pass it back as
 `cursor`). `limit` is 1 to 1000 (default 100); `kind` is `algo`, `asa` or `arc200`. Without `round`, balance and holders use
 the latest published round; an explicit published round has a fixed answer, so those responses carry `Cache-Control: public, max-age=3600`.
-Scan results carry the scan's `round` instead of `indexedRound`. If a result page has no `nextCursor` and `complete` is false, repeat
+Scan results carry the scan's `round` instead of `indexedRound`. While the scan runs, a page that has caught up is empty and carries the same `nextCursor`; with no `nextCursor` and `complete` false, repeat
 the same request (same cursor) a moment later: the scan is still running. Asynchronous scans: `POST` answers `202` with a `Location`; the job reports `state` (`Pending`, `Running`, `Completed`, `Failed`,
 `Cancelled`), `holdersFound` and `error`. The result is a consistent list of the holders at the scan's round, in account order; pages
 can be read while the scan runs (`complete` is true only for a finished scan and its last page). Every worker replica runs scans; a
@@ -139,6 +141,26 @@ scan whose replica dies is resumed from its checkpoint by another one. `429` wit
 Errors: 400 for invalid input or cursor, 404 for an unknown token, a round beyond the published one (with `indexedRound`) or
 another chain, 503 while nothing is indexed yet. A walk over the holders of the latest round should pass the
 `round` it received, so that all pages come from one round.
+
+## Client SDKs
+
+Use the API from your own code with a typed client; each SDK defaults to the public deployments of Algorand MainNet, Algorand TestNet and Voi and accepts a custom base URL for your own deployment.
+
+| Language | Install | Docs |
+|---|---|---|
+| TypeScript | `npm install @scholtz/avm-balance-indexer` | [sdk/typescript](sdk/typescript/README.md) |
+| Python | `pip install avm-balance-indexer` | [sdk/python](sdk/python/README.md) |
+| .NET | `dotnet add package AvmBalanceIndexer.Client` | [sdk/dotnet](sdk/dotnet/README.md) |
+| Go | `go get github.com/scholtz/avm-balance-indexer/sdk/go` | [sdk/go](sdk/go/README.md) |
+| Rust | `cargo add avm-balance-indexer` | [sdk/rust](sdk/rust/README.md) |
+
+```ts
+const indexer = AvmBalanceIndexer.voi();                                // or algorandMainnet(), algorandTestnet(), { baseUrl: "https://my-indexer" }
+const { amount } = await indexer.balance(address, "asa", 31566704, { round: 40_000_000 });
+```
+
+The clients are generated from [sdk/openapi/avm-balance-indexer.v1.json](sdk/openapi/avm-balance-indexer.v1.json), the OpenAPI document of the API (kept equal to `/openapi/v1.json` by a test, regenerated and diffed in CI).
+AI assistants: every SDK has an `AGENTS.md`, and [docs/llms.txt](docs/llms.txt) summarises the service. Overview, regeneration and versioning: [sdk/README.md](sdk/README.md); publishing and its GitHub secrets: [docs/sdk-publishing.md](docs/sdk-publishing.md).
 
 ## PostgreSQL or Cassandra?
 

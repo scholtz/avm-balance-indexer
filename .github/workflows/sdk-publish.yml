@@ -1,0 +1,336 @@
+name: Publish SDKs
+
+# When a change under sdk/ reaches main (or by hand, from main), every SDK that passes its tests is published to its registry unless that version is already there:
+#   npm (@scholtz/avm-balance-indexer), PyPI (avm-balance-indexer), NuGet (AvmBalanceIndexer.Client), crates.io (avm-balance-indexer), Go (git tag sdk/go/vX.Y.Z).
+# The version is sdk/VERSION; raise it (sdk/scripts/set-version.sh) to release. A registry whose secret is not configured is skipped with a notice.
+# Which secrets to create: docs/sdk-publishing.md. A secret is only visible to the step that publishes, never to the steps that install or test dependencies.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "sdk/**"
+      - ".github/workflows/sdk-publish.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sdk-publish
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify
+    uses: ./.github/workflows/sdk.yml
+
+  version:
+    name: Version
+    needs: verify
+    # Registries are immutable: only main is ever published, also when the workflow is started by hand from another branch.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: read
+        run: |
+          bash sdk/scripts/check-versions.sh
+          echo "version=$(tr -d '[:space:]' < sdk/VERSION)" >> "$GITHUB_OUTPUT"
+
+  # Build and test run without any secret and without the OIDC token; only the small publish job that follows has them.
+  npm-build:
+    name: npm (build)
+    needs: version
+    runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.need.outputs.publish }}
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Is it needed?
+        id: need
+        env:
+          HAS_TOKEN: ${{ secrets.NPM_TOKEN != '' }}
+        run: |
+          if [ "$HAS_TOKEN" != true ]; then echo "::notice title=npm::NPM_TOKEN is not set; skipping (docs/sdk-publishing.md)"; echo "publish=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          status="$(curl -s -o /dev/null -w '%{http_code}' "https://registry.npmjs.org/@scholtz%2favm-balance-indexer/$VERSION")"
+          case "$status" in
+            200) echo "::notice title=npm::@scholtz/avm-balance-indexer $VERSION is already published"; echo "publish=false" >> "$GITHUB_OUTPUT" ;;
+            404) echo "publish=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error title=npm::The registry answered HTTP $status when asked for @scholtz/avm-balance-indexer $VERSION; not guessing"; exit 1 ;;
+          esac
+      - uses: actions/setup-node@v4
+        if: steps.need.outputs.publish == 'true'
+        with:
+          node-version: 22
+      - name: Install, test and pack (no install scripts)
+        if: steps.need.outputs.publish == 'true'
+        working-directory: sdk/typescript
+        run: |
+          npm ci --ignore-scripts
+          npm test
+          npm pack
+      - uses: actions/upload-artifact@v7
+        if: steps.need.outputs.publish == 'true'
+        with:
+          name: npm-package
+          path: sdk/typescript/*.tgz
+          if-no-files-found: error
+
+  npm:
+    name: npm
+    needs: [version, npm-build]
+    if: needs.npm-build.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    environment: sdk-publish
+    permissions:
+      contents: read
+      id-token: write # npm provenance
+    outputs:
+      published: ${{ steps.done.outputs.published }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: npm-package
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: Publish the tested package
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish ./*.tgz --access public --provenance
+      - id: done
+        run: echo "published=true" >> "$GITHUB_OUTPUT"
+
+  pypi-build:
+    name: PyPI (build)
+    needs: version
+    runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.need.outputs.publish }}
+      token: ${{ steps.need.outputs.token }}
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Is it needed?
+        id: need
+        env:
+          HAS_TOKEN: ${{ secrets.PYPI_API_TOKEN != '' }}
+          TRUSTED: ${{ vars.PYPI_TRUSTED_PUBLISHING }}
+        run: |
+          if [ "$HAS_TOKEN" != true ] && [ "$TRUSTED" != "true" ]; then
+            echo "::notice title=PyPI::Neither PYPI_API_TOKEN nor the variable PYPI_TRUSTED_PUBLISHING=true is set; skipping (docs/sdk-publishing.md)"; echo "publish=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          echo "token=$HAS_TOKEN" >> "$GITHUB_OUTPUT"
+          status="$(curl -s -o /dev/null -w '%{http_code}' "https://pypi.org/pypi/avm-balance-indexer/$VERSION/json")"
+          case "$status" in
+            200) echo "::notice title=PyPI::avm-balance-indexer $VERSION is already published"; echo "publish=false" >> "$GITHUB_OUTPUT" ;;
+            404) echo "publish=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error title=PyPI::The registry answered HTTP $status when asked for avm-balance-indexer $VERSION; not guessing"; exit 1 ;;
+          esac
+      - uses: actions/setup-python@v5
+        if: steps.need.outputs.publish == 'true'
+        with:
+          python-version: "3.13"
+      - name: Test and build
+        if: steps.need.outputs.publish == 'true'
+        working-directory: sdk/python
+        run: |
+          python -m pip install -e ".[dev]" twine
+          python -m pytest -q
+          python -m build
+          python -m twine check dist/*
+      - uses: actions/upload-artifact@v7
+        if: steps.need.outputs.publish == 'true'
+        with:
+          name: python-dist
+          path: sdk/python/dist/*
+          if-no-files-found: error
+
+  pypi:
+    name: PyPI
+    needs: [version, pypi-build]
+    if: needs.pypi-build.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    environment: sdk-publish
+    permissions:
+      contents: read
+      id-token: write # trusted publishing
+    outputs:
+      published: ${{ steps.done.outputs.published }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: python-dist
+          path: dist
+      - name: Upload with the API token
+        if: needs.pypi-build.outputs.token == 'true'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+      - name: Upload with trusted publishing
+        if: needs.pypi-build.outputs.token != 'true'
+        uses: pypa/gh-action-pypi-publish@release/v1
+      - id: done
+        run: echo "published=true" >> "$GITHUB_OUTPUT"
+
+  nuget:
+    name: NuGet
+    needs: version
+    runs-on: ubuntu-latest
+    environment: sdk-publish
+    outputs:
+      published: ${{ steps.done.outputs.published }}
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Is it needed?
+        id: need
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          if [ -z "$NUGET_API_KEY" ]; then echo "::notice title=NuGet::NUGET_API_KEY is not set; skipping (docs/sdk-publishing.md)"; echo "publish=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          status="$(curl -s -o /dev/null -w '%{http_code}' "https://api.nuget.org/v3-flatcontainer/avmbalanceindexer.client/$VERSION/avmbalanceindexer.client.nuspec")"
+          case "$status" in
+            200) echo "::notice title=NuGet::AvmBalanceIndexer.Client $VERSION is already published"; echo "publish=false" >> "$GITHUB_OUTPUT" ;;
+            404) echo "publish=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error title=NuGet::The registry answered HTTP $status when asked for AvmBalanceIndexer.Client $VERSION; not guessing"; exit 1 ;;
+          esac
+      - uses: actions/setup-dotnet@v6
+        if: steps.need.outputs.publish == 'true'
+        with:
+          global-json-file: global.json
+          dotnet-version: 8.0.x
+      - name: Test and pack (no key)
+        if: steps.need.outputs.publish == 'true'
+        working-directory: sdk/dotnet
+        run: |
+          dotnet test AvmBalanceIndexer.Client.slnx -c Release
+          dotnet pack src/AvmBalanceIndexer.Client -c Release --no-build -o ../../artifacts
+      - name: Push
+        if: steps.need.outputs.publish == 'true'
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: dotnet nuget push "sdk/artifacts/*.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+      - id: done
+        if: steps.need.outputs.publish == 'true'
+        run: echo "published=true" >> "$GITHUB_OUTPUT"
+
+  crates:
+    name: crates.io
+    needs: version
+    runs-on: ubuntu-latest
+    environment: sdk-publish
+    outputs:
+      published: ${{ steps.done.outputs.published }}
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Is it needed?
+        id: need
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          if [ -z "$CARGO_REGISTRY_TOKEN" ]; then echo "::notice title=crates.io::CARGO_REGISTRY_TOKEN is not set; skipping (docs/sdk-publishing.md)"; echo "publish=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          status="$(curl -s -o /dev/null -w '%{http_code}' -H "User-Agent: avm-balance-indexer-publish" "https://crates.io/api/v1/crates/avm-balance-indexer/$VERSION")"
+          case "$status" in
+            200) echo "::notice title=crates.io::avm-balance-indexer $VERSION is already published"; echo "publish=false" >> "$GITHUB_OUTPUT" ;;
+            404) echo "publish=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error title=crates.io::The registry answered HTTP $status when asked for avm-balance-indexer $VERSION; not guessing"; exit 1 ;;
+          esac
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.need.outputs.publish == 'true'
+      - name: Test (no token; dependency build scripts run here)
+        if: steps.need.outputs.publish == 'true'
+        working-directory: sdk/rust
+        run: |
+          cargo test
+          cargo package
+      - name: Publish
+        if: steps.need.outputs.publish == 'true'
+        working-directory: sdk/rust
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        # --no-verify: the package was built and tested in the step before; verifying would compile all dependencies (their build scripts) with the token in the environment.
+        run: cargo publish --no-verify
+      - id: done
+        if: steps.need.outputs.publish == 'true'
+        run: echo "published=true" >> "$GITHUB_OUTPUT"
+
+  go:
+    name: Go module
+    # The tag is immutable too: it is pushed last, behind the same approval, and only when no registry job failed.
+    needs: [version, npm, pypi, nuget, crates]
+    if: ${{ !cancelled() && needs.version.result == 'success' && !contains(needs.*.result, 'failure') }}
+    runs-on: ubuntu-latest
+    environment: sdk-publish
+    permissions:
+      contents: write # pushes the tag
+    outputs:
+      published: ${{ steps.tag.outputs.created }}
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Tag sdk/go/v${{ needs.version.outputs.version }}
+        id: tag
+        run: |
+          tag="sdk/go/v$VERSION"
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" > /dev/null 2>&1; then
+            echo "::notice title=Go::$tag already exists"; exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$tag" -m "Go SDK $VERSION" "$GITHUB_SHA"
+          git push origin "$tag"
+          echo "created=true" >> "$GITHUB_OUTPUT"
+      - name: Ask the Go module proxy for the new version
+        run: curl -fsS --retry 3 --retry-delay 5 "https://proxy.golang.org/github.com/scholtz/avm-balance-indexer/sdk/go/@v/v$VERSION.info" || echo "::notice title=Go::the proxy has not seen v$VERSION yet; it picks it up on first use"
+
+  release:
+    name: GitHub release
+    needs: [version, npm, pypi, nuget, crates, go]
+    # Only when something was published now: a run that found everything published or no secrets must not announce packages that are not there.
+    if: ${{ !cancelled() && (needs.npm.outputs.published == 'true' || needs.pypi.outputs.published == 'true' || needs.nuget.outputs.published == 'true' || needs.crates.outputs.published == 'true' || needs.go.outputs.published == 'true') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+      NPM: ${{ needs.npm.outputs.published }}
+      PYPI: ${{ needs.pypi.outputs.published }}
+      NUGET: ${{ needs.nuget.outputs.published }}
+      CRATES: ${{ needs.crates.outputs.published }}
+      GO: ${{ needs.go.outputs.published }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create or extend the release sdk-v${{ needs.version.outputs.version }}
+        run: |
+          tag="sdk-v$VERSION"
+          {
+            echo "Published with this run:"
+            echo
+            if [ "$NPM" = true ]; then echo "- npm \`@scholtz/avm-balance-indexer\` $VERSION"; fi
+            if [ "$PYPI" = true ]; then echo "- PyPI \`avm-balance-indexer\` $VERSION"; fi
+            if [ "$NUGET" = true ]; then echo "- NuGet \`AvmBalanceIndexer.Client\` $VERSION"; fi
+            if [ "$CRATES" = true ]; then echo "- crates.io \`avm-balance-indexer\` $VERSION"; fi
+            if [ "$GO" = true ]; then echo "- Go \`github.com/scholtz/avm-balance-indexer/sdk/go@v$VERSION\`"; fi
+          } > notes.md
+          if gh release view "$tag" > /dev/null 2>&1; then
+            # A later run (for example after a token was added) publishes more registries of the same version: say so on the release.
+            { gh release view "$tag" --json body --jq .body; echo; cat notes.md; } > all.md
+            gh release edit "$tag" --notes-file all.md
+          else
+            gh release create "$tag" --target "$GITHUB_SHA" --title "SDKs $VERSION" --notes-file notes.md
+          fi

@@ -21,6 +21,7 @@ Read first (in this order, skip what you already know): this file, `CONTRIBUTING
 | `tests/...Storage.ContractTests` | One thin class per provider deriving from `StorageContractTests` (`InMemory...`, `PostgreSql...`); a new provider adds its class here and a CI service |
 | `tests/...Live.Tests` | Network tests: first 1000 rounds of TestNet+MainNet vs. ledger deltas |
 | `tools/...Benchmark` | Nightly PostgreSQL vs Cassandra benchmark on the newest MainNet rounds (docs/benchmarks.md) |
+| `sdk/` | Client SDKs (typescript, python, dotnet, go, rust) generated from `sdk/openapi/avm-balance-indexer.v1.json`; `sdk/scripts/generate.sh` regenerates, `sdk/scripts/set-version.sh` versions. See [sdk/README.md](sdk/README.md), [docs/sdk-publishing.md](docs/sdk-publishing.md) |
 | `deploy/`, `docker/` | Helm chart + per-chain values, Dockerfiles (CI lints/builds them) |
 
 Rules that are easy to break (details in CONTRIBUTING.md):
@@ -28,6 +29,8 @@ Rules that are easy to break (details in CONTRIBUTING.md):
 - No SQL/CQL concepts in Domain. A storage behaviour change needs a test in `StorageContractTests.cs` (covers all providers).
 - Network access in tests only in `Live.Tests` (`AVM_SKIP_LIVE_TESTS=1` skips it).
 - New architectural decision -> new numbered ADR in `docs/adr/`.
+- An API change (route, parameter, response type) changes the OpenAPI document: run `OpenApiSpecTests` with `AVM_UPDATE_OPENAPI=1`, then `sdk/scripts/generate.sh`, adapt the SDK wrappers if needed and raise `sdk/VERSION`
+  (`sdk/scripts/set-version.sh`). CI fails on any drift between API, spec and generated code.
 - Ledger facts and oracles (rewards pool, genesis/block hashing, `/v2/deltas/{round}` oracle) are in
   [docs/ledger-facts.md](docs/ledger-facts.md); read it before touching normalization, hashing or live tests.
 
