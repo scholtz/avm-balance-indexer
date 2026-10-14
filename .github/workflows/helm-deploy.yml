@@ -137,10 +137,12 @@ jobs:
             [ "$answer" = yes ]
           }
           missing=()
-          for resource in deployments.apps statefulsets.apps services configmaps secrets ingresses.networking.k8s.io poddisruptionbudgets.policy; do
-            for verb in get list watch create update patch delete; do
+          for resource in deployments.apps services configmaps secrets ingresses.networking.k8s.io; do
+            for verb in get list watch create update patch; do
               can "$verb" "$resource" || missing+=("$verb $resource")
             done
+            # Helm deletes only objects that left the chart and when it rolls a failed upgrade back to a fresh install.
+            can delete "$resource" || echo "::warning::The kube config may not delete $resource: a failed first install or a removed object has to be cleaned up by hand"
           done
           for resource in pods replicasets.apps; do
             for verb in get list watch; do
@@ -151,6 +153,13 @@ jobs:
             for item in "${missing[@]}"; do echo "::error::The kube config may not $item"; done
             echo "::error::Grant these in the namespace ${NAMESPACE} (deploy/rbac/deployer.yaml lists everything the chart needs)"; exit 1
           fi
+          # The PodDisruptionBudget only protects the API during node drains.
+          for verb in get list watch create update patch; do
+            if ! can "$verb" poddisruptionbudgets.policy; then
+              echo "::warning::No right to $verb poddisruptionbudgets: deploying without the API PodDisruptionBudget"
+              echo "PDB=false" >> "$GITHUB_ENV"; break
+            fi
+          done
           # The NetworkPolicy that shields Cassandra is a protection, not a requirement: without the right to manage it a new release is installed without it.
           # An existing policy is never dropped silently, that would open port 9042.
           for verb in get list watch create update patch delete; do
@@ -206,6 +215,7 @@ jobs:
             --set-string "image.repository=docker.io/${DOCKERHUB_USERNAME}/avm-balance-indexer"
             --set-string "cassandra.embedded.node=$CASSANDRA_NODE" --atomic --timeout 25m)
           if [ "${NETWORK_POLICY:-true}" = false ]; then common+=(--set networkPolicy.enabled=false); fi
+          if [ "${PDB:-true}" = false ]; then common+=(--set api.podDisruptionBudget.enabled=false); fi
           # Pods restart when a secret changes: its hash is part of the pod template.
           if [ -n "$PULL_TOKEN" ]; then common+=(--set "imagePullSecrets[0].name=${RELEASE}-dockerhub-pull"); fi
           if [ -n "$ALGOD_TOKEN" ]; then common+=(--set-string "algorand.existingSecret=${RELEASE}-algod"); fi

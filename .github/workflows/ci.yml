@@ -160,7 +160,10 @@ jobs:
           echo "$out" | grep -q 'kubernetes.io/hostname: "node-1"' || { echo "the node selector is missing"; exit 1; }
           out=$(helm template x deploy/helm/avm-balance-indexer -f deploy/helm/values/stage-testnet.yaml --set cassandra.embedded.node=node-1 --set networkPolicy.enabled=false)
           if echo "$out" | grep -q "kind: NetworkPolicy"; then echo "networkPolicy.enabled=false must render no NetworkPolicy"; exit 1; fi
-          echo "$out" | grep -q "kind: StatefulSet" || { echo "the Cassandra StatefulSet must still render"; exit 1; }
+          echo "$out" | grep -q "kind: Deployment" || { echo "the deployments must still render"; exit 1; }
+          if echo "$out" | grep -q "kind: StatefulSet"; then echo "the chart must not need StatefulSet rights"; exit 1; fi
+          out=$(helm template x deploy/helm/avm-balance-indexer -f deploy/helm/values/stage-testnet.yaml --set cassandra.embedded.node=node-1 --set api.podDisruptionBudget.enabled=false)
+          if echo "$out" | grep -q "kind: PodDisruptionBudget"; then echo "api.podDisruptionBudget.enabled=false must render no PodDisruptionBudget"; exit 1; fi
           if helm template x deploy/helm/avm-balance-indexer --set cassandra.embedded.enabled=true --set storage.provider=Cassandra --set cassandra.embedded.node=n > /dev/null 2>&1; then
             echo "the embedded Cassandra without a hostPath must fail the render"; exit 1
           fi

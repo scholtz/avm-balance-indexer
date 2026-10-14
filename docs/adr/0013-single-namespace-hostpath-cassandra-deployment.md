@@ -15,7 +15,7 @@ chain deployment, and docs/operations.md names `ReplicationFactor` 1 a developme
 - **One namespace (`avm-balance-indexer`), three Helm releases** (`testnet`, `mainnet`, `voi`). The namespace-scoped kube config in `KUBE_CONFIG` can touch only this
   namespace (`deploy/rbac/deployer.yaml`). Isolation between chains is by release: separate keyspace, separate Cassandra instance and data directory, separate ConfigMap,
   and a NetworkPolicy that lets only the release's own pods reach its Cassandra.
-- **Embedded Cassandra** (`cassandra.embedded`): a one-replica StatefulSet per release with the data in a `hostPath` directory
+- **Embedded Cassandra** (`cassandra.embedded`): a one-pod Deployment (strategy Recreate; needs fewer cluster rights than a StatefulSet) per release with the data in a `hostPath` directory
   (`/mnt/nvme1/avm-balance-indexer/<release>`). No login (reachable only through the NetworkPolicy), `replicationFactor` 1. Because the data belongs to one machine, the chart
   refuses to render without `cassandra.embedded.node` (or a nodeSelector); the pipeline takes it from the Actions variable or secret `CASSANDRA_NODE`. Availability and backup of the data are the
   operator's job (disk snapshots or `nodetool snapshot`); a database operator (K8ssandra) stays the recommended route once a cluster exists, and replaces this option without code changes.

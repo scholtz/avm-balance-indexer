@@ -113,7 +113,7 @@ Upgrades follow the rules of [operations.md](operations.md) automatically: when 
 seconds a worker restart takes. Deployments of one release never overlap (a run waits for the running one; of several waiting runs only the newest is kept, so start a rollback when nothing else is pending), testnet only ever deploys the head of `main`, and a production tag is refused unless CI succeeded on its commit.
 For a rollback give *Deploy production* the image tag; the chart and values come from the commit in it (or from `ref` for older tags such as `main-<sha7>`).
 
-Before anything changes the job checks every right in `deploy/rbac/deployer.yaml` that the chart and `helm --atomic` use and lists the missing ones. Only the NetworkPolicy is optional: a new release is installed without it (with a warning) when the account may not manage it, but an existing policy is never dropped, the job fails instead.
+Before anything changes the job checks every right in `deploy/rbac/deployer.yaml` that the chart and `helm --atomic` use and lists the missing ones. Only the NetworkPolicy and the PodDisruptionBudget are optional: a new release is installed without them (with a warning) when the account may not manage them, but an existing NetworkPolicy is never dropped, the job fails instead. Missing `delete` rights only produce a warning.
 A failed upgrade is rolled back by Helm (`--atomic`). Each production job (MainNet, then Voi) asks the environment's reviewers for its own approval. The pods need a namespace without Pod Security enforcement
 stricter than `privileged` for the Cassandra pod (it uses a hostPath volume and a root init container). Pre-release tags (`v1.2.3-rc1`) do not deploy.
 

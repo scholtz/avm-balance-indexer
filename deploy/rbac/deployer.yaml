@@ -22,7 +22,7 @@ rules:
     resources: [configmaps, secrets, services, pods, pods/log, events]
     verbs: [get, list, watch, create, update, patch, delete]
   - apiGroups: [apps]
-    resources: [deployments, statefulsets, replicasets]
+    resources: [deployments, replicasets]
     verbs: [get, list, watch, create, update, patch, delete]
   - apiGroups: [networking.k8s.io]
     resources: [ingresses, networkpolicies]

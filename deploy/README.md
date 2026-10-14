@@ -12,7 +12,7 @@ One Helm release per chain deployment. The three standard releases live side by 
 
 Providers are chosen per release through `storage.provider` only; switching requires a redeploy and a replay into the new backend.
 The overlays use Cassandra. Where no database operator (CloudNativePG / K8ssandra or equivalent) exists, the chart can start a
-single-node Cassandra itself (`cassandra.embedded`, StatefulSet with a `hostPath` volume, pinned to a node with
+single-node Cassandra itself (`cassandra.embedded`, Deployment with one pod and a `hostPath` volume, pinned to a node with
 `cassandra.embedded.nodeSelector`; a root init container fixes the directory permissions; a NetworkPolicy lets only the release's own pods reach port 9042). It has no login, so it
 needs no Secret. With an external database or PostgreSQL the chart consumes existing Secrets instead.
 
