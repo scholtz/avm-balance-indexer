@@ -108,6 +108,28 @@ public sealed class ClientTests
     }
 
     [Fact]
+    public void A_Relative_Or_Non_Http_Base_Url_Fails_At_Construction()
+    {
+        Assert.Throws<ArgumentException>(() => new AvmBalanceIndexerClient(new AvmBalanceIndexerOptions { BaseUrl = new Uri("/api", UriKind.Relative) }));
+        Assert.Throws<ArgumentException>(() => new AvmBalanceIndexerClient(new AvmBalanceIndexerOptions { BaseUrl = new Uri("ftp://indexer.test") }));
+    }
+
+    [Fact]
+    public async Task An_Export_With_A_Non_Positive_Poll_Interval_Is_Rejected_Before_It_Starts_A_Scan()
+    {
+        var handler = new FakeHandler(_ => Json(HttpStatusCode.OK, new { }));
+        using var client = Client(handler);
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () =>
+        {
+            await foreach (var _ in client.ExportHoldersAsync(TokenKind.Asa, 1, pollInterval: TimeSpan.FromSeconds(-1)))
+            {
+            }
+        });
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
     public void A_Header_The_Framework_Refuses_Fails_At_Construction()
     {
         var options = new AvmBalanceIndexerOptions { BaseUrl = new Uri("http://indexer.test") };

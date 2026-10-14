@@ -53,6 +53,8 @@ generate_python() {
 }
 
 generate_dotnet() {
+  local generator_log
+  generator_log="$(mktemp)"
   local out="sdk/dotnet/src/AvmBalanceIndexer.Client/Generated/GeneratedClient.cs"
   (
     cd "$sdk_dir/dotnet"
@@ -66,7 +68,7 @@ generate_dotnet() {
       /generateExceptionClasses:true /exceptionClass:GeneratedApiException /dateTimeType:System.DateTimeOffset \
       /generateNullableReferenceTypes:true /generateOptionalParameters:true /generateDtoTypes:true /classStyle:Poco \
       /clientClassAccessModifier:internal /generateSyncMethods:false /requiredPropertiesMustBeDefined:true \
-      /arrayType:System.Collections.Generic.IReadOnlyList /arrayInstanceType:System.Collections.Generic.List > /dev/null
+      /arrayType:System.Collections.Generic.IReadOnlyList /arrayInstanceType:System.Collections.Generic.List > "$generator_log" || { cat "$generator_log"; exit 1; }
   )
   normalize "$repo_dir/$(dirname "$out")"
 }

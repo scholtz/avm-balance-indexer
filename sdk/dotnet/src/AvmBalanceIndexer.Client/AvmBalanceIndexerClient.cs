@@ -106,6 +106,10 @@ public sealed class AvmBalanceIndexerClient : IDisposable
         options ??= new AvmBalanceIndexerOptions();
         Chain = options.Chain;
         BaseUrl = options.BaseUrl ?? DefaultEndpoints.For(options.Chain);
+        if (!BaseUrl.IsAbsoluteUri || BaseUrl.Scheme is not ("http" or "https"))
+        {
+            throw new ArgumentException($"BaseUrl must be an absolute http or https URL (got \"{BaseUrl}\").", nameof(options));
+        }
 
         // A HttpClient of the caller is never modified (it may be shared and may have sent requests already): the address and the headers
         // are applied to each request instead (GeneratedClient.Hooks.cs).
@@ -268,6 +272,11 @@ public sealed class AvmBalanceIndexerClient : IDisposable
     public async IAsyncEnumerable<HolderDto> ExportHoldersAsync(TokenKind kind, ulong tokenId, ulong? round = null, bool? includeZero = null, TimeSpan? pollInterval = null, int? limit = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         ValidateLimit(limit); // before the scan exists
+        if (pollInterval is { } requested && requested <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(pollInterval), requested, "pollInterval must be positive.");
+        }
+
         var started = await StartHolderScanAsync(kind, tokenId, round, includeZero, cancellationToken).ConfigureAwait(false);
         var scanId = started.Id.ToString();
         var wait = pollInterval ?? TimeSpan.FromSeconds(1);

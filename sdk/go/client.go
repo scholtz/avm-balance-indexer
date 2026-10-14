@@ -61,8 +61,8 @@ func New(chain ChainId, options *Options) (*Client, error) {
 	if baseURL == "" {
 		baseURL = defaultURL
 	}
-	var doer HTTPDoer = options.HTTPClient
-	if doer == nil {
+	doer := options.HTTPClient
+	if client, isClient := doer.(*http.Client); doer == nil || (isClient && client == nil) { // also a typed nil pointer in the interface
 		timeout := options.Timeout
 		switch {
 		case timeout == 0:

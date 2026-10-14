@@ -146,6 +146,13 @@ public static class ScanEndpoints
 
         var page = await jobs.GetResultAsync(parsed, cursor, pageSize, cancellationToken).ConfigureAwait(false);
 
+        // The scan can finish between the two reads: the store then answers with the last rows and no cursor. Report the state as of after
+        // the page, otherwise the page would say "not complete" and have no cursor to continue from.
+        if (page.NextCursor is null && !job.IsFinished && await jobs.GetJobAsync(parsed, cancellationToken).ConfigureAwait(false) is { } fresh)
+        {
+            job = fresh;
+        }
+
         // A cursor that ends a page of a scan that is still running means "caught up so far", not "finished".
         return Results.Ok(new ScanHoldersResponse(
             job.Id,

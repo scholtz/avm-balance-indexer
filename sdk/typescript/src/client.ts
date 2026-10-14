@@ -272,6 +272,9 @@ export class AvmBalanceIndexer {
         if (error.cause instanceof CallerAborted) {
           throw error.cause.reason;
         }
+        if (error.cause instanceof DOMException && error.cause.name === "TimeoutError") {
+          throw new ConnectionError(`Request to ${this.baseUrl} timed out`, error.cause);
+        }
         throw new ConnectionError(`Request to ${this.baseUrl} failed: ${error.cause instanceof Error ? error.cause.message : error.message}`, error.cause);
       }
       throw error;
