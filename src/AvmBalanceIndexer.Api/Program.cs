@@ -15,7 +15,15 @@ var builder = WebApplication.CreateBuilder(args);
 
 var api = builder.Configuration.GetSection(ApiOptions.SectionName).Get<ApiOptions>() ?? new ApiOptions();
 Validator.ValidateObject(api, new ValidationContext(api), validateAllProperties: true);
-builder.Services.AddOpenApi(options => options.AddOperationTransformer((operation, context, _) =>
+builder.Services.AddOpenApi(options =>
+{
+    // A relative server address: the UI calls the origin it was loaded from, whatever scheme and host a TLS-terminating ingress shows the pod.
+    options.AddDocumentTransformer((document, _, _) =>
+    {
+        document.Servers = [new Microsoft.OpenApi.OpenApiServer { Url = string.IsNullOrEmpty(api.PathBase) ? "/" : api.PathBase }];
+        return Task.CompletedTask;
+    });
+    options.AddOperationTransformer((operation, context, _) =>
 {
     // The handlers read the chain from the deployment, so the description would not mention the {chain} segment of the path at all and
     // "Try it out" could not fill it. Declare it, fixed to the one chain this deployment serves.
@@ -42,7 +50,8 @@ builder.Services.AddOpenApi(options => options.AddOperationTransformer((operatio
     }
 
     return Task.CompletedTask;
-}));
+    });
+});
 builder.Services.AddResponseCompression(options =>
 {
     options.EnableForHttps = true;
@@ -116,7 +125,15 @@ app.Use(async (context, next) =>
     // OnStarting, so the header is on error responses too (the exception handler clears headers it did not write).
     context.Response.OnStarting(static state =>
     {
-        ((HttpResponse)state).Headers.XContentTypeOptions = "nosniff";
+        var response = (HttpResponse)state;
+        response.Headers.XContentTypeOptions = "nosniff";
+        if (response.HttpContext.Request.Path.StartsWithSegments(SwaggerPath, StringComparison.OrdinalIgnoreCase))
+        {
+            // The UI may only talk to its own origin, which also stops a link such as ?url=https://evil/spec.json from loading a foreign description.
+            response.Headers.ContentSecurityPolicy =
+                "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'";
+        }
+
         return Task.CompletedTask;
     }, context.Response);
     await next();
@@ -144,7 +161,7 @@ if (api.PublishOpenApi)
     });
 
     // PathBase, so it also works behind an ingress that forwards a path prefix.
-    app.MapGet("/", (HttpRequest request) => Results.Redirect($"{request.PathBase}/swagger/index.html"))
+    app.MapGet("/", (HttpRequest request) => Results.Redirect($"{request.PathBase}{SwaggerPath}/index.html"))
         .RequireRateLimiting("client")
         .ExcludeFromDescription();
 }

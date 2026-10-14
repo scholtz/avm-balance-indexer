@@ -252,7 +252,7 @@ public sealed class ApiHardeningTests : IDisposable
 
         Assert.Equal("/avm-testnet/swagger/index.html", root.Headers.Location!.ToString());
         Assert.Equal(HttpStatusCode.OK, page.StatusCode);
-        Assert.EndsWith("/avm-testnet", document.GetProperty("servers")[0].GetProperty("url").GetString(), StringComparison.Ordinal);
+        Assert.Equal("/avm-testnet", document.GetProperty("servers")[0].GetProperty("url").GetString());
     }
 
     [Theory]
@@ -261,6 +261,9 @@ public sealed class ApiHardeningTests : IDisposable
     [InlineData("/a b")]
     [InlineData("/a//b")]
     [InlineData("/a?x=1")]
+    [InlineData("/..")]
+    [InlineData("/a/.")]
+    [InlineData("/avm\n")]
     public void A_Malformed_Path_Prefix_Stops_The_Start_With_A_Clear_Message(string pathBase)
     {
         var error = Assert.ThrowsAny<Exception>(() => Create(settings: ("Api:PathBase", pathBase)));
@@ -284,8 +287,11 @@ public sealed class ApiHardeningTests : IDisposable
 
         Assert.Equal(HttpStatusCode.MovedPermanently, bare.StatusCode);
         Assert.Contains("\"supportedSubmitMethods\":[\"get\"]", await configuration.Content.ReadAsStringAsync(), StringComparison.Ordinal);
-        // The package ships the bundle gzip-compressed and serves it as such; the response compression middleware is not involved.
+        // The package ships the bundle gzip-compressed and serves it as such: encoded exactly once, never twice.
         Assert.Equal(HttpStatusCode.OK, bundle.StatusCode);
+        Assert.Equal(["gzip"], bundle.Content.Headers.ContentEncoding);
+        Assert.Contains("connect-src 'self'", bundle.Headers.GetValues("Content-Security-Policy").Single(), StringComparison.Ordinal);
+        Assert.False(data.Headers.Contains("Content-Security-Policy"));
         Assert.Contains("gzip", data.Content.Headers.ContentEncoding);
     }
 
@@ -314,6 +320,7 @@ public sealed class ApiHardeningTests : IDisposable
 
         var document = await client.GetFromJsonAsync<JsonElement>(new Uri("/openapi/v1.json", UriKind.Relative));
 
+        Assert.Equal("/", document.GetProperty("servers")[0].GetProperty("url").GetString());
         var parameters = document.GetProperty("paths").GetProperty("/v1/{chain}/status").GetProperty("get").GetProperty("parameters");
         var chain = parameters.EnumerateArray().Single(static p => p.GetProperty("name").GetString() == "chain");
         Assert.Equal("algorand-testnet", chain.GetProperty("schema").GetProperty("default").GetString());

@@ -38,6 +38,6 @@ public sealed class ApiOptions
     /// Path prefix the API is published under when the ingress forwards it without stripping it, for example <c>/algorand-testnet</c>. Empty
     /// serves from the root. The Swagger UI and the server address in the OpenAPI description include it.
     /// </summary>
-    [RegularExpression(@"^(/[A-Za-z0-9._~-]+)*$", ErrorMessage = "Api:PathBase must be empty or start with a slash, have no trailing slash and contain only URL-safe segments (for example /algorand-testnet).")]
+    [RegularExpression(@"^(/(?!\.+(?:/|\z))[A-Za-z0-9._~-]+)*\z", ErrorMessage = "Api:PathBase must be empty or start with a slash, have no trailing slash and contain only URL-safe segments (for example /algorand-testnet).")]
     public string PathBase { get; set; } = string.Empty;
 }
