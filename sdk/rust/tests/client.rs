@@ -53,6 +53,20 @@ fn a_relative_or_non_http_base_url_is_rejected_when_building() {
     }
 }
 
+#[tokio::test]
+async fn a_zero_timeout_switches_the_timeout_off() {
+    let server = MockServer::start().await;
+    Mock::given(path("/v1/algorand-mainnet/status"))
+        .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_millis(100)).set_body_json(json!({
+            "chain": "algorand-mainnet", "provider": "x", "state": "Following", "indexedRound": 1, "targetRound": 1, "lag": 0, "updatedAt": null
+        })))
+        .mount(&server)
+        .await;
+    let indexer = AvmBalanceIndexer::builder(ChainId::AlgorandMainnet).base_url(server.uri()).timeout(Duration::ZERO).build().unwrap();
+
+    assert_eq!(indexer.status().await.unwrap().state, "Following");
+}
+
 #[test]
 fn an_invalid_header_is_rejected_when_building() {
     let result = AvmBalanceIndexer::builder(ChainId::Voi).header("bad name", "x").build();

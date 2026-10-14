@@ -116,8 +116,8 @@ func TestARelativeOrNonHTTPBaseURLIsRejected(t *testing.T) {
 }
 
 func TestUnknownChainIsRejected(t *testing.T) {
-	if _, err := avm.New(avm.ChainId("solana"), nil); err == nil {
-		t.Fatal("expected an error")
+	if _, err := avm.New(avm.ChainId("solana"), nil); !errors.Is(err, avm.ErrInvalidArgument) {
+		t.Fatalf("expected ErrInvalidArgument, got %v", err)
 	}
 }
 

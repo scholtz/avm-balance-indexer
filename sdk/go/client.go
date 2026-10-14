@@ -53,7 +53,7 @@ type Options struct {
 func New(chain ChainId, options *Options) (*Client, error) {
 	defaultURL, ok := DefaultBaseURLs[chain]
 	if !ok {
-		return nil, fmt.Errorf("avmbalanceindexer: unknown chain %q (use AlgorandMainnet, AlgorandTestnet or Voi)", chain)
+		return nil, fmt.Errorf("%w: unknown chain %q (use AlgorandMainnet, AlgorandTestnet or Voi)", ErrInvalidArgument, chain)
 	}
 	if options == nil {
 		options = &Options{}

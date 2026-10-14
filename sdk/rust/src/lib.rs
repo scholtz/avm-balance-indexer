@@ -219,7 +219,7 @@ impl AvmBalanceIndexerBuilder {
         self
     }
 
-    /// Timeout of each request of the default HTTP client. Default 30 seconds.
+    /// Timeout of each request of the default HTTP client. Default 30 seconds; zero disables it.
     pub fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
         self
@@ -248,10 +248,13 @@ impl AvmBalanceIndexerBuilder {
                     let value = reqwest::header::HeaderValue::from_str(value).map_err(|e| Error::InvalidArgument(format!("header value: {e}")))?;
                     headers.insert(name, value);
                 }
-                reqwest::Client::builder()
-                    .user_agent("avm-balance-indexer-rust-sdk")
-                    .default_headers(headers)
-                    .timeout(self.timeout.unwrap_or(Duration::from_secs(30)))
+                let mut builder = reqwest::Client::builder().user_agent("avm-balance-indexer-rust-sdk").default_headers(headers);
+                // Zero switches the timeout off, as in the other SDKs (reqwest would give every request no time at all).
+                match self.timeout.unwrap_or(Duration::from_secs(30)) {
+                    timeout if timeout.is_zero() => {}
+                    timeout => builder = builder.timeout(timeout),
+                }
+                builder
                     .build()
                     .map_err(|e| Error::Connection(e.to_string()))?
             }
