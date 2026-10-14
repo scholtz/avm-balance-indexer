@@ -133,6 +133,10 @@ catch (AvmBalanceIndexerConnectionException)
 {
     // network failure or timeout
 }
+catch (AvmBalanceIndexerResponseException)
+{
+    // a success answer that is not the documented JSON (for example a proxy's HTML page)
+}
 ```
 
 The SDK does **not** retry on its own; use `AddStandardResilienceHandler()` on the `HttpClient` (see above) or a loop that honours `RetryAfter`.

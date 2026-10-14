@@ -260,6 +260,10 @@ export class AvmBalanceIndexer {
       if (error instanceof ResponseError) {
         throw await toApiError(error.response);
       }
+      if (error instanceof DOMException && error.name === "TimeoutError") {
+        // The timeout stays armed until the body is read: a slow body is a timeout like a slow connection.
+        throw new ConnectionError(`Request to ${this.baseUrl} timed out`, error);
+      }
       if (error instanceof SyntaxError) {
         throw new DecodeError(`Unexpected response from ${this.baseUrl}: ${error.message}`, error);
       }

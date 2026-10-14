@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# sdk/scripts/set-version.sh 1.2.3  - writes the version into sdk/VERSION and every SDK manifest (needs bash and python3; no network, any OS).
+# sdk/scripts/set-version.sh 1.2.3  - writes the version into sdk/VERSION and every SDK manifest (needs bash and python; no network).
 set -euo pipefail
 version="${1:?usage: set-version.sh MAJOR.MINOR.PATCH}"
 if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo "version must be MAJOR.MINOR.PATCH"; exit 1; fi
 sdk_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-python3 - "$version" "$sdk_dir" <<'PY'
+python_bin="$(command -v python3 || command -v python || true)"
+[ -n "$python_bin" ] || { echo "python3 (or python) is needed to edit the manifests"; exit 1; }
+"$python_bin" - "$version" "$sdk_dir" <<'PY'
 import json
 import pathlib
 import re

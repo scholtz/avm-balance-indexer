@@ -64,7 +64,7 @@ await foreach (var h in indexer.ExportHoldersAsync(TokenKind.Algo, 0, round: 30_
 
 ## Errors
 
-`AvmBalanceIndexerApiException`: `StatusCode`, `ApiMessage`, `IsNotFound`, `IsRetryable` (429, 503, 504), `RetryAfter`, `Body`. `AvmBalanceIndexerConnectionException`: no response (network, timeout).
+`AvmBalanceIndexerApiException`: `StatusCode`, `ApiMessage`, `IsNotFound`, `IsRetryable` (429, 503, 504), `RetryAfter`, `Body`. `AvmBalanceIndexerConnectionException`: no response (network, timeout). `AvmBalanceIndexerResponseException`: a success answer that is not the documented JSON.
 `HolderScanException`: an export ended as Failed or Cancelled (`.Scan`). Cancellation surfaces as `OperationCanceledException`.
 
 ## Verify your work

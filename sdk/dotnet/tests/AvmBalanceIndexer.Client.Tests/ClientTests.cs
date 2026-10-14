@@ -176,6 +176,18 @@ public sealed class ClientTests
     }
 
     [Fact]
+    public async Task A_Success_Answer_That_Is_Not_Json_Is_A_Response_Exception()
+    {
+        var handler = new FakeHandler(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("<html>captive portal</html>", Encoding.UTF8, "text/html") });
+        using var client = Client(handler);
+
+        var error = await Assert.ThrowsAsync<AvmBalanceIndexerResponseException>(() => client.GetStatusAsync());
+
+        Assert.Equal(200, error.StatusCode);
+        Assert.Contains("captive portal", error.Body, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Not_Found_With_A_Plain_Body_Keeps_The_Body()
     {
         var handler = new FakeHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound) { Content = new StringContent("nope") });

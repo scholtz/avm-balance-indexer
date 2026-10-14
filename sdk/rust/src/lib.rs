@@ -467,9 +467,10 @@ impl AvmBalanceIndexer {
                             guard.armed = false;
                             return Ok(Some((page.items, Phase::Done)));
                         }
+                        // An empty page (caught up with a running scan) or no cursor to continue from (for example the last page of a scan that
+                        // failed): look at the scan and wait before the next read. The cursor of the previous page is kept.
+                        let look = page.items.is_empty() || page.next_cursor.is_none();
                         let cursor = page.next_cursor.or(cursor);
-                        // An empty page (caught up with a running scan) or no cursor yet: look at the scan and wait before the next read. The cursor is kept.
-                        let look = page.items.is_empty() || cursor.is_none();
                         Ok(Some((page.items, Phase::Reading { guard, cursor, look })))
                     }
                 }

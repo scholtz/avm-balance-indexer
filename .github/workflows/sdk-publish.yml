@@ -280,10 +280,11 @@ jobs:
 
   go:
     name: Go module
-    # The tag is immutable too: it is pushed last, behind the same approval, and only together with a registry release of this run (so that
-    # all SDKs of one version are built from one commit), and only when no registry job failed.
+    # The tag is immutable too: it is pushed last, behind the same approval, only when no registry job failed, and only together with a registry
+    # release of this run (so that all SDKs of one version are built from one commit). A run started by hand always tags a missing tag, which
+    # is also how a tag that failed to push is repaired.
     needs: [version, npm-build, npm, pypi-build, pypi, nuget, crates]
-    if: ${{ !cancelled() && needs.version.result == 'success' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && (needs.npm.outputs.published == 'true' || needs.pypi.outputs.published == 'true' || needs.nuget.outputs.published == 'true' || needs.crates.outputs.published == 'true') }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && (github.event_name == 'workflow_dispatch' || needs.npm.outputs.published == 'true' || needs.pypi.outputs.published == 'true' || needs.nuget.outputs.published == 'true' || needs.crates.outputs.published == 'true') }}
     runs-on: ubuntu-latest
     environment: sdk-publish
     permissions:

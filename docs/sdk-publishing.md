@@ -10,7 +10,8 @@ The workflow [`Publish SDKs`](../.github/workflows/sdk-publish.yml) runs when a 
 2. **Per registry**, in parallel: if the secret of that registry is configured and **the version in `sdk/VERSION` is not in the registry yet**, the package is tested again and published.
    Otherwise the job ends with a notice ("secret not set" or "already published"); that is not an error.
 3. **Go**: the tag `sdk/go/vX.Y.Z` is created (the Go module proxy serves tags, there is nothing to upload), but only together with a registry release of this run, so that all SDKs of one version are built from one commit.
-   If you publish no package to any registry, create the tag by hand: `git tag -a sdk/go/vX.Y.Z -m "Go SDK X.Y.Z" <commit> && git push origin sdk/go/vX.Y.Z`.
+   A run started by hand (*Run workflow*) always creates a missing tag, which also repairs a tag whose push failed.
+   If you publish no package to any registry, start that run once or create the tag by hand: `git tag -a sdk/go/vX.Y.Z -m "Go SDK X.Y.Z" <commit> && git push origin sdk/go/vX.Y.Z`.
 4. **Release**: a GitHub release `sdk-vX.Y.Z` with generated notes, once.
 
 So *code change merged* publishes only when the version was raised. Raise it in the same pull request: `sdk/scripts/set-version.sh 1.1.0` (all manifests) and commit. MAJOR = breaking change of the SDK surface,

@@ -350,6 +350,41 @@ async fn an_export_validates_the_page_size_before_it_starts_a_scan() {
 }
 
 #[tokio::test]
+async fn a_scan_that_fails_after_several_pages_is_reported_not_read_again_and_again() {
+    let server = MockServer::start().await;
+    let result_path = format!("/v1/algorand-mainnet/scans/{SCAN_ID}/holders");
+    Mock::given(method("POST")).respond_with(ResponseTemplate::new(202).set_body_json(scan("Running", false, None))).mount(&server).await;
+    Mock::given(path(result_path.as_str()))
+        .and(query_param_is_missing("cursor"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(
+            json!({ "id": SCAN_ID, "state": "Running", "complete": false, "round": 5, "items": [holder("A")], "nextCursor": "c1" }),
+        ))
+        .mount(&server)
+        .await;
+    // The last page of a failed scan: rows, but no cursor and not complete.
+    Mock::given(path(result_path.as_str()))
+        .and(query_param("cursor", "c1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(
+            json!({ "id": SCAN_ID, "state": "Failed", "complete": false, "round": 5, "items": [holder("B")], "nextCursor": null }),
+        ))
+        .mount(&server)
+        .await;
+    Mock::given(path(format!("/v1/algorand-mainnet/scans/{SCAN_ID}").as_str()))
+        .respond_with(ResponseTemplate::new(200).set_body_json(scan("Failed", false, Some("boom"))))
+        .mount(&server)
+        .await;
+    let indexer = client(&server, ChainId::AlgorandMainnet);
+
+    let mut holders = std::pin::pin!(indexer.export_holders_stream(TokenKind::Asa, 1, ExportOptions { poll_interval: Some(Duration::from_millis(10)), ..Default::default() }));
+
+    assert_eq!(holders.try_next().await.unwrap().unwrap().account, "A");
+    assert_eq!(holders.try_next().await.unwrap().unwrap().account, "B");
+    assert!(matches!(holders.try_next().await, Err(Error::Scan(_))));
+    let reads = server.received_requests().await.unwrap().iter().filter(|r| r.url.path().ends_with("/holders")).count();
+    assert!(reads <= 3, "the pages were read {reads} times");
+}
+
+#[tokio::test]
 async fn an_export_of_a_failed_scan_is_an_error() {
     let server = MockServer::start().await;
     Mock::given(method("POST")).respond_with(ResponseTemplate::new(202).set_body_json(scan("Failed", false, Some("boom")))).mount(&server).await;

@@ -208,6 +208,16 @@ describe("errors", () => {
     );
   });
 
+  it("times out while the body is being read", async () => {
+    handler = (_request, response) => {
+      response.writeHead(200, { "content-type": "application/json", "content-length": "1000" });
+      response.write("{");
+      // the rest never comes
+    };
+    const client = AvmBalanceIndexer.algorandMainnet({ baseUrl, timeoutMs: 200 });
+    await assert.rejects(() => client.status(), ConnectionError);
+  });
+
   it("times out", async () => {
     handler = () => {
       // never answers

@@ -66,6 +66,16 @@ public sealed class AvmBalanceIndexerApiException : Exception
     public bool IsRetryable => StatusCode is 429 or 503 or 504;
 }
 
+/// <summary>The server answered with a success status but the body is not what the API documents (for example an HTML page of a proxy).</summary>
+public sealed class AvmBalanceIndexerResponseException(string message, int statusCode, string? body, Exception inner) : Exception(message, inner)
+{
+    /// <summary>HTTP status code of the answer.</summary>
+    public int StatusCode { get; } = statusCode;
+
+    /// <summary>Raw response body.</summary>
+    public string? Body { get; } = body;
+}
+
 /// <summary>The request never produced a response (network failure or timeout).</summary>
 public sealed class AvmBalanceIndexerConnectionException(string message, Exception inner) : Exception(message, inner);
 
@@ -332,6 +342,10 @@ public sealed class AvmBalanceIndexerClient : IDisposable
         try
         {
             return await call().ConfigureAwait(false);
+        }
+        catch (GeneratedApiException error) when (error.StatusCode is >= 200 and < 300)
+        {
+            throw new AvmBalanceIndexerResponseException($"Unexpected response from {BaseUrl} (HTTP {error.StatusCode}): {error.InnerException?.Message ?? "the body is not the documented JSON"}", error.StatusCode, error.Response, error);
         }
         catch (GeneratedApiException error)
         {

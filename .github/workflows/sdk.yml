@@ -10,7 +10,8 @@ on:
       - "sdk/**"
       - ".github/workflows/sdk.yml"
       - ".github/workflows/sdk-publish.yml"
-      - "src/**" # anything the API document is rendered from
+      - "src/AvmBalanceIndexer.Api/**"
+      - "src/AvmBalanceIndexer.Domain/**" # ChainId and TokenKind come from here
       - "tests/AvmBalanceIndexer.Api.Tests/**"
   workflow_call:
 
