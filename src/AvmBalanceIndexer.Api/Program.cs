@@ -45,16 +45,17 @@ builder.Services.AddRateLimiter(options =>
     // Requests that reach no endpoint (the Swagger UI files are served by middleware) are limited by this one; everything else is
     // limited by the "client" policy on its endpoints, so health checks stay free.
     // One definition of "the limit" for both, so they cannot drift apart.
-    RateLimitPartition<string> PerClient(string key) =>
+    RateLimitPartition<string> PerClient(string key, int atLeast = 0) =>
         api.RateLimitPerMinute == 0
             ? RateLimitPartition.GetNoLimiter("unlimited")
             : RateLimitPartition.GetFixedWindowLimiter(
                 key,
-                _ => new FixedWindowRateLimiterOptions { PermitLimit = api.RateLimitPerMinute, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 });
+                _ => new FixedWindowRateLimiterOptions { PermitLimit = Math.Max(api.RateLimitPerMinute, atLeast), Window = TimeSpan.FromMinutes(1), QueueLimit = 0 });
 
     options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(httpContext =>
         api.PublishOpenApi && httpContext.Request.Path.StartsWithSegments(SwaggerPath, StringComparison.OrdinalIgnoreCase)
-            ? PerClient("ui:" + ClientKey(httpContext.Connection.RemoteIpAddress))
+            // A page load is about ten requests: a deliberately low data limit must not make the UI unusable.
+            ? PerClient("ui:" + ClientKey(httpContext.Connection.RemoteIpAddress), atLeast: 60)
             : RateLimitPartition.GetNoLimiter("unlimited"));
     options.AddPolicy("client", httpContext => PerClient(ClientKey(httpContext.Connection.RemoteIpAddress)));
 });

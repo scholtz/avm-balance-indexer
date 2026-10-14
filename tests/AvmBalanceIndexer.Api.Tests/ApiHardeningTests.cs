@@ -313,9 +313,10 @@ public sealed class ApiHardeningTests : IDisposable
     {
         using var client = Create(settings: ("Api:RateLimitPerMinute", "2"));
 
-        // Six requests span at most two one-minute windows, so at least two of them are over the limit whatever the clock does.
+        // The UI allowance is at least 60 a minute (a page load is about ten requests). 130 requests span at most two one-minute windows,
+        // so at least ten of them are over the limit whatever the clock does.
         var statuses = new List<HttpStatusCode>();
-        for (var i = 0; i < 6; i++)
+        for (var i = 0; i < 130; i++)
         {
             // Mixed case reaches the same files, so it must be limited the same way.
             using var response = await client.GetAsync(new Uri(i % 2 == 0 ? "/swagger/swagger-ui.css" : "/SWAGGER/swagger-ui.css", UriKind.Relative));
@@ -323,7 +324,7 @@ public sealed class ApiHardeningTests : IDisposable
         }
 
         using var health = await client.GetAsync(new Uri("/healthz/live", UriKind.Relative));
-        Assert.True(statuses.Count(static s => s == HttpStatusCode.TooManyRequests) >= 2, string.Join(", ", statuses));
+        Assert.True(statuses.Count(static s => s == HttpStatusCode.TooManyRequests) >= 10, string.Join(", ", statuses.Take(20)));
         Assert.Equal(HttpStatusCode.OK, health.StatusCode);
     }
 
