@@ -295,6 +295,22 @@ def test_export_holders_waits_for_the_scan_and_keeps_its_cursor(server):
     assert any(r["method"] == "GET" and urlparse(r["path"]).path.endswith(f"/scans/{scan_id}") for r in server.requests)
 
 
+def test_the_last_page_of_a_scan_that_finished_between_two_server_reads_is_not_read_twice(server):
+    def handler(request):
+        parsed = urlparse(request["path"])
+        if request["method"] == "POST":
+            return 202, scan_body("Pending", False), {}
+        if parsed.path.endswith("/holders"):
+            # Rows, no cursor and not complete: the job looked running when the endpoint read it and was finished when the store did.
+            return 200, {"id": "s", "state": "Running", "complete": False, "round": 5, "items": [holder("A"), holder("B")], "nextCursor": None}, {}
+        return 200, scan_body("Completed", True), {}
+
+    server.handler = handler
+    client = AvmBalanceIndexer.algorand_mainnet(base_url=server.url)
+
+    assert [h.account for h in client.export_holders("asa", 1, poll_interval=0.01)] == ["A", "B"]
+
+
 def test_stopping_an_export_early_cancels_the_scan(server):
     def handler(request):
         if request["method"] == "POST":

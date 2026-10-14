@@ -346,6 +346,26 @@ describe("pagination", () => {
     assert.equal(requests.length, 0);
   });
 
+  it("does not read the last page of a scan that finished between two server reads twice", async () => {
+    const id = "s1";
+    handler = (request, response) => {
+      const url = new URL(request.url ?? "", "http://x");
+      if (request.method === "POST") json(response, 202, scanBody("Pending", false));
+      else if (url.pathname.endsWith("/holders")) {
+        // Rows, no cursor and not complete: the job looked running when the endpoint read it and was finished when the store did.
+        json(response, 200, { id, state: "Running", complete: false, round: 5, items: [holder("A"), holder("B")], nextCursor: null });
+      } else json(response, 200, scanBody("Completed", true));
+    };
+    const client = AvmBalanceIndexer.algorandMainnet({ baseUrl });
+
+    const accounts: string[] = [];
+    for await (const item of client.exportHolders("asa", 1, { pollIntervalMs: 10 })) {
+      accounts.push(item.account);
+    }
+
+    assert.deepEqual(accounts, ["A", "B"]);
+  });
+
   it("fails an export whose scan failed", async () => {
     handler = (request, response) => {
       const url = new URL(request.url ?? "", "http://x");

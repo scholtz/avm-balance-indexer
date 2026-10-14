@@ -337,6 +337,33 @@ func TestExportHoldersWaitsForTheScanAndKeepsItsCursor(t *testing.T) {
 	}
 }
 
+func TestTheLastPageOfAScanThatFinishedBetweenTwoServerReadsIsNotReadTwice(t *testing.T) {
+	server, _ := fakeServer(t, func(r *http.Request) (int, any, map[string]string) {
+		switch {
+		case r.Method == http.MethodPost:
+			return 202, scan("Pending", false, nil), nil
+		case len(r.URL.Path) > 8 && r.URL.Path[len(r.URL.Path)-8:] == "/holders":
+			// Rows, no cursor and not complete: the job looked running when the endpoint read it and was finished when the store did.
+			return 200, map[string]any{"id": "11111111-1111-1111-1111-111111111111", "state": "Running", "complete": false, "round": 5, "items": []any{holder("A"), holder("B")}, "nextCursor": nil}, nil
+		}
+		return 200, scan("Completed", true, nil), nil
+	})
+	client, _ := avm.New(avm.AlgorandMainnet, &avm.Options{BaseURL: server.URL})
+
+	var accounts []string
+	err := client.ExportHolders(context.Background(), avm.Asa, 1, avm.ExportOptions{PollInterval: 10 * time.Millisecond}, func(h avm.HolderDto) error {
+		accounts = append(accounts, h.Account)
+		return nil
+	})
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(accounts) != 2 || accounts[0] != "A" || accounts[1] != "B" {
+		t.Errorf("accounts %v", accounts)
+	}
+}
+
 func TestExportValidatesThePageSizeBeforeStartingAScan(t *testing.T) {
 	server, requests := fakeServer(t, func(r *http.Request) (int, any, map[string]string) {
 		return 500, map[string]any{"error": "unexpected"}, nil

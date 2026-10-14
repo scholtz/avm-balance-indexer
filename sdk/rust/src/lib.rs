@@ -436,7 +436,7 @@ impl AvmBalanceIndexer {
         enum Phase {
             Start,
             // `look` is true when the previous page had nothing new: check the scan and wait before reading again.
-            Reading { guard: ScanGuard, cursor: Option<String>, look: bool },
+            Reading { guard: ScanGuard, cursor: Option<String>, look: bool, last_page_without_cursor: bool },
             Done,
         }
         let wait = options.poll_interval.unwrap_or(Duration::from_secs(1));
@@ -451,14 +451,19 @@ impl AvmBalanceIndexer {
                             .start_holder_scan(kind, token_id, ScanRequest { include_zero: options.include_zero, round: options.round })
                             .await?;
                         let guard = ScanGuard { client: self.clone(), id: started.id.to_string(), armed: true };
-                        Ok(Some((Vec::new(), Phase::Reading { guard, cursor: None, look: false })))
+                        Ok(Some((Vec::new(), Phase::Reading { guard, cursor: None, look: false, last_page_without_cursor: false })))
                     }
-                    Phase::Reading { mut guard, cursor, look } => {
+                    Phase::Reading { mut guard, cursor, look, last_page_without_cursor } => {
                         if look {
                             let scan = self.holder_scan(&guard.id).await?;
                             if scan.state == "Failed" || scan.state == "Cancelled" {
                                 guard.armed = false;
                                 return Err(Error::Scan(Box::new(scan)));
+                            }
+                            if scan.state == "Completed" && last_page_without_cursor {
+                                // The scan finished between two reads of the server: the previous page was its last, every row has been delivered.
+                                guard.armed = false;
+                                return Ok(Some((Vec::new(), Phase::Done)));
                             }
                             tokio::time::sleep(wait).await;
                         }
@@ -470,8 +475,9 @@ impl AvmBalanceIndexer {
                         // An empty page (caught up with a running scan) or no cursor to continue from (for example the last page of a scan that
                         // failed): look at the scan and wait before the next read. The cursor of the previous page is kept.
                         let look = page.items.is_empty() || page.next_cursor.is_none();
+                        let last_page_without_cursor = !page.items.is_empty() && page.next_cursor.is_none();
                         let cursor = page.next_cursor.or(cursor);
-                        Ok(Some((page.items, Phase::Reading { guard, cursor, look })))
+                        Ok(Some((page.items, Phase::Reading { guard, cursor, look, last_page_without_cursor })))
                     }
                 }
             }

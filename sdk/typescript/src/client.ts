@@ -451,12 +451,17 @@ export class AvmBalanceIndexer {
           finished = true;
           throw new ScanError(`Holder scan ${started.id} ended as ${scan.state}${scan.error ? `: ${scan.error}` : ""}`, scan);
         }
+        if (scan.state === "Completed" && page.items.length > 0 && !page.nextCursor) {
+          // The scan finished between two reads of the server: this was its last page, every row has been delivered.
+          finished = true;
+          return;
+        }
         await sleep(poll, options.signal);
       }
     } finally {
       if (!finished) {
         // Stopped early (break, error, abort): release the server-side scan, which counts against the server's limit of active scans.
-        await this.cancelHolderScan(started.id).catch(() => undefined);
+        await this.cancelHolderScan(started.id, AbortSignal.timeout(5000)).catch(() => undefined);
       }
     }
   }

@@ -388,12 +388,17 @@ class AvmBalanceIndexer:
                     finished = True
                     detail = f": {scan.error}" if scan.error else ""
                     raise ScanError(f"Holder scan {scan_id} ended as {scan.state}{detail}", scan)
+                if scan.state == "Completed" and page.items and not page.next_cursor:
+                    # The scan finished between two reads of the server: this was its last page, every row has been delivered.
+                    finished = True
+                    return
                 time.sleep(poll_interval)
         finally:
             if not finished:
                 # Stopped early (break, close(), error): release the server-side scan, which counts against the server's limit of active scans.
                 try:
-                    self.cancel_holder_scan(scan_id)
+                    # A short timeout of its own: the cleanup must not delay the error that ended the export.
+                    self._scans.cancel_holder_scan(self.chain, scan_id, _request_timeout=5.0)
                 except Exception:  # noqa: BLE001 - best effort
                     pass
 

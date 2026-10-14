@@ -308,6 +308,13 @@ public sealed class AvmBalanceIndexerClient : IDisposable
                     throw new HolderScanException($"Holder scan {scanId} ended as {scan.State}{(string.IsNullOrEmpty(scan.Error) ? string.Empty : ": " + scan.Error)}", scan);
                 }
 
+                if (scan.State == "Completed" && page.Items.Count > 0 && string.IsNullOrEmpty(page.NextCursor))
+                {
+                    // The scan finished between two reads of the server: this was its last page, every row has been delivered.
+                    finished = true;
+                    yield break;
+                }
+
                 await Task.Delay(wait, cancellationToken).ConfigureAwait(false);
             }
         }

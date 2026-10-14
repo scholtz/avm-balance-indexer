@@ -287,6 +287,32 @@ public sealed class ClientTests
     }
 
     [Fact]
+    public async Task The_Last_Page_Of_A_Scan_That_Finished_Between_Two_Server_Reads_Is_Not_Read_Twice()
+    {
+        var handler = new FakeHandler(request =>
+        {
+            if (request.Method == HttpMethod.Post)
+            {
+                return Json(HttpStatusCode.Accepted, Scan("Pending", false));
+            }
+
+            // Rows, no cursor and not complete: the job looked running when the endpoint read it and was finished when the store did.
+            return request.RequestUri!.AbsolutePath.EndsWith("/holders", StringComparison.Ordinal)
+                ? Json(HttpStatusCode.OK, new { id = "11111111-1111-1111-1111-111111111111", state = "Running", complete = false, round = 5, items = new[] { Holder("A"), Holder("B") }, nextCursor = (string?)null })
+                : Json(HttpStatusCode.OK, Scan("Completed", true));
+        });
+        using var client = Client(handler);
+
+        var accounts = new List<string>();
+        await foreach (var holder in client.ExportHoldersAsync(TokenKind.Asa, 1, pollInterval: TimeSpan.FromMilliseconds(10)))
+        {
+            accounts.Add(holder.Account);
+        }
+
+        Assert.Equal(["A", "B"], accounts);
+    }
+
+    [Fact]
     public async Task An_Export_Validates_The_Page_Size_Before_It_Starts_A_Scan()
     {
         var handler = new FakeHandler(_ => Json(HttpStatusCode.OK, new { }));

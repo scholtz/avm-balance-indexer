@@ -408,6 +408,11 @@ func (c *Client) ExportHolders(ctx context.Context, kind TokenKind, tokenID uint
 			finished = true
 			return &ScanError{Scan: scan}
 		}
+		if scan.State == "Completed" && len(result.Items) > 0 && (result.NextCursor == nil || *result.NextCursor == "") {
+			// The scan finished between two reads of the server: this was its last page, every row has been delivered.
+			finished = true
+			return nil
+		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()

@@ -84,11 +84,10 @@ generate_rust() {
     set -e
     rustup toolchain install $RUST_NIGHTLY --profile minimal -c rustfmt > /dev/null
     [ -x /opt/tools/bin/cargo-progenitor ] || cargo install cargo-progenitor --version $PROGENITOR_VERSION --locked --root /opt/tools --quiet
-    rm -rf .generated-rust
-    RUSTUP_TOOLCHAIN=$RUST_NIGHTLY /opt/tools/bin/cargo-progenitor progenitor -i openapi/avm-balance-indexer.v1.json -o .generated-rust \
+    rm -rf /tmp/generated-rust
+    RUSTUP_TOOLCHAIN=$RUST_NIGHTLY /opt/tools/bin/cargo-progenitor progenitor -i openapi/avm-balance-indexer.v1.json -o /tmp/generated-rust \
       -n avm-balance-indexer-api -v 1.0.0 --interface builder --license-name MIT > /dev/null
-    mv .generated-rust/src/lib.rs rust/src/generated.rs
-    rm -rf .generated-rust
+    cp /tmp/generated-rust/src/lib.rs rust/src/generated.rs
     chown -R $(id -u):$(id -g) rust/src/generated.rs /opt/tools /usr/local/cargo/registry
   "
   normalize "$sdk_dir/rust/src"

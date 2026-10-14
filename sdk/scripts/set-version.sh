@@ -22,10 +22,16 @@ def substitute(path, pattern):
     changed, count = re.subn(pattern, lambda m: m.group(1) + version + m.group(2), text, count=1, flags=re.M)
     if count == 0:
         sys.exit(f"{path}: no version found")
-    file.write_text(changed, encoding="utf-8", newline="")
+    write(file, changed)
 
 
-(sdk / "VERSION").write_text(version + "\n", encoding="utf-8", newline="")
+def write(path, text):
+    # open(), not Path.write_text(newline=...), which needs Python 3.10; LF endings on every OS.
+    with open(path, "w", encoding="utf-8", newline="") as handle:
+        handle.write(text)
+
+
+write(sdk / "VERSION", version + "\n")
 substitute("typescript/package.json", r'^(  "version": ")[^"]+(")')
 substitute("python/pyproject.toml", r'^(version = ")[^"]+(")')
 substitute("dotnet/src/AvmBalanceIndexer.Client/AvmBalanceIndexer.Client.csproj", r"(<Version>)[^<]+(</Version>)")
@@ -36,7 +42,7 @@ lock_path = sdk / "typescript/package-lock.json"
 lock = json.loads(lock_path.read_text(encoding="utf-8"))
 lock["version"] = version
 lock["packages"][""]["version"] = version
-lock_path.write_text(json.dumps(lock, indent=2, ensure_ascii=False) + "\n", encoding="utf-8", newline="")
+write(lock_path, json.dumps(lock, indent=2, ensure_ascii=False) + "\n")
 PY
 
 bash "$sdk_dir/scripts/check-versions.sh"
