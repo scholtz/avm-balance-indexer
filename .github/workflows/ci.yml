@@ -151,6 +151,8 @@ jobs:
             out=$(helm template "$2" deploy/helm/avm-balance-indexer -f "deploy/helm/values/$1.yaml" --set image.repository=docker.io/acme/avm-balance-indexer --set image.tag=t1 --set cassandra.embedded.node=node-1)
             echo "$out" | grep -q "path: \"$3\"" || { echo "$1: hostPath $3 missing"; exit 1; }
             echo "$out" | grep -q "host: \"$4\"" || { echo "$1: ingress host $4 missing"; exit 1; }
+            echo "$out" | grep -q "kubernetes.io/ingress.class: nginx" || { echo "$1: ingress class annotation missing"; exit 1; }
+            echo "$out" | grep -q "cert-manager.io/cluster-issuer: letsencrypt-dns" || { echo "$1: cluster issuer annotation missing"; exit 1; }
             echo "$out" | grep -q "image: docker.io/acme/avm-balance-indexer-api:t1" || { echo "$1: api image name wrong"; exit 1; }
             echo "$out" | grep -q "Storage__Cassandra__ContactPoints__0: \"$2-.*-cassandra\"" || { echo "$1: contact point missing"; exit 1; }
             if echo "$out" | grep -q "Storage__Cassandra__Password"; then echo "$1: embedded Cassandra must not need a secret"; exit 1; fi

@@ -11,6 +11,9 @@ cassandra:
     hostPath: /mnt/nvme1/avm-balance-indexer/testnet
 ingress:
   enabled: true
+  # This cluster selects the controller by annotation.
+  annotations:
+    kubernetes.io/ingress.class: nginx
   host: testnet.balance-indexer.biatec.io
   tls:
     enabled: true
