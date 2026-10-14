@@ -124,6 +124,44 @@ jobs:
             kubectl create namespace "$NAMESPACE"
           fi
           kubectl -n "$NAMESPACE" get pods > /dev/null
+      # The kube config may belong to a restricted account: say exactly which rights are missing before Helm fails half way.
+      - name: Check the permissions of the kube config
+        env:
+          RELEASE: ${{ inputs.release }}
+          CHAIN: ${{ inputs.chain }}
+        run: |
+          # can-i answers yes or no; anything else (a flaky API server) stops the job instead of being read as "no".
+          can() {
+            local answer
+            answer="$(kubectl -n "$NAMESPACE" auth can-i "$1" "$2" 2>/dev/null)" || [ "$answer" = no ] || { echo "::error::Could not ask the cluster whether the kube config may $1 $2"; exit 1; }
+            [ "$answer" = yes ]
+          }
+          missing=()
+          for resource in deployments.apps statefulsets.apps services configmaps secrets ingresses.networking.k8s.io poddisruptionbudgets.policy; do
+            for verb in get list watch create update patch delete; do
+              can "$verb" "$resource" || missing+=("$verb $resource")
+            done
+          done
+          for resource in pods replicasets.apps; do
+            for verb in get list watch; do
+              can "$verb" "$resource" || missing+=("$verb $resource")
+            done
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            for item in "${missing[@]}"; do echo "::error::The kube config may not $item"; done
+            echo "::error::Grant these in the namespace ${NAMESPACE} (deploy/rbac/deployer.yaml lists everything the chart needs)"; exit 1
+          fi
+          # The NetworkPolicy that shields Cassandra is a protection, not a requirement: without the right to manage it a new release is installed without it.
+          # An existing policy is never dropped silently, that would open port 9042.
+          for verb in get list watch create update patch delete; do
+            if ! can "$verb" networkpolicies.networking.k8s.io; then
+              if kubectl -n "$NAMESPACE" get networkpolicy "${RELEASE}-${CHAIN}-cassandra" > /dev/null 2>&1; then
+                echo "::error::The release has a Cassandra NetworkPolicy but the kube config may not $verb networkpolicies; grant it (deploy/rbac/deployer.yaml)"; exit 1
+              fi
+              echo "::warning::No right to $verb networkpolicies: deploying without the Cassandra NetworkPolicy; anything in the namespace can reach port 9042"
+              echo "NETWORK_POLICY=false" >> "$GITHUB_ENV"; break
+            fi
+          done
       # Every Kubernetes secret the release needs is created here from GitHub secrets: nothing is edited in the cluster by hand.
       - name: Kubernetes secrets
         env:
@@ -167,6 +205,7 @@ jobs:
           common=(--namespace "$NAMESPACE" -f "deploy/helm/values/$VALUES"
             --set-string "image.repository=docker.io/${DOCKERHUB_USERNAME}/avm-balance-indexer"
             --set-string "cassandra.embedded.node=$CASSANDRA_NODE" --atomic --timeout 25m)
+          if [ "${NETWORK_POLICY:-true}" = false ]; then common+=(--set networkPolicy.enabled=false); fi
           # Pods restart when a secret changes: its hash is part of the pod template.
           if [ -n "$PULL_TOKEN" ]; then common+=(--set "imagePullSecrets[0].name=${RELEASE}-dockerhub-pull"); fi
           if [ -n "$ALGOD_TOKEN" ]; then common+=(--set-string "algorand.existingSecret=${RELEASE}-algod"); fi
