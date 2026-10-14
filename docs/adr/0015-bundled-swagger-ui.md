@@ -17,13 +17,13 @@ first when opening a deployment's address.
   so the page works in an air-gapped cluster and under a strict content policy. The description itself still comes from
   `Microsoft.AspNetCore.OpenApi`. A CDN-hosted UI or Scalar were rejected for the external dependency at runtime and the extra client
   library respectively.
-- The description declares the `{chain}` path parameter, fixed to the chain the deployment serves (the handlers read the chain from the
+- The description declares the `{chain}` path parameter, with the chain the deployment serves as its default (not an enum, so a client generated from any deployment can address another) (the handlers read the chain from the
   deployment, so the framework did not generate it), which is what lets "Try it out" fill the address.
 - The UI files are rate limited per client like the data endpoints (a global limiter for `/swagger/*`, case-insensitive; the window is separate
-  from the data endpoints'). "Try it out" is not on by default: the page also lists the scan endpoints that create work.
+  from the data endpoints'). The UI only submits GET requests (the scan endpoints that create work are not executable from the public page) and "Try it out" is not on by default.
 - `Api:PathBase` supports an ingress that forwards a path prefix; the redirect, the UI and the server address in the description include it.
 
 ## Consequences
 
-- About 1.5 MB of third-party JavaScript is served by the API image (on request only).
+- About 1.5 MB of third-party JavaScript is served by the API image (on request only; the package serves its files precompressed and the API's response compression skips `/swagger`). It updates with the package: Dependabot's weekly NuGet run proposes new versions, and an advisory in swagger-ui is fixed by merging that update; set `Api:PublishOpenApi` to false to remove the UI from a deployment.
 - A client can use up to `Api:RateLimitPerMinute` requests per minute for the UI files and the same for the data endpoints.

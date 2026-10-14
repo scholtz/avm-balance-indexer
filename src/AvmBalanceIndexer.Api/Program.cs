@@ -34,8 +34,8 @@ builder.Services.AddOpenApi(options => options.AddOperationTransformer((operatio
                 Schema = new Microsoft.OpenApi.OpenApiSchema
                 {
                     Type = Microsoft.OpenApi.JsonSchemaType.String,
+                    // A default, not an enum: the description must stay usable for clients generated from it for any deployment.
                     Default = System.Text.Json.Nodes.JsonValue.Create(served),
-                    Enum = [System.Text.Json.Nodes.JsonValue.Create(served)],
                 },
             });
         }
@@ -63,7 +63,7 @@ builder.Services.AddRateLimiter(options =>
     // Requests that reach no endpoint (the Swagger UI files are served by middleware) are limited by this one; everything else is
     // limited by the "client" policy on its endpoints, so health checks stay free.
     options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(httpContext =>
-        api.RateLimitPerMinute == 0 || !httpContext.Request.Path.StartsWithSegments("/swagger", StringComparison.OrdinalIgnoreCase)
+        api.RateLimitPerMinute == 0 || !httpContext.Request.Path.StartsWithSegments(SwaggerPath, StringComparison.OrdinalIgnoreCase)
             ? RateLimitPartition.GetNoLimiter("unlimited")
             : RateLimitPartition.GetFixedWindowLimiter(
                 "ui:" + ClientKey(httpContext.Connection.RemoteIpAddress),
@@ -122,7 +122,9 @@ app.Use(async (context, next) =>
     await next();
 });
 app.UseExceptionHandler();
-app.UseResponseCompression();
+app.UseWhen(
+    static context => !context.Request.Path.StartsWithSegments(SwaggerPath, StringComparison.OrdinalIgnoreCase),
+    static branch => branch.UseResponseCompression());
 app.UseRateLimiter();
 app.UseRequestTimeouts();
 
@@ -134,13 +136,14 @@ if (api.PublishOpenApi)
     // ingress path prefix.
     app.UseSwaggerUI(options =>
     {
-        options.RoutePrefix = "swagger";
+        options.RoutePrefix = SwaggerPath.TrimStart('/');
+        options.SupportedSubmitMethods(Swashbuckle.AspNetCore.SwaggerUI.SubmitMethod.Get);
         options.SwaggerEndpoint("../openapi/v1.json", "AVM balance indexer v1");
         options.DocumentTitle = "AVM balance indexer API";
         options.DisplayRequestDuration();
     });
 
-    // PathBase, so it also works behind an ingress that strips a path prefix.
+    // PathBase, so it also works behind an ingress that forwards a path prefix.
     app.MapGet("/", (HttpRequest request) => Results.Redirect($"{request.PathBase}/swagger/index.html"))
         .RequireRateLimiting("client")
         .ExcludeFromDescription();
@@ -207,6 +210,9 @@ app.Run();
 
 public partial class Program
 {
+    /// <summary>Where the Swagger UI lives; the UI, its rate limit and the compression exclusion all refer to it.</summary>
+    private const string SwaggerPath = "/swagger";
+
     /// <summary>
     /// The rate-limit identity of a client: IPv4-mapped IPv6 addresses count as the IPv4 address, and an IPv6 client is its /64 (the
     /// smallest block a subscriber normally owns), so rotating addresses inside it does not buy a fresh allowance.

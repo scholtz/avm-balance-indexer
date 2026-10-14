@@ -255,6 +255,40 @@ public sealed class ApiHardeningTests : IDisposable
         Assert.EndsWith("/avm-testnet", document.GetProperty("servers")[0].GetProperty("url").GetString(), StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("avm-testnet")]
+    [InlineData("/avm-testnet/")]
+    [InlineData("/a b")]
+    [InlineData("/a//b")]
+    [InlineData("/a?x=1")]
+    public void A_Malformed_Path_Prefix_Stops_The_Start_With_A_Clear_Message(string pathBase)
+    {
+        var error = Assert.ThrowsAny<Exception>(() => Create(settings: ("Api:PathBase", pathBase)));
+
+        Assert.Contains("Api:PathBase", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task The_Swagger_UI_Offers_Only_Get_Requests_And_Redirects_Without_The_Page_Name()
+    {
+        using var client = Create(null, followRedirects: false);
+
+        using var bare = await client.GetAsync(new Uri("/swagger", UriKind.Relative));
+        using var configuration = await client.GetAsync(new Uri("/swagger/index.js", UriKind.Relative));
+        using var bundleRequest = new HttpRequestMessage(HttpMethod.Get, new Uri("/swagger/swagger-ui-bundle.js", UriKind.Relative));
+        bundleRequest.Headers.AcceptEncoding.ParseAdd("gzip");
+        using var bundle = await client.SendAsync(bundleRequest);
+        using var dataRequest = new HttpRequestMessage(HttpMethod.Get, new Uri("/openapi/v1.json", UriKind.Relative));
+        dataRequest.Headers.AcceptEncoding.ParseAdd("gzip");
+        using var data = await client.SendAsync(dataRequest);
+
+        Assert.Equal(HttpStatusCode.MovedPermanently, bare.StatusCode);
+        Assert.Contains("\"supportedSubmitMethods\":[\"get\"]", await configuration.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        // The package ships the bundle gzip-compressed and serves it as such; the response compression middleware is not involved.
+        Assert.Equal(HttpStatusCode.OK, bundle.StatusCode);
+        Assert.Contains("gzip", data.Content.Headers.ContentEncoding);
+    }
+
     [Fact]
     public async Task The_Swagger_UI_Files_Are_Limited_Per_Client_Like_The_Data_Endpoints()
     {
