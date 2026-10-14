@@ -35,7 +35,6 @@ builder.Services.AddOpenApi(options => options.AddOperationTransformer((operatio
                 {
                     Type = Microsoft.OpenApi.JsonSchemaType.String,
                     Default = System.Text.Json.Nodes.JsonValue.Create(served),
-                    Enum = [System.Text.Json.Nodes.JsonValue.Create(served)],
                 },
             });
         }
@@ -59,6 +58,15 @@ builder.Services.AddRateLimiter(options =>
         context.HttpContext.Response.Headers.RetryAfter = Math.Max(1, wait).ToString(System.Globalization.CultureInfo.InvariantCulture);
         await context.HttpContext.Response.WriteAsJsonAsync(new ErrorResponse("Too many requests; slow down."), cancellationToken);
     };
+
+    // Requests that reach no endpoint (the Swagger UI files are served by middleware) are limited by this one; everything else is
+    // limited by the "client" policy on its endpoints, so health checks stay free.
+    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(httpContext =>
+        api.RateLimitPerMinute == 0 || !httpContext.Request.Path.StartsWithSegments("/swagger", StringComparison.Ordinal)
+            ? RateLimitPartition.GetNoLimiter("unlimited")
+            : RateLimitPartition.GetFixedWindowLimiter(
+                "ui:" + ClientKey(httpContext.Connection.RemoteIpAddress),
+                _ => new FixedWindowRateLimiterOptions { PermitLimit = api.RateLimitPerMinute, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
     options.AddPolicy("client", httpContext =>
         api.RateLimitPerMinute == 0
             ? RateLimitPartition.GetNoLimiter("unlimited")
@@ -128,20 +136,24 @@ if (api.PublishOpenApi)
         options.DefaultModelsExpandDepth(-1);
     });
 
-    // Relative, so it also works behind a path prefix.
-    app.MapGet("/", () => Results.Redirect("swagger/index.html")).ExcludeFromDescription();
+    // PathBase, so it also works behind an ingress that strips a path prefix.
+    app.MapGet("/", (HttpRequest request) => Results.Redirect($"{request.PathBase}/swagger/index.html"))
+        .RequireRateLimiting("client")
+        .ExcludeFromDescription();
 }
 else
 {
     app.MapGet(
         "/",
-        (ChainContext chain) => Results.Ok(new
+        (HttpRequest request, ChainContext chain) => Results.Ok(new
         {
             service = "avm-balance-indexer",
             chain = chain.Chain,
-            status = $"/v1/{chain.Chain}/status",
-            health = "/healthz/ready",
-        })).ExcludeFromDescription();
+            status = $"{request.PathBase}/v1/{chain.Chain}/status",
+            health = $"{request.PathBase}/healthz/ready",
+        }))
+        .RequireRateLimiting("client")
+        .ExcludeFromDescription();
 }
 
 // Liveness only proves the process responds; readiness also requires the database.

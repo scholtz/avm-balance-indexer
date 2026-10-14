@@ -23,7 +23,9 @@ public sealed class ApiHardeningTests : IDisposable
         }
     }
 
-    private HttpClient Create(IChainStorage? storage = null, params (string Key, string Value)[] settings)
+    private HttpClient Create(IChainStorage? storage = null, params (string Key, string Value)[] settings) => Create(storage, followRedirects: true, settings);
+
+    private HttpClient Create(IChainStorage? storage, bool followRedirects, params (string Key, string Value)[] settings)
     {
         var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
@@ -42,7 +44,7 @@ public sealed class ApiHardeningTests : IDisposable
             });
         });
         _factories.Add(factory);
-        return factory.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        return factory.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions { AllowAutoRedirect = followRedirects });
     }
 
     private static readonly Uri Status = new("/v1/algorand-testnet/status", UriKind.Relative);
@@ -221,7 +223,7 @@ public sealed class ApiHardeningTests : IDisposable
     [Fact]
     public async Task The_Root_Leads_To_A_Swagger_UI_That_Brings_Its_Own_Scripts()
     {
-        using var client = Create();
+        using var client = Create(null, followRedirects: false);
 
         using var root = await client.GetAsync(new Uri("/", UriKind.Relative));
         using var page = await client.GetAsync(new Uri("/swagger/index.html", UriKind.Relative));
@@ -229,15 +231,32 @@ public sealed class ApiHardeningTests : IDisposable
         using var configuration = await client.GetAsync(new Uri("/swagger/index.js", UriKind.Relative));
 
         Assert.Equal(HttpStatusCode.Redirect, root.StatusCode);
-        Assert.Equal("swagger/index.html", root.Headers.Location!.ToString());
+        Assert.Equal("/swagger/index.html", root.Headers.Location!.ToString());
         Assert.Equal(HttpStatusCode.OK, page.StatusCode);
         var html = await page.Content.ReadAsStringAsync();
         Assert.Contains("swagger-ui", html, StringComparison.Ordinal);
-        Assert.DoesNotContain("https://", html, StringComparison.Ordinal);
+        Assert.DoesNotMatch(@"(?:src|href)=""(?:https?:)?//", html);
         Assert.Equal(HttpStatusCode.OK, script.StatusCode);
         var configurationText = await configuration.Content.ReadAsStringAsync();
         Assert.Contains("\"url\":\"../openapi/v1.json\"", configurationText, StringComparison.Ordinal);
         Assert.Contains("\"tryItOutEnabled\":true", configurationText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task The_Swagger_UI_Files_Are_Limited_Per_Client_Like_The_Data_Endpoints()
+    {
+        using var client = Create(settings: ("Api:RateLimitPerMinute", "2"));
+
+        var statuses = new List<HttpStatusCode>();
+        for (var i = 0; i < 4; i++)
+        {
+            using var response = await client.GetAsync(new Uri("/swagger/swagger-ui.css", UriKind.Relative));
+            statuses.Add(response.StatusCode);
+        }
+
+        using var health = await client.GetAsync(new Uri("/healthz/live", UriKind.Relative));
+        Assert.Equal([HttpStatusCode.OK, HttpStatusCode.OK, HttpStatusCode.TooManyRequests, HttpStatusCode.TooManyRequests], statuses);
+        Assert.Equal(HttpStatusCode.OK, health.StatusCode);
     }
 
     [Fact]
@@ -257,9 +276,9 @@ public sealed class ApiHardeningTests : IDisposable
     {
         using var client = Create(settings: ("Api:PublishOpenApi", "false"));
 
-        var (status, body) = (await client.GetAsync(new Uri("/", UriKind.Relative))) is var response
-            ? (response.StatusCode, await response.Content.ReadFromJsonAsync<JsonElement>())
-            : default;
+        using var root = await client.GetAsync(new Uri("/", UriKind.Relative));
+        var status = root.StatusCode;
+        var body = await root.Content.ReadFromJsonAsync<JsonElement>();
         using var ui = await client.GetAsync(new Uri("/swagger/index.html", UriKind.Relative));
 
         Assert.Equal(HttpStatusCode.OK, status);
