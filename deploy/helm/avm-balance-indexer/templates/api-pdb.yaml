@@ -1,3 +1,4 @@
+{{- if .Values.api.podDisruptionBudget.enabled }}
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
@@ -7,3 +8,4 @@ spec:
   minAvailable: {{ .Values.api.podDisruptionBudget.minAvailable }}
   selector:
     matchLabels: {{- include "avm.selectorLabels" (merge (dict "component" "api") .) | nindent 6 }}
+{{- end }}

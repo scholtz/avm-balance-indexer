@@ -16,7 +16,6 @@ metadata:
   labels: {{- include "avm.labels" . | nindent 4 }}
     app.kubernetes.io/component: cassandra
 spec:
-  clusterIP: None
   ports:
     - name: cql
       port: 9042
@@ -24,15 +23,17 @@ spec:
   selector: {{- include "avm.selectorLabels" (merge (dict "component" "cassandra") .) | nindent 4 }}
 ---
 apiVersion: apps/v1
-kind: StatefulSet
+kind: Deployment
 metadata:
   name: {{ include "avm.fullname" . }}-cassandra
   labels: {{- include "avm.labels" . | nindent 4 }}
     app.kubernetes.io/component: cassandra
 spec:
   # One node: the data lives in one directory of one machine (hostPath), so a second replica could not share it.
+  # A Deployment is enough for that (and needs fewer rights than a StatefulSet); Recreate stops the old pod before the new one opens the directory.
   replicas: 1
-  serviceName: {{ include "avm.fullname" . }}-cassandra
+  strategy:
+    type: Recreate
   selector:
     matchLabels: {{- include "avm.selectorLabels" (merge (dict "component" "cassandra") .) | nindent 6 }}
   template:

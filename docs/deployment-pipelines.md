@@ -103,9 +103,9 @@ a Cassandra with login (keys `username` and `password`, `storage.cassandra.exist
 
 1. Add the secrets and the variable (1), prepare the cluster (2), push to `main`. The testnet workflow builds the images, installs the release and waits until the API,
    worker and Cassandra are ready (the first Cassandra start takes a few minutes; the wait is 25 minutes). The smoke test only warns, because DNS and the certificate can lag.
-2. Production: merge to `main`, then `git tag v0.1.0 && git push origin v0.1.0`. Approve the runs in the `mainnet` and `voi` environments. MainNet starts the backfill from round 0; plan disk and time
+2. Production: merge to `main`, then `git tag v1.0.0 && git push origin v1.0.0`. Approve the runs in the `mainnet` and `voi` environments. MainNet starts the backfill from round 0; plan disk and time
    (benchmark figures in the README) and consider your own archival nodes (`algorand.gossipHosts`).
-3. Roll back or redeploy: Actions, *Deploy production*, Run workflow, give an existing image tag (for example `v0.1.0`). No images are built.
+3. Roll back or redeploy: Actions, *Deploy production*, Run workflow, give an existing image tag (for example `v1.0.0`). No images are built.
 4. Look at it: `kubectl -n avm-balance-indexer get pods -l app.kubernetes.io/instance=testnet` and `kubectl -n avm-balance-indexer logs deploy/testnet-algorand-testnet-worker`.
 
 Upgrades follow the rules of [operations.md](operations.md) automatically: when the release already exists, the deploy job first upgrades the worker alone
@@ -113,7 +113,7 @@ Upgrades follow the rules of [operations.md](operations.md) automatically: when 
 seconds a worker restart takes. Deployments of one release never overlap (a run waits for the running one; of several waiting runs only the newest is kept, so start a rollback when nothing else is pending), testnet only ever deploys the head of `main`, and a production tag is refused unless CI succeeded on its commit.
 For a rollback give *Deploy production* the image tag; the chart and values come from the commit in it (or from `ref` for older tags such as `main-<sha7>`).
 
-Before anything changes the job checks every right in `deploy/rbac/deployer.yaml` that the chart and `helm --atomic` use and lists the missing ones. Only the NetworkPolicy is optional: a new release is installed without it (with a warning) when the account may not manage it, but an existing policy is never dropped, the job fails instead.
+Before anything changes the job checks every right in `deploy/rbac/deployer.yaml` that the chart and `helm --atomic` use and lists the missing ones. Only the NetworkPolicy and the PodDisruptionBudget are optional: a new release is installed without them (with a warning) when the account may not manage them, but an existing NetworkPolicy is never dropped, the job fails instead. Missing `delete` rights only produce a warning.
 A failed upgrade is rolled back by Helm (`--atomic`). Each production job (MainNet, then Voi) asks the environment's reviewers for its own approval. The pods need a namespace without Pod Security enforcement
 stricter than `privileged` for the Cassandra pod (it uses a hostPath volume and a root init container). Pre-release tags (`v1.2.3-rc1`) do not deploy.
 

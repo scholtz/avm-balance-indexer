@@ -14,7 +14,7 @@ on:
       version:
         description: Full version string, stored as the image label org.opencontainers.image.version
         type: string
-        default: ""
+        required: true
       tags:
         description: Image tags to push, one per line
         type: string
@@ -59,7 +59,21 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
+      # The first tag is the immutable one. When it exists already (testnet built this commit before the release tag) the other tags are put on that
+      # image instead of building again, so the bits that ran on testnet are the bits that go to production.
+      - name: Image of this commit already built?
+        id: existing
+        env:
+          NAMES: ${{ steps.names.outputs.list }}
+        run: |
+          first="$(head -n1 <<< "$NAMES")"
+          if docker buildx imagetools inspect "$first" > /dev/null 2>&1; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            args=(); while IFS= read -r name; do [ -n "$name" ] && [ "$name" != "$first" ] && args+=(-t "$name"); done <<< "$NAMES"
+            if [ ${#args[@]} -gt 0 ]; then docker buildx imagetools create "${args[@]}" "$first"; fi
+          fi
       - uses: docker/build-push-action@v7
+        if: steps.existing.outputs.found != 'true'
         with:
           context: .
           file: docker/Dockerfile.${{ matrix.component }}

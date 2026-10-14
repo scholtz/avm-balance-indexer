@@ -42,7 +42,7 @@ storage:
     # Secret with keys "username" and "password"
     existingSecret: ""
 
-# A single-node Cassandra started by this release, for clusters without a database operator.
+# A single-node Cassandra (Deployment, one pod) started by this release, for clusters without a database operator.
 # Needs storage.provider=Cassandra and storage.cassandra.replicationFactor=1. The data lives in a directory of one node.
 cassandra:
   embedded:
@@ -93,6 +93,7 @@ api:
     type: ClusterIP
     port: 80
   podDisruptionBudget:
+    enabled: true
     minAvailable: 1
 
 worker:
