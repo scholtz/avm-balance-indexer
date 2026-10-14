@@ -23,7 +23,8 @@ public sealed class OpenApiSpecTests
         var published = await PublishedSpecAsync();
         var path = SpecPath();
 
-        if (Environment.GetEnvironmentVariable("AVM_UPDATE_OPENAPI") == "1")
+        // Never on CI, so a stray variable cannot hide drift there.
+        if (Environment.GetEnvironmentVariable("AVM_UPDATE_OPENAPI") == "1" && Environment.GetEnvironmentVariable("CI") is null)
         {
             await File.WriteAllTextAsync(path, published + "\n");
         }

@@ -31,14 +31,21 @@ jobs:
           fetch-depth: 0
       - name: All manifests carry sdk/VERSION
         run: bash sdk/scripts/check-versions.sh
-      - name: A change of SDK code should raise the version
+      - name: A change of SDK code must raise the version
         if: github.event_name == 'pull_request'
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
+          ACTOR: ${{ github.actor }}
         run: |
           changed="$(git diff --name-only "$BASE"...HEAD -- sdk ':!sdk/**/*.md' ':!sdk/**/tests/**' ':!sdk/**/test/**' ':!sdk/**/examples/**' ':!sdk/go/client_test.go' ':!sdk/rust/tests/**')"
           if [ -n "$changed" ] && git diff --quiet "$BASE"...HEAD -- sdk/VERSION; then
-            echo "::warning title=SDK version::SDK code changed but sdk/VERSION did not; nothing is published until the version is raised (sdk/scripts/set-version.sh)."
+            # Dependency updates by Dependabot change no behaviour of their own and are released with the next bump.
+            if [ "$ACTOR" = "dependabot[bot]" ]; then
+              echo "::notice title=SDK version::Dependabot changed SDK files; the version is raised with the next change."
+            else
+              echo "::error title=SDK version::SDK code changed but sdk/VERSION did not, so nothing would be published. Raise it with sdk/scripts/set-version.sh (MAJOR breaking, MINOR feature, PATCH fix or regenerated code)."
+              exit 1
+            fi
           fi
       - uses: actions/setup-dotnet@v6
         with:

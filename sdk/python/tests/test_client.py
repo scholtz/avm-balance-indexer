@@ -178,6 +178,38 @@ def test_error_status_becomes_api_error_with_retry_after(server):
     assert caught.value.is_retryable
 
 
+def test_retry_after_may_be_an_http_date_and_nonsense_is_ignored(server):
+    from email.utils import formatdate
+    import time as clock
+
+    client = AvmBalanceIndexer.algorand_mainnet(base_url=server.url)
+    answers = {}
+    for label, value in (("date", formatdate(clock.time() + 30, usegmt=True)), ("inf", "inf"), ("soon", "soon")):
+        server.handler = lambda r, v=value: (429, {"error": "slow down"}, {"Retry-After": v})
+        with pytest.raises(ApiError) as caught:
+            client.status()
+        answers[label] = caught.value.retry_after_seconds
+
+    assert answers["date"] is not None and 0 < answers["date"] <= 30
+    assert answers["inf"] is None and answers["soon"] is None
+
+
+def test_argument_validation_errors_are_not_reported_as_decode_errors(server):
+    client = AvmBalanceIndexer.algorand_mainnet(base_url=server.url)
+    with pytest.raises(ValueError) as caught:
+        client.account_tokens("ADDRESS", cursor=123)
+    assert not isinstance(caught.value, ResponseDecodeError)
+    assert server.requests == []
+
+
+def test_a_redirect_is_followed(server):
+    server.handler = lambda r: (302, "", {"Location": "/moved"}) if r["path"] == "/v1/algorand-mainnet/status" else (
+        200, {"chain": "algorand-mainnet", "provider": "x", "state": "Following", "indexedRound": 1, "targetRound": 1, "lag": 0, "updatedAt": None}, {})
+    client = AvmBalanceIndexer.algorand_mainnet(base_url=server.url)
+
+    assert client.status().state == "Following"
+
+
 def test_not_found_and_non_json_body(server):
     server.handler = lambda r: (404, "nope", {})
     client = AvmBalanceIndexer.algorand_mainnet(base_url=server.url)

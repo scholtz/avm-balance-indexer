@@ -170,6 +170,33 @@ func TestErrorStatusBecomesAPIError(t *testing.T) {
 	}
 }
 
+func TestRetryAfterMayBeAnHTTPDateAndNonsenseIsIgnored(t *testing.T) {
+	var header string
+	server, _ := fakeServer(t, func(r *http.Request) (int, any, map[string]string) {
+		return 429, map[string]any{"error": "slow down"}, map[string]string{"Retry-After": header}
+	})
+	client, _ := avm.New(avm.AlgorandMainnet, &avm.Options{BaseURL: server.URL})
+	retryAfter := func(value string) time.Duration {
+		header = value
+		_, err := client.Status(context.Background())
+		var apiError *avm.APIError
+		if !errors.As(err, &apiError) {
+			t.Fatalf("expected APIError, got %v", err)
+		}
+		return apiError.RetryAfter
+	}
+
+	if got := retryAfter(time.Now().Add(30 * time.Second).UTC().Format(http.TimeFormat)); got <= 0 || got > 30*time.Second {
+		t.Errorf("an HTTP date gave %v", got)
+	}
+	if got := retryAfter("Inf"); got != 0 {
+		t.Errorf("Inf gave %v", got)
+	}
+	if got := retryAfter("soon"); got != 0 {
+		t.Errorf("nonsense gave %v", got)
+	}
+}
+
 func TestNotFoundAndPlainBody(t *testing.T) {
 	server, _ := fakeServer(t, func(r *http.Request) (int, any, map[string]string) { return 404, "nope", nil })
 	client, _ := avm.New(avm.AlgorandMainnet, &avm.Options{BaseURL: server.URL})

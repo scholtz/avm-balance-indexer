@@ -158,6 +158,24 @@ public sealed class ClientTests
     }
 
     [Fact]
+    public async Task Retry_After_May_Be_An_Http_Date_And_Nonsense_Is_Ignored()
+    {
+        async Task<TimeSpan?> RetryAfter(string header)
+        {
+            var handler = new FakeHandler(_ => Json(HttpStatusCode.TooManyRequests, new { error = "slow down" }, ("Retry-After", header)));
+            using var client = Client(handler);
+            var error = await Assert.ThrowsAsync<AvmBalanceIndexerApiException>(() => client.GetStatusAsync());
+            return error.RetryAfter;
+        }
+
+        var inThirtySeconds = await RetryAfter(DateTimeOffset.UtcNow.AddSeconds(30).ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+        Assert.NotNull(inThirtySeconds);
+        Assert.InRange(inThirtySeconds.Value.TotalSeconds, 1, 30);
+        Assert.Null(await RetryAfter("Infinity"));
+        Assert.Null(await RetryAfter("soon"));
+    }
+
+    [Fact]
     public async Task Not_Found_With_A_Plain_Body_Keeps_The_Body()
     {
         var handler = new FakeHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound) { Content = new StringContent("nope") });

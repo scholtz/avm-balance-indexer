@@ -125,6 +125,28 @@ async fn an_error_status_becomes_an_api_error_with_retry_after() {
 }
 
 #[tokio::test]
+async fn retry_after_may_be_an_http_date_and_nonsense_is_ignored() {
+    let server = MockServer::start().await;
+    let indexer = client(&server, ChainId::AlgorandMainnet);
+    let mut results = Vec::new();
+    for value in [httpdate::fmt_http_date(std::time::SystemTime::now() + Duration::from_secs(30)), "inf".to_owned(), "soon".to_owned()] {
+        server.reset().await;
+        Mock::given(path("/v1/algorand-mainnet/status"))
+            .respond_with(ResponseTemplate::new(429).insert_header("Retry-After", value.as_str()).set_body_json(json!({ "error": "slow down" })))
+            .mount(&server)
+            .await;
+        match indexer.status().await.unwrap_err() {
+            Error::Api { retry_after, .. } => results.push(retry_after),
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    assert!(results[0].is_some_and(|d| d > Duration::ZERO && d <= Duration::from_secs(30)));
+    assert_eq!(results[1], None);
+    assert_eq!(results[2], None);
+}
+
+#[tokio::test]
 async fn a_json_not_found_is_recognised() {
     let server = MockServer::start().await;
     Mock::given(path("/v1/algorand-mainnet/tokens/asa/1"))

@@ -66,7 +66,7 @@ The workflow `SDKs` regenerates everything in CI and fails when a committed gene
 ### Versions and publishing
 
 `sdk/VERSION` (MAJOR.MINOR.PATCH) is the version of **all** SDKs. `sdk/scripts/set-version.sh 1.1.0` writes it into every manifest, `sdk/scripts/check-versions.sh` verifies them (CI does).
-Raise it in the pull request that changes SDK behaviour: MAJOR for breaking changes of the SDK surface, MINOR for new features, PATCH for fixes and regenerated code.
+Raise it in every pull request that changes SDK files other than docs, tests and examples (the `SDKs` check fails otherwise): MAJOR for breaking changes of the SDK surface, MINOR for new features, PATCH for fixes and regenerated code.
 
 When a change under `sdk/` reaches `main`, the workflow `Publish SDKs` runs the tests and publishes every package whose version is not yet in its registry (npm, PyPI, NuGet, crates.io) and tags the Go module.
 Setting up the registry tokens is described in [docs/sdk-publishing.md](../docs/sdk-publishing.md).

@@ -308,7 +308,8 @@ public sealed class AvmBalanceIndexerClient : IDisposable
                 // Stopped early (break, error, cancellation): release the server-side scan, which counts against the server's limit of active scans.
                 try
                 {
-                    await CancelHolderScanAsync(scanId, CancellationToken.None).ConfigureAwait(false);
+                    using var release = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                    await CancelHolderScanAsync(scanId, release.Token).ConfigureAwait(false);
                 }
                 catch (Exception)
                 {
@@ -346,6 +347,28 @@ public sealed class AvmBalanceIndexerClient : IDisposable
         }
     }
 
+    /// <summary><c>Retry-After</c> is a number of seconds or an HTTP date; anything else (or an absurd value) is ignored.</summary>
+    private static double? ParseRetryAfter(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        double seconds;
+        if (!double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out seconds))
+        {
+            if (!DateTimeOffset.TryParse(value, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal, out var date))
+            {
+                return null;
+            }
+
+            seconds = (date - DateTimeOffset.UtcNow).TotalSeconds;
+        }
+
+        return seconds > 0 && seconds < 1e9 ? seconds : null;
+    }
+
     private static AvmBalanceIndexerApiException ToApiException(GeneratedApiException error)
     {
         var message = $"HTTP {error.StatusCode}";
@@ -368,7 +391,7 @@ public sealed class AvmBalanceIndexerClient : IDisposable
         }
 
         TimeSpan? retryAfter = null;
-        if (error.Headers.TryGetValue("Retry-After", out var values) && double.TryParse(values.FirstOrDefault(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var seconds) && seconds > 0 && seconds < 1e9)
+        if (error.Headers.TryGetValue("Retry-After", out var values) && ParseRetryAfter(values.FirstOrDefault()) is { } seconds)
         {
             retryAfter = TimeSpan.FromSeconds(seconds);
         }

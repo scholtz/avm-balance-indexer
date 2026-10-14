@@ -153,7 +153,7 @@ The public deployments limit each client address to 600 data requests per minute
 
 ## Using the generated types
 
-All response types are exported (`StatusResponse`, `HolderDto`, `HoldersResponse`, `ScanResponse`, …). The raw generated API classes live in `src/generated` and are an implementation detail.
+All response types are exported (`StatusResponse`, `HolderDto`, `HoldersResponse`, `ScanResponse`, …), and `ChainId` / `TokenKind` (values and types) are the generated ones; `Chains` is an alias of `ChainId`. The raw generated API classes live in `src/generated` and are an implementation detail.
 
 ## Development
 

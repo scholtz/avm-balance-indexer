@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -176,10 +177,7 @@ func toAPIError(response *http.Response, body []byte) *APIError {
 	if json.Unmarshal(body, &parsed) == nil && parsed.Error != "" {
 		message = parsed.Error
 	}
-	var retryAfter time.Duration
-	if seconds, err := strconv.ParseFloat(response.Header.Get("Retry-After"), 64); err == nil && seconds > 0 && seconds < 1e9 {
-		retryAfter = time.Duration(seconds * float64(time.Second))
-	}
+	retryAfter := parseRetryAfter(response.Header.Get("Retry-After"))
 	return &APIError{Status: response.StatusCode, Message: message, RetryAfter: retryAfter, Body: body}
 }
 
@@ -416,4 +414,24 @@ func (c *Client) ExportHolders(ctx context.Context, kind TokenKind, tokenID uint
 		case <-time.After(wait):
 		}
 	}
+}
+
+// parseRetryAfter reads a number of seconds or an HTTP date; anything else (or an absurd value) gives zero.
+func parseRetryAfter(value string) time.Duration {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	seconds, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		date, dateErr := http.ParseTime(value)
+		if dateErr != nil {
+			return 0
+		}
+		seconds = time.Until(date).Seconds()
+	}
+	if math.IsNaN(seconds) || seconds <= 0 || seconds >= 1e9 {
+		return 0
+	}
+	return time.Duration(seconds * float64(time.Second))
 }

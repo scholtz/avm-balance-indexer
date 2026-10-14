@@ -8,6 +8,8 @@ import {
   ScansApi,
   StatusApi,
   TokensApi,
+  ChainId,
+  TokenKind,
   type BalanceResponse,
   type EffectDto,
   type HistoryResponse,
@@ -21,23 +23,16 @@ import {
   type TokenResponse,
 } from "./generated/index.js";
 
-/** The chains an AVM Balance Indexer deployment can serve. */
-export const Chains = {
-  AlgorandMainnet: "algorand-mainnet",
-  AlgorandTestnet: "algorand-testnet",
-  Voi: "voi",
-} as const;
-export type ChainId = (typeof Chains)[keyof typeof Chains];
+/** The chains an AVM Balance Indexer deployment can serve: `Chains.Voi` is `"voi"` (generated from the API description). */
+export const Chains = ChainId;
+export { ChainId, TokenKind };
 
-/** Public deployments, used when no `baseUrl` is given. */
+/** Public deployments, used when no `baseUrl` is given. A new chain in the API description fails to compile here. */
 export const DEFAULT_BASE_URLS: Readonly<Record<ChainId, string>> = {
   "algorand-mainnet": "https://mainnet.balance-indexer.biatec.io",
   "algorand-testnet": "https://testnet.balance-indexer.biatec.io",
   voi: "https://voi.balance-indexer.biatec.io",
 };
-
-/** Token kinds: `algo` (native, token id 0), `asa` (Algorand Standard Asset, also ARC-20 Smart ASAs) and `arc200` (application token). */
-export type TokenKind = "algo" | "asa" | "arc200";
 
 /** Token ids and rounds: numbers, or bigint / numeric strings, up to 2^53 - 1 (the generated API types them as JavaScript numbers); larger values are rejected with a RangeError. */
 export type Id = number | bigint | string;
@@ -258,11 +253,6 @@ export class AvmBalanceIndexer {
     return new AvmBalanceIndexer({ ...options, chain: Chains.Voi });
   }
 
-  // The generated operations type `chain` and `kind` as per-operation string unions; the values are validated by the server.
-  private get c(): never {
-    return this.chain as never;
-  }
-
   private async call<T>(run: () => Promise<T>): Promise<T> {
     try {
       return await run();
@@ -286,14 +276,14 @@ export class AvmBalanceIndexer {
 
   /** Indexed round, target round, lag and ingestion state. */
   status(signal?: AbortSignal): Promise<StatusResponse> {
-    return this.call(() => this.status_.getChainStatus({ chain: this.c }, { signal }));
+    return this.call(() => this.status_.getChainStatus({ chain: this.chain }, { signal }));
   }
 
   /** Current holdings of an account (one page). */
   accountTokens(address: string, options: AccountTokensOptions = {}): Promise<HoldingsResponse> {
     return this.call(() =>
       this.balances.getAccountTokens(
-        { chain: this.c, address, includeZero: options.includeZero, cursor: options.cursor, limit: checkLimit(options.limit) },
+        { chain: this.chain, address, includeZero: options.includeZero, cursor: options.cursor, limit: checkLimit(options.limit) },
         { signal: options.signal },
       ),
     );
@@ -304,9 +294,9 @@ export class AvmBalanceIndexer {
     return this.call(() =>
       this.balances.getTokenBalance(
         {
-          chain: this.c,
+          chain: this.chain,
           address,
-          kind: kind as never,
+          kind,
           tokenId: toNumber(tokenId, "tokenId"),
           round: options.round === undefined ? undefined : toNumber(options.round, "round"),
         },
@@ -320,9 +310,9 @@ export class AvmBalanceIndexer {
     return this.call(() =>
       this.historyApi.getTokenHistory(
         {
-          chain: this.c,
+          chain: this.chain,
           address,
-          kind: kind as never,
+          kind,
           tokenId: toNumber(tokenId, "tokenId"),
           fromRound: options.fromRound === undefined ? undefined : toNumber(options.fromRound, "fromRound"),
           toRound: options.toRound === undefined ? undefined : toNumber(options.toRound, "toRound"),
@@ -339,8 +329,8 @@ export class AvmBalanceIndexer {
     return this.call(() =>
       this.holdersApi.getTokenHolders(
         {
-          chain: this.c,
-          kind: kind as never,
+          chain: this.chain,
+          kind,
           tokenId: toNumber(tokenId, "tokenId"),
           round: options.round === undefined ? undefined : toNumber(options.round, "round"),
           includeZero: options.includeZero,
@@ -354,7 +344,7 @@ export class AvmBalanceIndexer {
 
   /** Token metadata (symbol, name, decimals, standard). */
   token(kind: TokenKind, tokenId: Id, signal?: AbortSignal): Promise<TokenResponse> {
-    return this.call(() => this.tokens.getToken({ chain: this.c, kind: kind as never, tokenId: toNumber(tokenId, "tokenId") }, { signal }));
+    return this.call(() => this.tokens.getToken({ chain: this.chain, kind, tokenId: toNumber(tokenId, "tokenId") }, { signal }));
   }
 
   /** Starts an asynchronous export of every holder of a token. Prefer {@link exportHolders}. */
@@ -362,8 +352,8 @@ export class AvmBalanceIndexer {
     return this.call(() =>
       this.scans.createHolderScan(
         {
-          chain: this.c,
-          kind: kind as never,
+          chain: this.chain,
+          kind,
           tokenId: toNumber(tokenId, "tokenId"),
           scanRequest: {
             round: options.round === undefined ? null : toNumber(options.round, "round"),
@@ -377,17 +367,17 @@ export class AvmBalanceIndexer {
 
   /** State and progress of a scan. */
   holderScan(id: string, signal?: AbortSignal): Promise<ScanResponse> {
-    return this.call(() => this.scans.getHolderScan({ chain: this.c, id }, { signal }));
+    return this.call(() => this.scans.getHolderScan({ chain: this.chain, id }, { signal }));
   }
 
   /** A result page of a scan (readable while it runs). */
   holderScanPage(id: string, options: PageOptions = {}): Promise<ScanHoldersResponse> {
-    return this.call(() => this.scans.getHolderScanResult({ chain: this.c, id, cursor: options.cursor, limit: checkLimit(options.limit) }, { signal: options.signal }));
+    return this.call(() => this.scans.getHolderScanResult({ chain: this.chain, id, cursor: options.cursor, limit: checkLimit(options.limit) }, { signal: options.signal }));
   }
 
   /** Cancels a scan. */
   cancelHolderScan(id: string, signal?: AbortSignal): Promise<ScanResponse> {
-    return this.call(() => this.scans.cancelHolderScan({ chain: this.c, id }, { signal }));
+    return this.call(() => this.scans.cancelHolderScan({ chain: this.chain, id }, { signal }));
   }
 
   /** Every holding of an account, page by page. */
@@ -484,6 +474,14 @@ async function toApiError(response: Response): Promise<ApiError> {
   } catch {
     // Not JSON (for example a 504 from a proxy).
   }
-  const retryAfter = Number(response.headers.get("Retry-After"));
-  return new ApiError(response.status, message, Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : undefined, body);
+  return new ApiError(response.status, message, parseRetryAfter(response.headers.get("Retry-After")), body);
+}
+
+/** `Retry-After` is a number of seconds or an HTTP date; anything else (or an absurd value) is ignored. */
+function parseRetryAfter(value: string | null): number | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const seconds = /^\s*\d+(\.\d+)?\s*$/.test(value) ? Number(value) : (Date.parse(value) - Date.now()) / 1000;
+  return Number.isFinite(seconds) && seconds > 0 && seconds < 1e9 ? seconds : undefined;
 }

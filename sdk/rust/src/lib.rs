@@ -122,8 +122,12 @@ async fn convert(error: progenitor_client::Error<ErrorResponse>) -> Error {
 }
 
 fn retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
-    let seconds: f64 = headers.get("retry-after")?.to_str().ok()?.trim().parse().ok()?;
-    // "inf", NaN and absurd values from a misbehaving proxy are ignored rather than turned into a panic.
+    let value = headers.get("retry-after")?.to_str().ok()?.trim();
+    // A number of seconds or an HTTP date. "inf", NaN and absurd values from a misbehaving proxy are ignored rather than turned into a panic.
+    let seconds = match value.parse::<f64>() {
+        Ok(seconds) => seconds,
+        Err(_) => httpdate::parse_http_date(value).ok()?.duration_since(std::time::SystemTime::now()).ok()?.as_secs_f64(),
+    };
     (seconds > 0.0 && seconds < 1e9).then(|| Duration::from_secs_f64(seconds))
 }
 

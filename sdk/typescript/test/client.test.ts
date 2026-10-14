@@ -136,6 +136,21 @@ describe("errors", () => {
     );
   });
 
+  it("understands Retry-After as an HTTP date and ignores nonsense", async () => {
+    const answer = (retryAfter: string) => {
+      handler = (_request, response) => json(response, 429, { error: "slow down" }, { "Retry-After": retryAfter });
+      return AvmBalanceIndexer.algorandMainnet({ baseUrl }).status().then(
+        () => undefined,
+        (error: unknown) => (error as ApiError).retryAfterSeconds,
+      );
+    };
+
+    const inThirtySeconds = await answer(new Date(Date.now() + 30_000).toUTCString());
+    assert.ok(inThirtySeconds !== undefined && inThirtySeconds > 0 && inThirtySeconds <= 30);
+    assert.equal(await answer("Infinity"), undefined);
+    assert.equal(await answer("soon"), undefined);
+  });
+
   it("reports 404 as not found and keeps non-JSON bodies", async () => {
     handler = (_request, response) => {
       response.writeHead(404, { "content-type": "text/plain" });

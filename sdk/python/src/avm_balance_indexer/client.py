@@ -5,6 +5,8 @@ from __future__ import annotations
 import builtins
 import json
 import time
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Dict, Iterator, Mapping, Optional, Union
 
 import urllib3
@@ -155,7 +157,7 @@ class AvmBalanceIndexer:
 
         configuration = Configuration(host=self.base_url)
         # No hidden retries: errors surface at once (ApiError.retry_after_seconds tells when to retry).
-        configuration.retries = 0
+        configuration.retries = urllib3.Retry(total=None, connect=0, read=0, status=0, other=0, redirect=3)
         self._api_client = ApiClient(configuration)
         self._api_client.user_agent = "avm-balance-indexer-python-sdk"
         for name, value in (headers or {}).items():
@@ -204,6 +206,10 @@ class AvmBalanceIndexer:
         except urllib3.exceptions.HTTPError as error:
             raise IndexerConnectionError(f"Request to {self.base_url} failed: {error}") from error
         except ValueError as error:  # pydantic's ValidationError and JSON errors are ValueErrors
+            # The generated methods validate their own arguments first; that error is titled with the method (BalancesApi.get_account_tokens),
+            # a response that does not fit a model with the model (HoldingsResponse).
+            if getattr(error, "title", None) == getattr(function, "__qualname__", None):
+                raise ValueError(f"Invalid argument: {error}") from error
             raise ResponseDecodeError(f"Unexpected response from {self.base_url}: {error}") from error
 
     # -- single requests ------------------------------------------------------------------------
@@ -405,14 +411,24 @@ def _to_api_error(error: ApiException) -> ApiError:
     retry_after: Optional[float] = None
     headers: Optional[Dict[str, str]] = error.headers
     if headers:
-        raw = headers.get("Retry-After") or headers.get("retry-after")
-        try:
-            retry_after = float(raw) if raw is not None and 0 < float(raw) < 1e9 else None
-        except ValueError:
-            retry_after = None
+        retry_after = _parse_retry_after(headers.get("Retry-After") or headers.get("retry-after"))
     return ApiError(error.status or 0, message, retry_after, body)
 
 
 def _is_transport_failure(error: ApiException) -> bool:
     """The generated client reports a TLS failure or an unusable connection as status 0 (or none)."""
     return not error.status
+
+
+def _parse_retry_after(raw: Optional[str]) -> Optional[float]:
+    """``Retry-After`` is a number of seconds or an HTTP date; anything else (or an absurd value) is ignored."""
+    if not raw:
+        return None
+    try:
+        seconds = float(raw)
+    except ValueError:
+        try:
+            seconds = (parsedate_to_datetime(raw) - datetime.now(timezone.utc)).total_seconds()
+        except (TypeError, ValueError):
+            return None
+    return seconds if 0 < seconds < 1e9 else None

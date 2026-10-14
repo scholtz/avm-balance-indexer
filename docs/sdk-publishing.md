@@ -14,7 +14,7 @@ The workflow [`Publish SDKs`](../.github/workflows/sdk-publish.yml) runs when a 
 4. **Release**: a GitHub release `sdk-vX.Y.Z` with generated notes, once.
 
 So *code change merged* publishes only when the version was raised. Raise it in the same pull request: `sdk/scripts/set-version.sh 1.1.0` (all manifests) and commit. MAJOR = breaking change of the SDK surface,
-MINOR = new feature, PATCH = fix or regenerated code. A pull request that changes SDK code without raising the version gets a warning annotation. A published version is never overwritten.
+MINOR = new feature, PATCH = fix or regenerated code. A pull request that changes SDK code without raising the version fails the `SDKs` check (Dependabot updates are exempt). A published version is never overwritten.
 
 | Registry | Package | Secret / variable | Skipped without it |
 |---|---|---|---|
