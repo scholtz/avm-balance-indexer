@@ -15,7 +15,34 @@ var builder = WebApplication.CreateBuilder(args);
 
 var api = builder.Configuration.GetSection(ApiOptions.SectionName).Get<ApiOptions>() ?? new ApiOptions();
 Validator.ValidateObject(api, new ValidationContext(api), validateAllProperties: true);
-builder.Services.AddOpenApi();
+builder.Services.AddOpenApi(options => options.AddOperationTransformer((operation, context, _) =>
+{
+    // The handlers read the chain from the deployment, so the description would not mention the {chain} segment of the path at all and
+    // "Try it out" could not fill it. Declare it, fixed to the one chain this deployment serves.
+    if (context.Description.RelativePath?.Contains("{chain}", StringComparison.Ordinal) == true)
+    {
+        var served = context.ApplicationServices.GetRequiredService<ChainContext>().Chain;
+        operation.Parameters ??= [];
+        if (!operation.Parameters.Any(static p => p.Name == "chain"))
+        {
+            operation.Parameters.Add(new Microsoft.OpenApi.OpenApiParameter
+            {
+                Name = "chain",
+                In = Microsoft.OpenApi.ParameterLocation.Path,
+                Required = true,
+                Description = "The chain this deployment serves.",
+                Schema = new Microsoft.OpenApi.OpenApiSchema
+                {
+                    Type = Microsoft.OpenApi.JsonSchemaType.String,
+                    Default = System.Text.Json.Nodes.JsonValue.Create(served),
+                    Enum = [System.Text.Json.Nodes.JsonValue.Create(served)],
+                },
+            });
+        }
+    }
+
+    return Task.CompletedTask;
+}));
 builder.Services.AddResponseCompression(options =>
 {
     options.EnableForHttps = true;
@@ -88,6 +115,33 @@ app.UseRequestTimeouts();
 if (api.PublishOpenApi)
 {
     app.MapOpenApi().RequireRateLimiting("client");
+
+    // The UI ships its own scripts and styles (no CDN), and refers to the description relatively, so it also works behind an
+    // ingress path prefix.
+    app.UseSwaggerUI(options =>
+    {
+        options.RoutePrefix = "swagger";
+        options.SwaggerEndpoint("../openapi/v1.json", "AVM balance indexer v1");
+        options.DocumentTitle = "AVM balance indexer API";
+        options.DisplayRequestDuration();
+        options.EnableTryItOutByDefault();
+        options.DefaultModelsExpandDepth(-1);
+    });
+
+    // Relative, so it also works behind a path prefix.
+    app.MapGet("/", () => Results.Redirect("swagger/index.html")).ExcludeFromDescription();
+}
+else
+{
+    app.MapGet(
+        "/",
+        (ChainContext chain) => Results.Ok(new
+        {
+            service = "avm-balance-indexer",
+            chain = chain.Chain,
+            status = $"/v1/{chain.Chain}/status",
+            health = "/healthz/ready",
+        })).ExcludeFromDescription();
 }
 
 // Liveness only proves the process responds; readiness also requires the database.

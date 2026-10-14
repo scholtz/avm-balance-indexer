@@ -42,7 +42,7 @@ public sealed class ApiHardeningTests : IDisposable
             });
         });
         _factories.Add(factory);
-        return factory.CreateClient();
+        return factory.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
     }
 
     private static readonly Uri Status = new("/v1/algorand-testnet/status", UriKind.Relative);
@@ -216,6 +216,56 @@ public sealed class ApiHardeningTests : IDisposable
         Assert.True(responses.TryGetProperty("404", out _));
         Assert.True(responses.TryGetProperty("429", out _));
         Assert.Equal(HttpStatusCode.NotFound, disabled.StatusCode);
+    }
+
+    [Fact]
+    public async Task The_Root_Leads_To_A_Swagger_UI_That_Brings_Its_Own_Scripts()
+    {
+        using var client = Create();
+
+        using var root = await client.GetAsync(new Uri("/", UriKind.Relative));
+        using var page = await client.GetAsync(new Uri("/swagger/index.html", UriKind.Relative));
+        using var script = await client.GetAsync(new Uri("/swagger/swagger-ui-bundle.js", UriKind.Relative));
+        using var configuration = await client.GetAsync(new Uri("/swagger/index.js", UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.Redirect, root.StatusCode);
+        Assert.Equal("swagger/index.html", root.Headers.Location!.ToString());
+        Assert.Equal(HttpStatusCode.OK, page.StatusCode);
+        var html = await page.Content.ReadAsStringAsync();
+        Assert.Contains("swagger-ui", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("https://", html, StringComparison.Ordinal);
+        Assert.Equal(HttpStatusCode.OK, script.StatusCode);
+        var configurationText = await configuration.Content.ReadAsStringAsync();
+        Assert.Contains("\"url\":\"../openapi/v1.json\"", configurationText, StringComparison.Ordinal);
+        Assert.Contains("\"tryItOutEnabled\":true", configurationText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task The_Chain_Parameter_Defaults_To_The_Chain_The_Deployment_Serves()
+    {
+        using var client = Create();
+
+        var document = await client.GetFromJsonAsync<JsonElement>(new Uri("/openapi/v1.json", UriKind.Relative));
+
+        var parameters = document.GetProperty("paths").GetProperty("/v1/{chain}/status").GetProperty("get").GetProperty("parameters");
+        var chain = parameters.EnumerateArray().Single(static p => p.GetProperty("name").GetString() == "chain");
+        Assert.Equal("algorand-testnet", chain.GetProperty("schema").GetProperty("default").GetString());
+    }
+
+    [Fact]
+    public async Task Without_The_Description_The_Root_Is_A_Small_Landing_Document_Not_A_404()
+    {
+        using var client = Create(settings: ("Api:PublishOpenApi", "false"));
+
+        var (status, body) = (await client.GetAsync(new Uri("/", UriKind.Relative))) is var response
+            ? (response.StatusCode, await response.Content.ReadFromJsonAsync<JsonElement>())
+            : default;
+        using var ui = await client.GetAsync(new Uri("/swagger/index.html", UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.Equal("algorand-testnet", body.GetProperty("chain").GetString());
+        Assert.Equal("/v1/algorand-testnet/status", body.GetProperty("status").GetString());
+        Assert.Equal(HttpStatusCode.NotFound, ui.StatusCode);
     }
 
     private sealed class NotStartedStorage : InMemoryChainStorage
