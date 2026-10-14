@@ -27,8 +27,8 @@ commit when a release changes the API or the data, and use a matching release ta
 ## 1. GitHub secrets
 
 Create them under Settings, Secrets and variables, Actions. Repository secrets work for all workflows; to keep production apart, create the
-two **environments** `testnet` and `production` (Settings, Environments) and put `KUBE_CONFIG` into each (use a different kube config if the clusters differ).
-On the `production` environment enable *Required reviewers* so that a release tag waits for an approval before it touches the cluster.
+the **environments** `testnet`, `mainnet` and `voi` (Settings, Environments; the workflows use the one named like the release) and put `KUBE_CONFIG` into each (use a different kube config if the clusters differ).
+On `mainnet` and `voi` enable *Required reviewers* so that a release tag waits for an approval before it touches the cluster.
 
 | Secret | Used by | Content |
 |---|---|---|
@@ -38,7 +38,7 @@ On the `production` environment enable *Required reviewers* so that a release ta
 | `ALGOD_TOKEN_TESTNET`, `ALGOD_TOKEN_MAINNET`, `ALGOD_TOKEN_VOI` | deploy, optional | API token of your own algod node for that chain (section 3). |
 | `KUBE_CONFIG` | deploy | Kube config file of the deployer account (section 2), either the YAML itself or its base64 encoding. |
 
-One **variable** (not a secret; Settings, Secrets and variables, Actions, Variables): `CASSANDRA_NODE`, the name of the node (`kubectl get nodes`) that owns
+One **variable** (a secret works too; Settings, Secrets and variables, Actions): `CASSANDRA_NODE`, the name of the node (`kubectl get nodes`) that owns
 `/mnt/nvme1/avm-balance-indexer`. The chart pins the Cassandra pods to it and refuses to render without it, because on any other node the hostPath would be created empty and a new database would be indexed.
 
 Docker Hub creates the repositories `avm-balance-indexer-api` and `avm-balance-indexer-worker` on the first push (create them first if your
@@ -90,7 +90,7 @@ Nothing in the cluster is edited by hand: the deploy job creates and updates eve
 |---|---|---|
 | `<release>-dockerhub-pull`, only when the GitHub secret exists | `DOCKERHUB_USERNAME` + `DOCKERHUB_PULL_TOKEN` | pulling the images from private Docker Hub repositories (`imagePullSecrets`); public repositories need nothing |
 | `<release>-algod` (key `token`), only when the GitHub secret exists | `DOCKERHUB_PULL_TOKEN` | deploy, optional | A second, **read-only** Docker Hub access token; set it only when the repositories are private. Stored in the cluster as the image pull secret. |
-| `ALGOD_TOKEN_TESTNET`, `ALGOD_TOKEN_MAINNET`, `ALGOD_TOKEN_VOI` | an algod node that needs an API token (`algorand.existingSecret`); set the node address in the Actions variable `ALGOD_URL_TESTNET` / `_MAINNET` / `_VOI` (without them the chain's public endpoint is used and no token is needed) |
+| `ALGOD_TOKEN_TESTNET`, `ALGOD_TOKEN_MAINNET`, `ALGOD_TOKEN_VOI` | an algod node that needs an API token (`algorand.existingSecret`); set the node address in the Actions variable or secret `ALGOD_URL_TESTNET` / `_MAINNET` / `_VOI` (without them the chain's public endpoint is used and no token is needed) |
 | Helm release state | Helm itself | `sh.helm.release.*` Secrets, written with the deployer's rights |
 
 The embedded Cassandra has no login and needs no Secret; certificates come from cert-manager (the `ClusterIssuer` of `ingress.tls.clusterIssuer`). The namespace is created by the job when it is missing and the kube config may do so;
@@ -104,7 +104,7 @@ a Cassandra with login (keys `username` and `password`, `storage.cassandra.exist
 
 1. Add the secrets and the variable (1), prepare the cluster (2), push to `main`. The testnet workflow builds the images, installs the release and waits until the API,
    worker and Cassandra are ready (the first Cassandra start takes a few minutes; the wait is 25 minutes). The smoke test only warns, because DNS and the certificate can lag.
-2. Production: merge to `main`, then `git tag v0.1.0 && git push origin v0.1.0`. Approve the run in the `production` environment. MainNet starts the backfill from round 0; plan disk and time
+2. Production: merge to `main`, then `git tag v0.1.0 && git push origin v0.1.0`. Approve the runs in the `mainnet` and `voi` environments. MainNet starts the backfill from round 0; plan disk and time
    (benchmark figures in the README) and consider your own archival nodes (`algorand.gossipHosts`).
 3. Roll back or redeploy: Actions, *Deploy production*, Run workflow, give an existing image tag (for example `v0.1.0`). No images are built.
 4. Look at it: `kubectl -n avm-balance-indexer get pods -l app.kubernetes.io/instance=testnet` and `kubectl -n avm-balance-indexer logs deploy/testnet-algorand-testnet-worker`.
