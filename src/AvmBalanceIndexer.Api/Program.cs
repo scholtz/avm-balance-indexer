@@ -23,34 +23,7 @@ builder.Services.AddOpenApi(options =>
         document.Servers = [new Microsoft.OpenApi.OpenApiServer { Url = string.IsNullOrEmpty(api.PathBase) ? "/" : api.PathBase }];
         return Task.CompletedTask;
     });
-    options.AddOperationTransformer((operation, context, _) =>
-{
-    // The handlers read the chain from the deployment, so the description would not mention the {chain} segment of the path at all and
-    // "Try it out" could not fill it. Declare it, fixed to the one chain this deployment serves.
-    if (context.Description.RelativePath?.Contains("{chain}", StringComparison.Ordinal) == true)
-    {
-        var served = context.ApplicationServices.GetRequiredService<ChainContext>().Chain;
-        operation.Parameters ??= [];
-        if (!operation.Parameters.Any(static p => p.Name == "chain"))
-        {
-            operation.Parameters.Add(new Microsoft.OpenApi.OpenApiParameter
-            {
-                Name = "chain",
-                In = Microsoft.OpenApi.ParameterLocation.Path,
-                Required = true,
-                Description = "The chain this deployment serves.",
-                Schema = new Microsoft.OpenApi.OpenApiSchema
-                {
-                    Type = Microsoft.OpenApi.JsonSchemaType.String,
-                    // A default, not an enum: the description must stay usable for clients generated from it for any deployment.
-                    Default = System.Text.Json.Nodes.JsonValue.Create(served),
-                },
-            });
-        }
-    }
-
-    return Task.CompletedTask;
-    });
+    options.AddOperationTransformer<ChainParameterTransformer>();
 });
 builder.Services.AddResponseCompression(options =>
 {
@@ -71,18 +44,19 @@ builder.Services.AddRateLimiter(options =>
 
     // Requests that reach no endpoint (the Swagger UI files are served by middleware) are limited by this one; everything else is
     // limited by the "client" policy on its endpoints, so health checks stay free.
-    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(httpContext =>
-        api.RateLimitPerMinute == 0 || !httpContext.Request.Path.StartsWithSegments(SwaggerPath, StringComparison.OrdinalIgnoreCase)
-            ? RateLimitPartition.GetNoLimiter("unlimited")
-            : RateLimitPartition.GetFixedWindowLimiter(
-                "ui:" + ClientKey(httpContext.Connection.RemoteIpAddress),
-                _ => new FixedWindowRateLimiterOptions { PermitLimit = api.RateLimitPerMinute, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
-    options.AddPolicy("client", httpContext =>
+    // One definition of "the limit" for both, so they cannot drift apart.
+    RateLimitPartition<string> PerClient(string key) =>
         api.RateLimitPerMinute == 0
             ? RateLimitPartition.GetNoLimiter("unlimited")
             : RateLimitPartition.GetFixedWindowLimiter(
-                ClientKey(httpContext.Connection.RemoteIpAddress),
-                _ => new FixedWindowRateLimiterOptions { PermitLimit = api.RateLimitPerMinute, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+                key,
+                _ => new FixedWindowRateLimiterOptions { PermitLimit = api.RateLimitPerMinute, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 });
+
+    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(httpContext =>
+        httpContext.Request.Path.StartsWithSegments(SwaggerPath, StringComparison.OrdinalIgnoreCase)
+            ? PerClient("ui:" + ClientKey(httpContext.Connection.RemoteIpAddress))
+            : RateLimitPartition.GetNoLimiter("unlimited"));
+    options.AddPolicy("client", httpContext => PerClient(ClientKey(httpContext.Connection.RemoteIpAddress)));
 });
 if (api.TrustForwardedHeaders)
 {
@@ -139,6 +113,8 @@ app.Use(async (context, next) =>
     await next();
 });
 app.UseExceptionHandler();
+// The package serves its bundle precompressed (Content-Encoding set), but only to clients that accept gzip; the others would make the
+// compression middleware recompress megabytes of static files on every request.
 app.UseWhen(
     static context => !context.Request.Path.StartsWithSegments(SwaggerPath, StringComparison.OrdinalIgnoreCase),
     static branch => branch.UseResponseCompression());

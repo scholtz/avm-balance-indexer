@@ -86,7 +86,8 @@ api:
   forwardedHeadersLimit: 1
   # Serve the OpenAPI description at /openapi/v1.json and the Swagger UI at /swagger (the root redirects there).
   publishOpenApi: true
-  # Path prefix the ingress forwards without stripping it (for example /algorand-testnet). Empty serves from the root.
+  # Path prefix the ingress forwards without stripping it (for example /algorand-testnet); the chart's own ingress then routes that path.
+  # Empty serves from the root.
   pathBase: ""
   resources:
     requests: { cpu: 250m, memory: 256Mi }

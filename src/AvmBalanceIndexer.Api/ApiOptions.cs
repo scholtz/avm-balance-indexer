@@ -31,7 +31,10 @@ public sealed class ApiOptions
     [Range(1, 10)]
     public int ForwardedHeadersLimit { get; set; } = 1;
 
-    /// <summary>Serve the OpenAPI description at <c>/openapi/v1.json</c>.</summary>
+    /// <summary>
+    /// Serve the OpenAPI description at <c>/openapi/v1.json</c> and the Swagger UI at <c>/swagger</c> (the root redirects there). When off, the root
+    /// answers a small JSON landing document and neither exists.
+    /// </summary>
     public bool PublishOpenApi { get; set; } = true;
 
     /// <summary>

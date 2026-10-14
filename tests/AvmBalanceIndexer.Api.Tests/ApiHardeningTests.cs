@@ -253,6 +253,10 @@ public sealed class ApiHardeningTests : IDisposable
         Assert.Equal("/avm-testnet/swagger/index.html", root.Headers.Location!.ToString());
         Assert.Equal(HttpStatusCode.OK, page.StatusCode);
         Assert.Equal("/avm-testnet", document.GetProperty("servers")[0].GetProperty("url").GetString());
+
+        // A request without the prefix (a port-forward straight to the pod) is served as well.
+        using var unprefixed = await client.GetAsync(new Uri("/swagger/index.html", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.OK, unprefixed.StatusCode);
     }
 
     [Theory]
@@ -300,8 +304,9 @@ public sealed class ApiHardeningTests : IDisposable
     {
         using var client = Create(settings: ("Api:RateLimitPerMinute", "2"));
 
+        // Six requests span at most two one-minute windows, so at least two of them are over the limit whatever the clock does.
         var statuses = new List<HttpStatusCode>();
-        for (var i = 0; i < 4; i++)
+        for (var i = 0; i < 6; i++)
         {
             // Mixed case reaches the same files, so it must be limited the same way.
             using var response = await client.GetAsync(new Uri(i % 2 == 0 ? "/swagger/swagger-ui.css" : "/SWAGGER/swagger-ui.css", UriKind.Relative));
@@ -309,7 +314,7 @@ public sealed class ApiHardeningTests : IDisposable
         }
 
         using var health = await client.GetAsync(new Uri("/healthz/live", UriKind.Relative));
-        Assert.Equal([HttpStatusCode.OK, HttpStatusCode.OK, HttpStatusCode.TooManyRequests, HttpStatusCode.TooManyRequests], statuses);
+        Assert.True(statuses.Count(static s => s == HttpStatusCode.TooManyRequests) >= 2, string.Join(", ", statuses));
         Assert.Equal(HttpStatusCode.OK, health.StatusCode);
     }
 
