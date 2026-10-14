@@ -122,7 +122,7 @@ match indexer.token(TokenKind::Asa, 123).await {
 }
 ```
 
-`error.is_retryable()` is true for 429, 503 and 504. Invalid arguments (a `limit` outside 1 to 1000) return `Error::InvalidArgument` before any request is sent. An error answer that is not the API's JSON (for example an HTML page of a
+`error.is_retryable()` is true for 429, 503 and 504, for a failed connection and for an answer that is not the documented JSON (a gateway's HTML error page: its status cannot be reported here, so it is treated as worth a retry). Invalid arguments (a `limit` outside 1 to 1000) return `Error::InvalidArgument` before any request is sent. An error answer that is not the API's JSON (for example an HTML page of a
 proxy) is `Error::Api` with `body` for undeclared statuses and `Error::Decode` for the declared ones (400, 404, 429, 503, 504 without JSON).
 The SDK does **not** retry on its own. The public deployments limit each client address to 600 data requests per minute.
 

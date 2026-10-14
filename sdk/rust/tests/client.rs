@@ -46,6 +46,14 @@ fn a_custom_base_url_is_trimmed() {
 }
 
 #[test]
+fn a_relative_or_non_http_base_url_is_rejected_when_building() {
+    for url in ["indexer.example.com", "/api", "ftp://indexer.test", "localhost:8080"] {
+        let result = AvmBalanceIndexer::builder(ChainId::Voi).base_url(url).build();
+        assert!(matches!(result, Err(Error::InvalidArgument(_))), "{url} was accepted");
+    }
+}
+
+#[test]
 fn an_invalid_header_is_rejected_when_building() {
     let result = AvmBalanceIndexer::builder(ChainId::Voi).header("bad name", "x").build();
     assert!(matches!(result, Err(Error::InvalidArgument(_))));
@@ -178,6 +186,7 @@ async fn a_declared_error_status_without_json_is_a_decode_error() {
     let error = client(&server, ChainId::AlgorandMainnet).token(TokenKind::Asa, 1).await.unwrap_err();
 
     assert!(matches!(error, Error::Decode(_)));
+    assert!(error.is_retryable(), "a gateway's HTML error page is worth a retry");
 }
 
 #[tokio::test]

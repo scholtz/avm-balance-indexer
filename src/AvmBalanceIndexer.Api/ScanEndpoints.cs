@@ -148,7 +148,8 @@ public static class ScanEndpoints
 
         // The scan can finish between the two reads: the store then answers with the last rows and no cursor. Report the state as of after
         // the page, otherwise the page would say "not complete" and have no cursor to continue from.
-        if (page.NextCursor is null && !job.IsFinished && await jobs.GetJobAsync(parsed, cancellationToken).ConfigureAwait(false) is { } fresh)
+        // Only for a page with rows: an empty page without a cursor of a running scan means "nothing yet", and rows may be appended after it.
+        if (page.NextCursor is null && page.Items.Count > 0 && !job.IsFinished && await jobs.GetJobAsync(parsed, cancellationToken).ConfigureAwait(false) is { } fresh)
         {
             job = fresh;
         }

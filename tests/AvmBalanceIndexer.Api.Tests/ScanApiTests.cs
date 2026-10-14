@@ -91,7 +91,7 @@ public sealed class ScanApiTests : IAsyncLifetime
     }
 
     /// <summary>A store whose scan looks Running when the endpoint reads the job first and is Completed when the page has been read.</summary>
-    private sealed class FinishingDuringReadScanStore(IScanJobStore inner) : IScanJobStore
+    private sealed class FinishingDuringReadScanStore(IScanJobStore inner, int rows = 2) : IScanJobStore
     {
         private int _reads;
 
@@ -102,7 +102,7 @@ public sealed class ScanApiTests : IAsyncLifetime
                 cancellationToken);
 
         public Task<Page<Holding>> GetResultAsync(Guid id, string? cursor, int limit, CancellationToken cancellationToken) =>
-            Task.FromResult(new Page<Holding>([Row(0), Row(1)], null, 2));
+            Task.FromResult(new Page<Holding>([.. Enumerable.Range(0, rows).Select(Row)], null, 2));
 
         public Task CreateAsync(ScanJob job, CancellationToken cancellationToken) => inner.CreateAsync(job, cancellationToken);
 
@@ -137,6 +137,20 @@ public sealed class ScanApiTests : IAsyncLifetime
         Assert.Equal(JsonValueKind.Null, page.GetProperty("nextCursor").ValueKind);
         Assert.Equal("Completed", page.GetProperty("state").GetString());
         Assert.True(page.GetProperty("complete").GetBoolean());
+    }
+
+    [Fact]
+    public async Task An_Empty_Page_Of_A_Running_Scan_Is_Not_Reported_Complete()
+    {
+        var (_, created) = await PostAsync(TokenScans);
+        var id = created.GetProperty("id").GetGuid();
+        Start(maxActive: 20, scanStore: new FinishingDuringReadScanStore(_storage, rows: 0));
+
+        var (_, page) = await GetAsync($"/v1/algorand-testnet/scans/{id}/holders");
+
+        // Rows may be appended after an empty page: the reader has to ask again.
+        Assert.Equal(0, page.GetProperty("items").GetArrayLength());
+        Assert.False(page.GetProperty("complete").GetBoolean());
     }
 
     [Fact]

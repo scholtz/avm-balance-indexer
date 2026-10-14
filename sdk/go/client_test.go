@@ -107,6 +107,14 @@ func TestCustomBaseURLKeepsItsPrefix(t *testing.T) {
 	}
 }
 
+func TestARelativeOrNonHTTPBaseURLIsRejected(t *testing.T) {
+	for _, base := range []string{"indexer.example.com", "/api", "localhost:8080", "ftp://indexer.test"} {
+		if _, err := avm.New(avm.Voi, &avm.Options{BaseURL: base}); !errors.Is(err, avm.ErrInvalidArgument) {
+			t.Errorf("%q: expected ErrInvalidArgument, got %v", base, err)
+		}
+	}
+}
+
 func TestUnknownChainIsRejected(t *testing.T) {
 	if _, err := avm.New(avm.ChainId("solana"), nil); err == nil {
 		t.Fatal("expected an error")

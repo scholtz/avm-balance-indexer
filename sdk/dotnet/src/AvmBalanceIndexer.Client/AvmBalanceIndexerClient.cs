@@ -31,7 +31,7 @@ public sealed class AvmBalanceIndexerOptions
     /// <summary>Extra headers on every request.</summary>
     public IDictionary<string, string> Headers { get; } = new Dictionary<string, string>();
 
-    /// <summary>Timeout of a request when the SDK creates the <see cref="HttpClient"/> (ignored when you pass your own). Default 30 seconds.</summary>
+    /// <summary>Timeout of a request when the SDK creates the <see cref="HttpClient"/> (ignored when you pass your own). Default 30 seconds; zero or negative disables it.</summary>
     public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(30);
 }
 
@@ -114,7 +114,7 @@ public sealed class AvmBalanceIndexerClient : IDisposable
         // A HttpClient of the caller is never modified (it may be shared and may have sent requests already): the address and the headers
         // are applied to each request instead (GeneratedClient.Hooks.cs).
         _ownsHttpClient = options.HttpClient is null;
-        _http = options.HttpClient ?? new HttpClient { Timeout = options.Timeout };
+        _http = options.HttpClient ?? new HttpClient { Timeout = options.Timeout > TimeSpan.Zero ? options.Timeout : Timeout.InfiniteTimeSpan };
         var headers = new Dictionary<string, string>(options.Headers);
         foreach (var (name, value) in headers)
         {

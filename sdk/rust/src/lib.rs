@@ -70,9 +70,10 @@ impl Error {
         matches!(self, Error::Api { status: 404, .. })
     }
 
-    /// Rate limited or nothing indexed yet: retry after `retry_after`.
+    /// Worth retrying after a pause: rate limited or nothing indexed yet (429, 503, 504, with `retry_after`), a connection that failed, or
+    /// an answer that is not the documented JSON. The last one includes the HTML error page of a gateway, whose status this SDK cannot report.
     pub fn is_retryable(&self) -> bool {
-        matches!(self, Error::Api { status: 429 | 503 | 504, .. })
+        matches!(self, Error::Api { status: 429 | 503 | 504, .. } | Error::Connection(_) | Error::Decode(_))
     }
 }
 
@@ -234,6 +235,10 @@ impl AvmBalanceIndexerBuilder {
     /// Creates the client.
     pub fn build(self) -> Result<AvmBalanceIndexer> {
         let base_url = self.base_url.unwrap_or_else(|| default_base_url(self.chain).to_owned()).trim_end_matches('/').to_owned();
+        match reqwest::Url::parse(&base_url) {
+            Ok(url) if matches!(url.scheme(), "http" | "https") && url.has_host() => {}
+            _ => return Err(Error::InvalidArgument(format!("the base URL must be an absolute http or https URL (got {base_url:?})"))),
+        }
         let client = match self.http_client {
             Some(client) => client,
             None => {
@@ -477,9 +482,10 @@ impl AvmBalanceIndexer {
                         }
                         // An empty page (caught up with a running scan) or no cursor to continue from (for example the last page of a scan that
                         // failed): look at the scan and wait before the next read. The cursor of the previous page is kept.
-                        let look = page.items.is_empty() || page.next_cursor.is_none();
-                        let last_page_without_cursor = !page.items.is_empty() && page.next_cursor.is_none();
-                        let cursor = page.next_cursor.or(cursor);
+                        let next = page.next_cursor.filter(|next| !next.is_empty());
+                        let look = page.items.is_empty() || next.is_none();
+                        let last_page_without_cursor = !page.items.is_empty() && next.is_none();
+                        let cursor = next.or(cursor);
                         Ok(Some((page.items, Phase::Reading { guard, cursor, look, last_page_without_cursor })))
                     }
                 }

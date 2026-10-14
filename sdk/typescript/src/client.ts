@@ -208,6 +208,9 @@ export class AvmBalanceIndexer {
       throw new RangeError(`Unknown chain "${String(this.chain)}"; use one of ${Object.values(Chains).join(", ")}`);
     }
     this.baseUrl = (options.baseUrl ?? DEFAULT_BASE_URLS[this.chain]).replace(/\/+$/, "");
+    if (!URL.canParse(this.baseUrl) || !/^https?:$/.test(new URL(this.baseUrl).protocol)) {
+      throw new RangeError(`baseUrl must be an absolute http or https URL (got "${this.baseUrl}")`);
+    }
     const timeoutMs = options.timeoutMs ?? 30_000;
     const inner = options.fetch ?? ((input: RequestInfo | URL, init?: RequestInit) => fetch(input, init));
     const configuration = new Configuration({

@@ -100,6 +100,12 @@ def test_custom_base_url_is_honoured_and_trimmed():
     assert AvmBalanceIndexer(chain=VOI, base_url="https://my.example.com/indexer//").base_url == "https://my.example.com/indexer"
 
 
+@pytest.mark.parametrize("url", ["indexer.example.com", "/api", "localhost:8080", "ftp://indexer.test"])
+def test_a_relative_or_non_http_base_url_is_rejected(url):
+    with pytest.raises(ValueError):
+        AvmBalanceIndexer(base_url=url)
+
+
 def test_unknown_chain_is_rejected():
     with pytest.raises(ValueError):
         AvmBalanceIndexer(chain="solana")

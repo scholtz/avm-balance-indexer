@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -75,6 +76,9 @@ func New(chain ChainId, options *Options) (*Client, error) {
 	headers := map[string]string{"User-Agent": "avm-balance-indexer-go-sdk"}
 	for name, value := range options.Headers {
 		headers[name] = value
+	}
+	if parsed, err := url.Parse(baseURL); err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return nil, fmt.Errorf("%w: the base URL must be an absolute http or https URL (got %q)", ErrInvalidArgument, baseURL)
 	}
 	api, err := NewClient(baseURL, WithHTTPClient(doer), WithRequestEditorFn(func(_ context.Context, request *http.Request) error {
 		for name, value := range headers {

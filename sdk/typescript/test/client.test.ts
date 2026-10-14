@@ -70,6 +70,12 @@ describe("defaults", () => {
     assert.equal(new AvmBalanceIndexer({ chain: Chains.Voi, baseUrl: "https://my.example.com/indexer//" }).baseUrl, "https://my.example.com/indexer");
   });
 
+  it("rejects a relative or non-http base URL", () => {
+    for (const baseUrl of ["indexer.example.com", "/api", "localhost:8080", "ftp://indexer.test"]) {
+      assert.throws(() => new AvmBalanceIndexer({ baseUrl }), RangeError, baseUrl);
+    }
+  });
+
   it("rejects an unknown chain", () => {
     assert.throws(() => new AvmBalanceIndexer({ chain: "solana" as never }), RangeError);
   });

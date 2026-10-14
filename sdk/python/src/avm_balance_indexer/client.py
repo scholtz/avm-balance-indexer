@@ -7,6 +7,7 @@ import json
 import time
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
+from urllib.parse import urlparse
 from typing import Dict, Iterator, Mapping, Optional, Union
 
 import urllib3
@@ -153,6 +154,9 @@ class AvmBalanceIndexer:
             raise ValueError(f"Unknown chain {chain!r}; use one of {', '.join(CHAINS)}")
         self.chain = chain
         self.base_url = (base_url or DEFAULT_BASE_URLS[chain]).rstrip("/")
+        parsed = urlparse(self.base_url)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            raise ValueError(f"base_url must be an absolute http or https URL (got {self.base_url!r})")
         self.timeout = timeout
 
         configuration = Configuration(host=self.base_url)

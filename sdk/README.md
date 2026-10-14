@@ -71,6 +71,11 @@ Raise it in every pull request that changes SDK files other than docs, tests and
 When a change under `sdk/` reaches `main`, the workflow `Publish SDKs` runs the tests and publishes every package whose version is not yet in its registry (npm, PyPI, NuGet, crates.io) and tags the Go module.
 Setting up the registry tokens is described in [docs/sdk-publishing.md](../docs/sdk-publishing.md).
 
+### Good to know
+
+- A holder export starts a scan on the server before it reads anything. If the request that starts it is aborted or times out after the server accepted it, the SDK never learns the id and cannot cancel it; such a scan ends by itself (see `Scans:Retention` in the README) and counts against `Scans:MaxActive` until then.
+- The Rust SDK cannot report the status of an error answer that is not the API's JSON (a gateway's HTML page); it surfaces it as `Error::Decode`, which counts as retryable.
+
 ### Tests
 
 Every SDK is tested against a local mock server (no network): default URLs, custom base URL and headers, query serialisation, error mapping, timeouts, pagination with a pinned round and the scan export.

@@ -11,6 +11,7 @@ check() { # name found
 }
 
 check typescript/package.json "$(sed -nE 's/^  "version": "([^"]+)".*/\1/p' "$sdk_dir/typescript/package.json" | head -1)"
+check typescript/package-lock.json "$(sed -nE 's/^  "version": "([^"]+)".*/\1/p' "$sdk_dir/typescript/package-lock.json" | head -1)"
 check python/pyproject.toml "$(sed -nE 's/^version = "([^"]+)".*/\1/p' "$sdk_dir/python/pyproject.toml" | head -1)"
 check dotnet/AvmBalanceIndexer.Client.csproj "$(sed -nE 's#.*<Version>([^<]+)</Version>.*#\1#p' "$sdk_dir/dotnet/src/AvmBalanceIndexer.Client/AvmBalanceIndexer.Client.csproj" | head -1)"
 check rust/Cargo.toml "$(sed -nE 's/^version = "([^"]+)".*/\1/p' "$sdk_dir/rust/Cargo.toml" | head -1)"
