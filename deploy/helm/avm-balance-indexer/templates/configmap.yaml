@@ -23,6 +23,7 @@ data:
   Api__KnownProxyNetworks__{{ $i }}: {{ $network | quote }}
   {{- end }}
   Api__PublishOpenApi: {{ .Values.api.publishOpenApi | quote }}
+  Api__PathBase: {{ .Values.api.pathBase | quote }}
   Scans__MaxActive: {{ .Values.scans.maxActive | quote }}
   Scans__Retention: {{ .Values.scans.retention | quote }}
   Scans__StaleAfter: {{ .Values.scans.staleAfter | quote }}

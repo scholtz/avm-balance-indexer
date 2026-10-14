@@ -33,4 +33,10 @@ public sealed class ApiOptions
 
     /// <summary>Serve the OpenAPI description at <c>/openapi/v1.json</c>.</summary>
     public bool PublishOpenApi { get; set; } = true;
+
+    /// <summary>
+    /// Path prefix the API is published under when the ingress forwards it without stripping it, for example <c>/algorand-testnet</c>. Empty
+    /// serves from the root. The Swagger UI and the server address in the OpenAPI description include it.
+    /// </summary>
+    public string PathBase { get; set; } = string.Empty;
 }

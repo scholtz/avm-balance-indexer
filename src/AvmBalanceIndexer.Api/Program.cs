@@ -35,6 +35,7 @@ builder.Services.AddOpenApi(options => options.AddOperationTransformer((operatio
                 {
                     Type = Microsoft.OpenApi.JsonSchemaType.String,
                     Default = System.Text.Json.Nodes.JsonValue.Create(served),
+                    Enum = [System.Text.Json.Nodes.JsonValue.Create(served)],
                 },
             });
         }
@@ -62,7 +63,7 @@ builder.Services.AddRateLimiter(options =>
     // Requests that reach no endpoint (the Swagger UI files are served by middleware) are limited by this one; everything else is
     // limited by the "client" policy on its endpoints, so health checks stay free.
     options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(httpContext =>
-        api.RateLimitPerMinute == 0 || !httpContext.Request.Path.StartsWithSegments("/swagger", StringComparison.Ordinal)
+        api.RateLimitPerMinute == 0 || !httpContext.Request.Path.StartsWithSegments("/swagger", StringComparison.OrdinalIgnoreCase)
             ? RateLimitPartition.GetNoLimiter("unlimited")
             : RateLimitPartition.GetFixedWindowLimiter(
                 "ui:" + ClientKey(httpContext.Connection.RemoteIpAddress),
@@ -105,6 +106,11 @@ if (api.TrustForwardedHeaders)
     app.UseForwardedHeaders();
 }
 
+if (!string.IsNullOrEmpty(api.PathBase))
+{
+    app.UsePathBase(api.PathBase);
+}
+
 app.Use(async (context, next) =>
 {
     // OnStarting, so the header is on error responses too (the exception handler clears headers it did not write).
@@ -132,8 +138,6 @@ if (api.PublishOpenApi)
         options.SwaggerEndpoint("../openapi/v1.json", "AVM balance indexer v1");
         options.DocumentTitle = "AVM balance indexer API";
         options.DisplayRequestDuration();
-        options.EnableTryItOutByDefault();
-        options.DefaultModelsExpandDepth(-1);
     });
 
     // PathBase, so it also works behind an ingress that strips a path prefix.

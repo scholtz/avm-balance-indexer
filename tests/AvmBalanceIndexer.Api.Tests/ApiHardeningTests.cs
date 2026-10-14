@@ -239,7 +239,20 @@ public sealed class ApiHardeningTests : IDisposable
         Assert.Equal(HttpStatusCode.OK, script.StatusCode);
         var configurationText = await configuration.Content.ReadAsStringAsync();
         Assert.Contains("\"url\":\"../openapi/v1.json\"", configurationText, StringComparison.Ordinal);
-        Assert.Contains("\"tryItOutEnabled\":true", configurationText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Under_A_Path_Prefix_The_Root_The_UI_And_The_Description_Carry_The_Prefix()
+    {
+        using var client = Create(null, followRedirects: false, ("Api:PathBase", "/avm-testnet"));
+
+        using var root = await client.GetAsync(new Uri("/avm-testnet/", UriKind.Relative));
+        using var page = await client.GetAsync(new Uri("/avm-testnet/swagger/index.html", UriKind.Relative));
+        var document = await client.GetFromJsonAsync<JsonElement>(new Uri("/avm-testnet/openapi/v1.json", UriKind.Relative));
+
+        Assert.Equal("/avm-testnet/swagger/index.html", root.Headers.Location!.ToString());
+        Assert.Equal(HttpStatusCode.OK, page.StatusCode);
+        Assert.EndsWith("/avm-testnet", document.GetProperty("servers")[0].GetProperty("url").GetString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -250,7 +263,8 @@ public sealed class ApiHardeningTests : IDisposable
         var statuses = new List<HttpStatusCode>();
         for (var i = 0; i < 4; i++)
         {
-            using var response = await client.GetAsync(new Uri("/swagger/swagger-ui.css", UriKind.Relative));
+            // Mixed case reaches the same files, so it must be limited the same way.
+            using var response = await client.GetAsync(new Uri(i % 2 == 0 ? "/swagger/swagger-ui.css" : "/SWAGGER/swagger-ui.css", UriKind.Relative));
             statuses.Add(response.StatusCode);
         }
 
