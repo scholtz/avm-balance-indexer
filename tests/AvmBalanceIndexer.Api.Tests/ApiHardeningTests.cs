@@ -251,6 +251,9 @@ public sealed class ApiHardeningTests : IDisposable
         var document = await client.GetFromJsonAsync<JsonElement>(new Uri("/avm-testnet/openapi/v1.json", UriKind.Relative));
 
         Assert.Equal("/avm-testnet/swagger/index.html", root.Headers.Location!.ToString());
+        Assert.Contains("connect-src 'self'", page.Headers.GetValues("Content-Security-Policy").Single(), StringComparison.Ordinal);
+        using var bare = await client.GetAsync(new Uri("/avm-testnet/swagger", UriKind.Relative));
+        Assert.Contains("connect-src 'self'", bare.Headers.GetValues("Content-Security-Policy").Single(), StringComparison.Ordinal);
         Assert.Equal(HttpStatusCode.OK, page.StatusCode);
         Assert.Equal("/avm-testnet", document.GetProperty("servers")[0].GetProperty("url").GetString());
 
@@ -288,6 +291,7 @@ public sealed class ApiHardeningTests : IDisposable
         using var dataRequest = new HttpRequestMessage(HttpMethod.Get, new Uri("/openapi/v1.json", UriKind.Relative));
         dataRequest.Headers.AcceptEncoding.ParseAdd("gzip");
         using var data = await client.SendAsync(dataRequest);
+        using var plain = await client.GetAsync(new Uri("/swagger/swagger-ui.css", UriKind.Relative));
 
         Assert.Equal(HttpStatusCode.MovedPermanently, bare.StatusCode);
         Assert.Contains("\"supportedSubmitMethods\":[\"get\"]", await configuration.Content.ReadAsStringAsync(), StringComparison.Ordinal);
@@ -296,6 +300,11 @@ public sealed class ApiHardeningTests : IDisposable
         Assert.Equal(["gzip"], bundle.Content.Headers.ContentEncoding);
         Assert.Contains("connect-src 'self'", bundle.Headers.GetValues("Content-Security-Policy").Single(), StringComparison.Ordinal);
         Assert.False(data.Headers.Contains("Content-Security-Policy"));
+
+        // A client that does not accept gzip still gets a usable file, not gzip bytes it never asked for.
+        Assert.Equal(HttpStatusCode.OK, plain.StatusCode);
+        Assert.Empty(plain.Content.Headers.ContentEncoding);
+        Assert.Contains("swagger", await plain.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
         Assert.Contains("gzip", data.Content.Headers.ContentEncoding);
     }
 
@@ -345,6 +354,7 @@ public sealed class ApiHardeningTests : IDisposable
         Assert.Equal("algorand-testnet", body.GetProperty("chain").GetString());
         Assert.Equal("/v1/algorand-testnet/status", body.GetProperty("status").GetString());
         Assert.Equal(HttpStatusCode.NotFound, ui.StatusCode);
+        Assert.False(ui.Headers.Contains("Content-Security-Policy"));
     }
 
     private sealed class NotStartedStorage : InMemoryChainStorage

@@ -145,6 +145,10 @@ jobs:
           if helm template ci deploy/helm/avm-balance-indexer -f deploy/helm/values/stage-testnet.yaml --set cassandra.embedded.node=ci-node --set worker.strategy=recreate > /dev/null 2>&1; then
             echo "an invalid worker.strategy must fail the render"; exit 1
           fi
+          helm template ci deploy/helm/avm-balance-indexer -f deploy/helm/values/stage-testnet.yaml --set cassandra.embedded.node=ci-node --set api.pathBase=/avm-testnet | grep -q 'Api__PathBase: "/avm-testnet"'
+          if helm template ci deploy/helm/avm-balance-indexer -f deploy/helm/values/stage-testnet.yaml --set cassandra.embedded.node=ci-node --set api.pathBase=/avm-testnet/ > /dev/null 2>&1; then
+            echo "a pathBase with a trailing slash must fail the render"; exit 1
+          fi
       - name: Deployment overlays render (hostPath, ingress host, embedded Cassandra contact point)
         run: |
           check() { # overlay release hostPath host

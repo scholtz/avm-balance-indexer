@@ -53,7 +53,7 @@ builder.Services.AddRateLimiter(options =>
                 _ => new FixedWindowRateLimiterOptions { PermitLimit = api.RateLimitPerMinute, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 });
 
     options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(httpContext =>
-        httpContext.Request.Path.StartsWithSegments(SwaggerPath, StringComparison.OrdinalIgnoreCase)
+        api.PublishOpenApi && httpContext.Request.Path.StartsWithSegments(SwaggerPath, StringComparison.OrdinalIgnoreCase)
             ? PerClient("ui:" + ClientKey(httpContext.Connection.RemoteIpAddress))
             : RateLimitPartition.GetNoLimiter("unlimited"));
     options.AddPolicy("client", httpContext => PerClient(ClientKey(httpContext.Connection.RemoteIpAddress)));
@@ -96,12 +96,15 @@ if (!string.IsNullOrEmpty(api.PathBase))
 
 app.Use(async (context, next) =>
 {
+    // Decided now, while the path has the path base stripped: when the callback runs (after the pipeline unwound) it is restored.
+    var ui = api.PublishOpenApi && context.Request.Path.StartsWithSegments(SwaggerPath, StringComparison.OrdinalIgnoreCase);
+
     // OnStarting, so the header is on error responses too (the exception handler clears headers it did not write).
-    context.Response.OnStarting(static state =>
+    context.Response.OnStarting(state =>
     {
         var response = (HttpResponse)state;
         response.Headers.XContentTypeOptions = "nosniff";
-        if (response.HttpContext.Request.Path.StartsWithSegments(SwaggerPath, StringComparison.OrdinalIgnoreCase))
+        if (ui)
         {
             // The UI may only talk to its own origin, which also stops a link such as ?url=https://evil/spec.json from loading a foreign description.
             response.Headers.ContentSecurityPolicy =

@@ -18,7 +18,6 @@ first when opening a deployment's address.
   `Microsoft.AspNetCore.OpenApi`. A CDN-hosted UI or Scalar were rejected for the external dependency at runtime and the extra client
   library respectively.
 - The description declares the `{chain}` path parameter, because the handlers read the chain from the deployment and the framework therefore does not generate it. Its default is the chain the deployment serves. It is a default and not an enum, so a client generated from any deployment can address another. The description names a relative server (`/`, or the path base), so the page calls the origin it was loaded from even behind a TLS-terminating ingress.
-  deployment, so the framework did not generate it), which is what lets "Try it out" fill the address.
 - The UI files are rate limited per client like the data endpoints (a global limiter for `/swagger/*`, case-insensitive; the window is separate
   from the data endpoints'). The UI only submits GET requests (the scan endpoints that create work are not executable from the public page) and "Try it out" is not on by default.
 - Responses under `/swagger` carry a content security policy that allows only the API's own origin, which also stops a crafted `?url=` link from loading a foreign description.
