@@ -138,6 +138,8 @@ if (api.PublishOpenApi)
         options.SwaggerEndpoint("../openapi/v1.json", "AVM balance indexer v1");
         options.DocumentTitle = "AVM balance indexer API";
         options.DisplayRequestDuration();
+        // No call to validator.swagger.io: the CSP would block it and the badge would show as broken.
+        options.ConfigObject.AdditionalItems["validatorUrl"] = null;
     });
 
     // PathBase, so it also works behind an ingress that forwards a path prefix.

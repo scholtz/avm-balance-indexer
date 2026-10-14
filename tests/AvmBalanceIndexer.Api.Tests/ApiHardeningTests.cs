@@ -239,6 +239,7 @@ public sealed class ApiHardeningTests : IDisposable
         Assert.Equal(HttpStatusCode.OK, script.StatusCode);
         var configurationText = await configuration.Content.ReadAsStringAsync();
         Assert.Contains("\"url\":\"../openapi/v1.json\"", configurationText, StringComparison.Ordinal);
+        Assert.Contains("\"validatorUrl\":null", configurationText, StringComparison.Ordinal);
     }
 
     [Fact]
