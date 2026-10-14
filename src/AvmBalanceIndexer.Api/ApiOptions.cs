@@ -31,6 +31,16 @@ public sealed class ApiOptions
     [Range(1, 10)]
     public int ForwardedHeadersLimit { get; set; } = 1;
 
-    /// <summary>Serve the OpenAPI description at <c>/openapi/v1.json</c>.</summary>
+    /// <summary>
+    /// Serve the OpenAPI description at <c>/openapi/v1.json</c> and the Swagger UI at <c>/swagger</c> (the root redirects there). When off, the root
+    /// answers a small JSON landing document and neither exists.
+    /// </summary>
     public bool PublishOpenApi { get; set; } = true;
+
+    /// <summary>
+    /// Path prefix the API is published under when the ingress forwards it without stripping it, for example <c>/algorand-testnet</c>. Empty
+    /// serves from the root. The Swagger UI and the server address in the OpenAPI description include it.
+    /// </summary>
+    [RegularExpression(@"^(/(?!\.+(?:/|\z))[A-Za-z0-9._~-]+)*\z", ErrorMessage = "Api:PathBase must be empty or start with a slash, have no trailing slash and contain only URL-safe segments (for example /algorand-testnet).")]
+    public string PathBase { get; set; } = string.Empty;
 }

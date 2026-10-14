@@ -23,7 +23,9 @@ public sealed class ApiHardeningTests : IDisposable
         }
     }
 
-    private HttpClient Create(IChainStorage? storage = null, params (string Key, string Value)[] settings)
+    private HttpClient Create(IChainStorage? storage = null, params (string Key, string Value)[] settings) => Create(storage, followRedirects: true, settings);
+
+    private HttpClient Create(IChainStorage? storage, bool followRedirects, params (string Key, string Value)[] settings)
     {
         var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
@@ -42,7 +44,7 @@ public sealed class ApiHardeningTests : IDisposable
             });
         });
         _factories.Add(factory);
-        return factory.CreateClient();
+        return factory.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions { AllowAutoRedirect = followRedirects });
     }
 
     private static readonly Uri Status = new("/v1/algorand-testnet/status", UriKind.Relative);
@@ -216,6 +218,145 @@ public sealed class ApiHardeningTests : IDisposable
         Assert.True(responses.TryGetProperty("404", out _));
         Assert.True(responses.TryGetProperty("429", out _));
         Assert.Equal(HttpStatusCode.NotFound, disabled.StatusCode);
+    }
+
+    [Fact]
+    public async Task The_Root_Leads_To_A_Swagger_UI_That_Brings_Its_Own_Scripts()
+    {
+        using var client = Create(null, followRedirects: false);
+
+        using var root = await client.GetAsync(new Uri("/", UriKind.Relative));
+        using var page = await client.GetAsync(new Uri("/swagger/index.html", UriKind.Relative));
+        using var script = await client.GetAsync(new Uri("/swagger/swagger-ui-bundle.js", UriKind.Relative));
+        using var configuration = await client.GetAsync(new Uri("/swagger/index.js", UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.Redirect, root.StatusCode);
+        Assert.Equal("/swagger/index.html", root.Headers.Location!.ToString());
+        Assert.Equal(HttpStatusCode.OK, page.StatusCode);
+        var html = await page.Content.ReadAsStringAsync();
+        Assert.Contains("swagger-ui", html, StringComparison.Ordinal);
+        Assert.DoesNotMatch(@"(?:src|href)=""(?:https?:)?//", html);
+        Assert.Equal(HttpStatusCode.OK, script.StatusCode);
+        var configurationText = await configuration.Content.ReadAsStringAsync();
+        Assert.Contains("\"url\":\"../openapi/v1.json\"", configurationText, StringComparison.Ordinal);
+        Assert.Contains("\"validatorUrl\":null", configurationText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Under_A_Path_Prefix_The_Root_The_UI_And_The_Description_Carry_The_Prefix()
+    {
+        using var client = Create(null, followRedirects: false, ("Api:PathBase", "/avm-testnet"));
+
+        using var root = await client.GetAsync(new Uri("/avm-testnet/", UriKind.Relative));
+        using var page = await client.GetAsync(new Uri("/avm-testnet/swagger/index.html", UriKind.Relative));
+        var document = await client.GetFromJsonAsync<JsonElement>(new Uri("/avm-testnet/openapi/v1.json", UriKind.Relative));
+
+        Assert.Equal("/avm-testnet/swagger/index.html", root.Headers.Location!.ToString());
+        Assert.Contains("connect-src 'self'", page.Headers.GetValues("Content-Security-Policy").Single(), StringComparison.Ordinal);
+        using var bare = await client.GetAsync(new Uri("/avm-testnet/swagger", UriKind.Relative));
+        Assert.Contains("connect-src 'self'", bare.Headers.GetValues("Content-Security-Policy").Single(), StringComparison.Ordinal);
+        Assert.Equal(HttpStatusCode.OK, page.StatusCode);
+        Assert.Equal("/avm-testnet", document.GetProperty("servers")[0].GetProperty("url").GetString());
+
+        // A request without the prefix (a port-forward straight to the pod) is served as well.
+        using var unprefixed = await client.GetAsync(new Uri("/swagger/index.html", UriKind.Relative));
+        Assert.Equal(HttpStatusCode.OK, unprefixed.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("avm-testnet")]
+    [InlineData("/avm-testnet/")]
+    [InlineData("/a b")]
+    [InlineData("/a//b")]
+    [InlineData("/a?x=1")]
+    [InlineData("/..")]
+    [InlineData("/a/.")]
+    [InlineData("/avm\n")]
+    public void A_Malformed_Path_Prefix_Stops_The_Start_With_A_Clear_Message(string pathBase)
+    {
+        var error = Assert.ThrowsAny<Exception>(() => Create(settings: ("Api:PathBase", pathBase)));
+
+        Assert.Contains("Api:PathBase", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task The_Swagger_UI_Offers_Only_Get_Requests_And_Redirects_Without_The_Page_Name()
+    {
+        using var client = Create(null, followRedirects: false);
+
+        using var bare = await client.GetAsync(new Uri("/swagger", UriKind.Relative));
+        using var configuration = await client.GetAsync(new Uri("/swagger/index.js", UriKind.Relative));
+        using var bundleRequest = new HttpRequestMessage(HttpMethod.Get, new Uri("/swagger/swagger-ui-bundle.js", UriKind.Relative));
+        bundleRequest.Headers.AcceptEncoding.ParseAdd("gzip");
+        using var bundle = await client.SendAsync(bundleRequest);
+        using var dataRequest = new HttpRequestMessage(HttpMethod.Get, new Uri("/openapi/v1.json", UriKind.Relative));
+        dataRequest.Headers.AcceptEncoding.ParseAdd("gzip");
+        using var data = await client.SendAsync(dataRequest);
+        using var plain = await client.GetAsync(new Uri("/swagger/swagger-ui.css", UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.MovedPermanently, bare.StatusCode);
+        Assert.Contains("\"supportedSubmitMethods\":[\"get\"]", await configuration.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        // The package ships the bundle gzip-compressed and serves it as such: encoded exactly once, never twice.
+        Assert.Equal(HttpStatusCode.OK, bundle.StatusCode);
+        Assert.Equal(["gzip"], bundle.Content.Headers.ContentEncoding);
+        Assert.Contains("connect-src 'self'", bundle.Headers.GetValues("Content-Security-Policy").Single(), StringComparison.Ordinal);
+        Assert.False(data.Headers.Contains("Content-Security-Policy"));
+
+        // A client that does not accept gzip still gets a usable file, not gzip bytes it never asked for.
+        Assert.Equal(HttpStatusCode.OK, plain.StatusCode);
+        Assert.Empty(plain.Content.Headers.ContentEncoding);
+        Assert.Contains("swagger", await plain.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("gzip", data.Content.Headers.ContentEncoding);
+    }
+
+    [Fact]
+    public async Task The_Swagger_UI_Files_Are_Limited_Per_Client_Like_The_Data_Endpoints()
+    {
+        using var client = Create(settings: ("Api:RateLimitPerMinute", "2"));
+
+        // The UI allowance is at least 60 a minute (a page load is about ten requests). 130 requests span at most two one-minute windows,
+        // so at least ten of them are over the limit whatever the clock does.
+        var statuses = new List<HttpStatusCode>();
+        for (var i = 0; i < 130; i++)
+        {
+            // Mixed case reaches the same files, so it must be limited the same way.
+            using var response = await client.GetAsync(new Uri(i % 2 == 0 ? "/swagger/swagger-ui.css" : "/SWAGGER/swagger-ui.css", UriKind.Relative));
+            statuses.Add(response.StatusCode);
+        }
+
+        using var health = await client.GetAsync(new Uri("/healthz/live", UriKind.Relative));
+        Assert.True(statuses.Count(static s => s == HttpStatusCode.TooManyRequests) >= 10, string.Join(", ", statuses.Take(20)));
+        Assert.Equal(HttpStatusCode.OK, health.StatusCode);
+    }
+
+    [Fact]
+    public async Task The_Chain_Parameter_Defaults_To_The_Chain_The_Deployment_Serves()
+    {
+        using var client = Create();
+
+        var document = await client.GetFromJsonAsync<JsonElement>(new Uri("/openapi/v1.json", UriKind.Relative));
+
+        Assert.Equal("/", document.GetProperty("servers")[0].GetProperty("url").GetString());
+        var parameters = document.GetProperty("paths").GetProperty("/v1/{chain}/status").GetProperty("get").GetProperty("parameters");
+        var chain = parameters.EnumerateArray().Single(static p => p.GetProperty("name").GetString() == "chain");
+        Assert.Equal("algorand-testnet", chain.GetProperty("schema").GetProperty("default").GetString());
+    }
+
+    [Fact]
+    public async Task Without_The_Description_The_Root_Is_A_Small_Landing_Document_Not_A_404()
+    {
+        using var client = Create(settings: ("Api:PublishOpenApi", "false"));
+
+        using var root = await client.GetAsync(new Uri("/", UriKind.Relative));
+        var status = root.StatusCode;
+        var body = await root.Content.ReadFromJsonAsync<JsonElement>();
+        using var ui = await client.GetAsync(new Uri("/swagger/index.html", UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.Equal("algorand-testnet", body.GetProperty("chain").GetString());
+        Assert.Equal("/v1/algorand-testnet/status", body.GetProperty("status").GetString());
+        Assert.Equal(HttpStatusCode.NotFound, ui.StatusCode);
+        Assert.False(ui.Headers.Contains("Content-Security-Policy"));
     }
 
     private sealed class NotStartedStorage : InMemoryChainStorage

@@ -43,7 +43,7 @@ public sealed class ScanApiTests : IAsyncLifetime
         return Task.CompletedTask;
     }
 
-    private void Start(int maxActive, InMemoryChainStorage? storage = null)
+    private void Start(int maxActive, InMemoryChainStorage? storage = null, string pathBase = "")
     {
         storage ??= _storage;
         _client?.Dispose();
@@ -53,6 +53,7 @@ public sealed class ScanApiTests : IAsyncLifetime
             builder.UseSetting("Chain", ChainId.AlgorandTestnet);
             builder.UseSetting("Storage:Provider", "PostgreSql");
             builder.UseSetting("Storage:PostgreSql:ConnectionString", "Host=localhost;Database=unused;Username=u;Password=p");
+            builder.UseSetting("Api:PathBase", pathBase);
             builder.UseSetting("Scans:MaxActive", maxActive.ToString(System.Globalization.CultureInfo.InvariantCulture));
             builder.ConfigureServices(services =>
             {
@@ -107,6 +108,17 @@ public sealed class ScanApiTests : IAsyncLifetime
         var (status, polled) = await GetAsync($"/v1/algorand-testnet/scans/{id}");
         Assert.Equal(HttpStatusCode.OK, status);
         Assert.Equal(id, polled.GetProperty("id").GetGuid());
+    }
+
+    [Fact]
+    public async Task Under_A_Path_Prefix_The_Location_Of_A_New_Scan_Carries_It()
+    {
+        Start(maxActive: 20, pathBase: "/avm-testnet");
+
+        var (response, body) = await PostAsync(new Uri("/avm-testnet/v1/algorand-testnet/tokens/algo/0/holders/scans", UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+        Assert.Equal($"/avm-testnet/v1/algorand-testnet/scans/{body.GetProperty("id").GetGuid()}", response.Headers.Location!.ToString());
     }
 
     [Fact]

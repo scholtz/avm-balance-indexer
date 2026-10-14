@@ -1,3 +1,6 @@
+{{- if and .Values.api.pathBase (or (not (regexMatch "^(/[A-Za-z0-9._~-]+)+$" .Values.api.pathBase)) (regexMatch "(^|/)[.]+(/|$)" .Values.api.pathBase)) }}
+{{- fail (printf "api.pathBase must be empty or start with a slash, have no trailing slash and contain only URL-safe segments, not %q" .Values.api.pathBase) }}
+{{- end }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -23,6 +26,7 @@ data:
   Api__KnownProxyNetworks__{{ $i }}: {{ $network | quote }}
   {{- end }}
   Api__PublishOpenApi: {{ .Values.api.publishOpenApi | quote }}
+  Api__PathBase: {{ .Values.api.pathBase | quote }}
   Scans__MaxActive: {{ .Values.scans.maxActive | quote }}
   Scans__Retention: {{ .Values.scans.retention | quote }}
   Scans__StaleAfter: {{ .Values.scans.staleAfter | quote }}

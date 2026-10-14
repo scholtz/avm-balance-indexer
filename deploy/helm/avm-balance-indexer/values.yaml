@@ -84,8 +84,11 @@ api:
   # Proxies to believe (CIDR list, for example ["10.0.0.0/8"]) and how many hops to peel off X-Forwarded-For (CDN + ingress = 2).
   knownProxyNetworks: []
   forwardedHeadersLimit: 1
-  # Serve the OpenAPI description at /openapi/v1.json.
+  # Serve the OpenAPI description at /openapi/v1.json and the Swagger UI at /swagger (the root redirects there).
   publishOpenApi: true
+  # Path prefix the ingress forwards without stripping it (for example /algorand-testnet); the chart's own ingress then routes that path.
+  # Empty serves from the root.
+  pathBase: ""
   resources:
     requests: { cpu: 250m, memory: 256Mi }
     limits: { cpu: "1", memory: 512Mi }

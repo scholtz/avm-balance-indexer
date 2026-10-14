@@ -15,7 +15,16 @@ var builder = WebApplication.CreateBuilder(args);
 
 var api = builder.Configuration.GetSection(ApiOptions.SectionName).Get<ApiOptions>() ?? new ApiOptions();
 Validator.ValidateObject(api, new ValidationContext(api), validateAllProperties: true);
-builder.Services.AddOpenApi();
+builder.Services.AddOpenApi(options =>
+{
+    // A relative server address: the UI calls the origin it was loaded from, whatever scheme and host a TLS-terminating ingress shows the pod.
+    options.AddDocumentTransformer((document, _, _) =>
+    {
+        document.Servers = [new Microsoft.OpenApi.OpenApiServer { Url = string.IsNullOrEmpty(api.PathBase) ? "/" : api.PathBase }];
+        return Task.CompletedTask;
+    });
+    options.AddOperationTransformer<ChainParameterTransformer>();
+});
 builder.Services.AddResponseCompression(options =>
 {
     options.EnableForHttps = true;
@@ -32,12 +41,23 @@ builder.Services.AddRateLimiter(options =>
         context.HttpContext.Response.Headers.RetryAfter = Math.Max(1, wait).ToString(System.Globalization.CultureInfo.InvariantCulture);
         await context.HttpContext.Response.WriteAsJsonAsync(new ErrorResponse("Too many requests; slow down."), cancellationToken);
     };
-    options.AddPolicy("client", httpContext =>
+
+    // Requests that reach no endpoint (the Swagger UI files are served by middleware) are limited by this one; everything else is
+    // limited by the "client" policy on its endpoints, so health checks stay free.
+    // One definition of "the limit" for both, so they cannot drift apart.
+    RateLimitPartition<string> PerClient(string key, int atLeast = 0) =>
         api.RateLimitPerMinute == 0
             ? RateLimitPartition.GetNoLimiter("unlimited")
             : RateLimitPartition.GetFixedWindowLimiter(
-                ClientKey(httpContext.Connection.RemoteIpAddress),
-                _ => new FixedWindowRateLimiterOptions { PermitLimit = api.RateLimitPerMinute, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+                key,
+                _ => new FixedWindowRateLimiterOptions { PermitLimit = Math.Max(api.RateLimitPerMinute, atLeast), Window = TimeSpan.FromMinutes(1), QueueLimit = 0 });
+
+    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(httpContext =>
+        api.PublishOpenApi && httpContext.Request.Path.StartsWithSegments(SwaggerPath, StringComparison.OrdinalIgnoreCase)
+            // A page load is about ten requests: a deliberately low data limit must not make the UI unusable.
+            ? PerClient("ui:" + ClientKey(httpContext.Connection.RemoteIpAddress), atLeast: 60)
+            : RateLimitPartition.GetNoLimiter("unlimited"));
+    options.AddPolicy("client", httpContext => PerClient(ClientKey(httpContext.Connection.RemoteIpAddress)));
 });
 if (api.TrustForwardedHeaders)
 {
@@ -70,24 +90,76 @@ if (api.TrustForwardedHeaders)
     app.UseForwardedHeaders();
 }
 
+if (!string.IsNullOrEmpty(api.PathBase))
+{
+    app.UsePathBase(api.PathBase);
+}
+
 app.Use(async (context, next) =>
 {
+    // Decided now, while the path has the path base stripped: when the callback runs (after the pipeline unwound) it is restored.
+    var ui = api.PublishOpenApi && context.Request.Path.StartsWithSegments(SwaggerPath, StringComparison.OrdinalIgnoreCase);
+
     // OnStarting, so the header is on error responses too (the exception handler clears headers it did not write).
-    context.Response.OnStarting(static state =>
+    context.Response.OnStarting(state =>
     {
-        ((HttpResponse)state).Headers.XContentTypeOptions = "nosniff";
+        var response = (HttpResponse)state;
+        response.Headers.XContentTypeOptions = "nosniff";
+        if (ui)
+        {
+            // The UI may only talk to its own origin, which also stops a link such as ?url=https://evil/spec.json from loading a foreign description.
+            response.Headers.ContentSecurityPolicy =
+                "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'";
+        }
+
         return Task.CompletedTask;
     }, context.Response);
     await next();
 });
 app.UseExceptionHandler();
-app.UseResponseCompression();
+// The package serves its bundle precompressed (Content-Encoding set), but only to clients that accept gzip; the others would make the
+// compression middleware recompress megabytes of static files on every request.
+app.UseWhen(
+    static context => !context.Request.Path.StartsWithSegments(SwaggerPath, StringComparison.OrdinalIgnoreCase),
+    static branch => branch.UseResponseCompression());
 app.UseRateLimiter();
 app.UseRequestTimeouts();
 
 if (api.PublishOpenApi)
 {
     app.MapOpenApi().RequireRateLimiting("client");
+
+    // The UI ships its own scripts and styles (no CDN), and refers to the description relatively, so it also works behind an
+    // ingress path prefix.
+    app.UseSwaggerUI(options =>
+    {
+        options.RoutePrefix = SwaggerPath.TrimStart('/');
+        options.SupportedSubmitMethods(Swashbuckle.AspNetCore.SwaggerUI.SubmitMethod.Get);
+        options.SwaggerEndpoint("../openapi/v1.json", "AVM balance indexer v1");
+        options.DocumentTitle = "AVM balance indexer API";
+        options.DisplayRequestDuration();
+        // No call to validator.swagger.io: the CSP would block it and the badge would show as broken.
+        options.ConfigObject.AdditionalItems["validatorUrl"] = null;
+    });
+
+    // PathBase, so it also works behind an ingress that forwards a path prefix.
+    app.MapGet("/", (HttpRequest request) => Results.Redirect($"{request.PathBase}{SwaggerPath}/index.html"))
+        .RequireRateLimiting("client")
+        .ExcludeFromDescription();
+}
+else
+{
+    app.MapGet(
+        "/",
+        (HttpRequest request, ChainContext chain) => Results.Ok(new
+        {
+            service = "avm-balance-indexer",
+            chain = chain.Chain,
+            status = $"{request.PathBase}/v1/{chain.Chain}/status",
+            health = $"{request.PathBase}/healthz/ready",
+        }))
+        .RequireRateLimiting("client")
+        .ExcludeFromDescription();
 }
 
 // Liveness only proves the process responds; readiness also requires the database.
@@ -137,6 +209,9 @@ app.Run();
 
 public partial class Program
 {
+    /// <summary>Where the Swagger UI lives; the UI, its rate limit and the compression exclusion all refer to it.</summary>
+    private const string SwaggerPath = "/swagger";
+
     /// <summary>
     /// The rate-limit identity of a client: IPv4-mapped IPv6 addresses count as the IPv4 address, and an IPv6 client is its /64 (the
     /// smallest block a subscriber normally owns), so rotating addresses inside it does not buy a fresh allowance.

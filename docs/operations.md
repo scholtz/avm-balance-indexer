@@ -9,7 +9,7 @@ One **deployment per chain** (`algorand-mainnet`, `algorand-testnet`, `voi`) wit
 
 | Component | Replicas | Role |
 |---|---|---|
-| API (`avm-api`) | 2 or more, stateless | Serves `/v1/{chain}`, `/healthz/*`, `/openapi/v1.json`. Reads the database only. |
+| API (`avm-api`) | 2 or more, stateless | Serves `/v1/{chain}`, `/healthz/*`, `/openapi/v1.json` and the Swagger UI at `/swagger` (`/` redirects there). Reads the database only. |
 | Worker (`avm-worker`) | 2 by default | One replica holds the **writer lease** and indexes; the others stand by. Every replica also runs scan jobs and samples the chain status for metrics. |
 | Database | PostgreSQL or Cassandra | Chosen per deployment with `Storage:Provider`. Never dual-written. |
 
