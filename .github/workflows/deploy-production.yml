@@ -2,7 +2,7 @@ name: Deploy production
 
 # A version tag (v1.2.3) on a commit of main builds the images, pushes them to Docker Hub and upgrades the production releases:
 #   mainnet (algorand-mainnet, https://mainnet.balance-indexer.biatec.io) and then voi (https://voi.balance-indexer.biatec.io).
-# Run it by hand with an existing image tag to redeploy or roll back (no build). The `production` environment can require a reviewer.
+# Run it by hand with an existing image tag to redeploy or roll back (no build). The environments `mainnet` and `voi` can require a reviewer.
 # See docs/deployment-pipelines.md.
 
 on:
@@ -91,7 +91,7 @@ jobs:
     if: ${{ !cancelled() && !failure() && needs.plan.result == 'success' }}
     uses: ./.github/workflows/helm-deploy.yml
     with:
-      environment: production
+      environment: mainnet
       ref: ${{ needs.plan.outputs.sha }}
       release: mainnet
       values: prod-algorand.yaml
@@ -107,7 +107,7 @@ jobs:
     if: ${{ !cancelled() && !failure() && needs.plan.result == 'success' }}
     uses: ./.github/workflows/helm-deploy.yml
     with:
-      environment: production
+      environment: voi
       ref: ${{ needs.plan.outputs.sha }}
       release: voi
       values: prod-voi.yaml

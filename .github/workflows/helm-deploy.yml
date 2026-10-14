@@ -7,7 +7,7 @@ on:
   workflow_call:
     inputs:
       environment:
-        description: GitHub environment (testnet or production); environment secrets override repository secrets
+        description: GitHub environment named like the release (testnet, mainnet or voi); environment secrets override repository secrets
         type: string
         required: true
       ref:
@@ -47,6 +47,20 @@ on:
       DOCKERHUB_USERNAME:
         required: true
       DOCKERHUB_PULL_TOKEN:
+        required: false
+      CASSANDRA_NODE:
+        required: false
+      ALGOD_TOKEN_TESTNET:
+        required: false
+      ALGOD_TOKEN_MAINNET:
+        required: false
+      ALGOD_TOKEN_VOI:
+        required: false
+      ALGOD_URL_TESTNET:
+        required: false
+      ALGOD_URL_MAINNET:
+        required: false
+      ALGOD_URL_VOI:
         required: false
 
 permissions:
@@ -117,7 +131,7 @@ jobs:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           PULL_TOKEN: ${{ secrets.DOCKERHUB_PULL_TOKEN }}
           ALGOD_TOKEN: ${{ secrets[format('ALGOD_TOKEN_{0}', inputs.secret-suffix)] }}
-          ALGOD_URL: ${{ vars[format('ALGOD_URL_{0}', inputs.secret-suffix)] }}
+          ALGOD_URL: ${{ vars[format('ALGOD_URL_{0}', inputs.secret-suffix)] || secrets[format('ALGOD_URL_{0}', inputs.secret-suffix)] }}
         run: |
           # Server-side apply keeps the secret out of the last-applied-configuration annotation.
           apply() { kubectl -n "$NAMESPACE" apply --server-side --force-conflicts -f -; }
@@ -130,25 +144,25 @@ jobs:
           # Token of the algod node when it needs one (GitHub secret ALGOD_TOKEN_TESTNET / _MAINNET / _VOI); the chart is told about it below.
           if [ -n "$ALGOD_TOKEN" ]; then
             if [ -z "$ALGOD_URL" ]; then
-              echo "::error::ALGOD_TOKEN is set but the Actions variable ALGOD_URL is not: the token would be sent to the public endpoint"; exit 1
+              echo "::error::ALGOD_TOKEN is set but the Actions variable (or secret) ALGOD_URL_<chain> is not: the token would be sent to the public endpoint"; exit 1
             fi
             kubectl -n "$NAMESPACE" create secret generic "${RELEASE}-algod" --from-literal=token="$ALGOD_TOKEN" --dry-run=client -o yaml | apply
           fi
       - name: Upgrade the release
         env:
           ALGOD_TOKEN: ${{ secrets[format('ALGOD_TOKEN_{0}', inputs.secret-suffix)] }}
-          ALGOD_URL: ${{ vars[format('ALGOD_URL_{0}', inputs.secret-suffix)] }}
+          ALGOD_URL: ${{ vars[format('ALGOD_URL_{0}', inputs.secret-suffix)] || secrets[format('ALGOD_URL_{0}', inputs.secret-suffix)] }}
           PULL_TOKEN: ${{ secrets.DOCKERHUB_PULL_TOKEN }}
           RELEASE: ${{ inputs.release }}
           VALUES: ${{ inputs.values }}
           CHAIN: ${{ inputs.chain }}
           IMAGE_TAG: ${{ inputs.image-tag }}
-          CASSANDRA_NODE: ${{ vars.CASSANDRA_NODE }}
+          CASSANDRA_NODE: ${{ vars.CASSANDRA_NODE || secrets.CASSANDRA_NODE }}
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
         run: |
           if ! [[ "$IMAGE_TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then echo "::error::Invalid image tag"; exit 1; fi
           if [ -z "$CASSANDRA_NODE" ]; then
-            echo "::error::Set the Actions variable CASSANDRA_NODE to the name of the node that owns /mnt/nvme1/avm-balance-indexer (docs/deployment-pipelines.md)"; exit 1
+            echo "::error::Set the Actions variable (or secret) CASSANDRA_NODE to the name of the node that owns /mnt/nvme1/avm-balance-indexer (docs/deployment-pipelines.md)"; exit 1
           fi
           common=(--namespace "$NAMESPACE" -f "deploy/helm/values/$VALUES"
             --set-string "image.repository=docker.io/${DOCKERHUB_USERNAME}/avm-balance-indexer"

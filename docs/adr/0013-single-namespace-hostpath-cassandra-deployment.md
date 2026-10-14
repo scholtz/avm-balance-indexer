@@ -17,12 +17,12 @@ chain deployment, and docs/operations.md names `ReplicationFactor` 1 a developme
   and a NetworkPolicy that lets only the release's own pods reach its Cassandra.
 - **Embedded Cassandra** (`cassandra.embedded`): a one-replica StatefulSet per release with the data in a `hostPath` directory
   (`/mnt/nvme1/avm-balance-indexer/<release>`). No login (reachable only through the NetworkPolicy), `replicationFactor` 1. Because the data belongs to one machine, the chart
-  refuses to render without `cassandra.embedded.node` (or a nodeSelector); the pipeline takes it from the Actions variable `CASSANDRA_NODE`. Availability and backup of the data are the
+  refuses to render without `cassandra.embedded.node` (or a nodeSelector); the pipeline takes it from the Actions variable or secret `CASSANDRA_NODE`. Availability and backup of the data are the
   operator's job (disk snapshots or `nodetool snapshot`); a database operator (K8ssandra) stays the recommended route once a cluster exists, and replaces this option without code changes.
 - **Images on Docker Hub** as `<repository>-api` and `<repository>-worker` (Docker Hub allows `user/repository` only). Both environments run the immutable tag described in ADR 0014.
 - **Pipelines follow the upgrade rules of operations.md**: the deploy job upgrades the worker first (strategy `Recreate`, so no old writer runs while a migration is applied), waits for it,
   then upgrades everything to the new tag. Testnet deploys only the head of `main` after green CI; production needs a `vX.Y.Z` tag on a commit of `main` with a green CI run, and the
-  protected `production` environment.
+  protected GitHub environments `mainnet` and `voi` (reviewers, own `KUBE_CONFIG`).
 - **Secrets come from GitHub.** The deploy job creates the optional image pull secret and algod token secret with server-side apply on every run and restarts the pods when they change (hash in the pod template).
   The kube config (and, for a least-privilege account, `deploy/rbac/deployer.yaml`) is the only manual setup.
 
