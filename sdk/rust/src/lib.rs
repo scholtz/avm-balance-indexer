@@ -70,10 +70,9 @@ impl Error {
         matches!(self, Error::Api { status: 404, .. })
     }
 
-    /// Worth retrying after a pause: rate limited or nothing indexed yet (429, 503, 504, with `retry_after`), a connection that failed, or
-    /// an answer that is not the documented JSON. The last one includes the HTML error page of a gateway, whose status this SDK cannot report.
+    /// Rate limited or nothing indexed yet: retry after `retry_after`.
     pub fn is_retryable(&self) -> bool {
-        matches!(self, Error::Api { status: 429 | 503 | 504, .. } | Error::Connection(_) | Error::Decode(_))
+        matches!(self, Error::Api { status: 429 | 503 | 504, .. })
     }
 }
 

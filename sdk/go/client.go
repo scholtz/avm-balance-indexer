@@ -363,6 +363,9 @@ func (c *Client) ExportHolders(ctx context.Context, kind TokenKind, tokenID uint
 	if err := checkLimit(options.Limit); err != nil { // before the scan exists
 		return err
 	}
+	if options.PollInterval < 0 {
+		return fmt.Errorf("%w: PollInterval must not be negative (zero means one second)", ErrInvalidArgument)
+	}
 	started, err := c.StartHolderScan(ctx, kind, tokenID, &ScanRequest{Round: options.Round, IncludeZero: options.IncludeZero})
 	if err != nil {
 		return err

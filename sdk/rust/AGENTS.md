@@ -65,7 +65,7 @@ let any_size = indexer.export_holders_stream(TokenKind::Algo, 0, ExportOptions {
 ## Errors
 
 `Error::Api { status, message, retry_after, body }`, `Error::Connection(String)` (no response: network, timeout), `Error::Decode(String)`, `Error::Scan(Box<ScanResponse>)` (an export ended as Failed or Cancelled), `Error::InvalidArgument(String)`.
-Helpers: `error.is_not_found()`, `error.is_retryable()` (429, 503, 504, a failed connection, or `Decode`: the HTML error page of a gateway shows up as `Decode` without its status).
+Helpers: `error.is_not_found()`, `error.is_retryable()` (429, 503, 504). The HTML error page of a gateway for a declared status shows up as `Decode` without its status; behind such a gateway treat `Decode` like a transient failure yourself.
 
 ## Verify your work
 

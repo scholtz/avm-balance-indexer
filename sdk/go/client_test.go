@@ -372,6 +372,19 @@ func TestTheLastPageOfAScanThatFinishedBetweenTwoServerReadsIsNotReadTwice(t *te
 	}
 }
 
+func TestExportRejectsANegativePollIntervalBeforeStartingAScan(t *testing.T) {
+	server, requests := fakeServer(t, func(r *http.Request) (int, any, map[string]string) {
+		return 500, map[string]any{"error": "unexpected"}, nil
+	})
+	client, _ := avm.New(avm.AlgorandMainnet, &avm.Options{BaseURL: server.URL})
+
+	err := client.ExportHolders(context.Background(), avm.Asa, 1, avm.ExportOptions{PollInterval: -time.Second}, func(avm.HolderDto) error { return nil })
+
+	if !errors.Is(err, avm.ErrInvalidArgument) || len(*requests) != 0 {
+		t.Fatalf("err %v, %d requests", err, len(*requests))
+	}
+}
+
 func TestExportValidatesThePageSizeBeforeStartingAScan(t *testing.T) {
 	server, requests := fakeServer(t, func(r *http.Request) (int, any, map[string]string) {
 		return 500, map[string]any{"error": "unexpected"}, nil

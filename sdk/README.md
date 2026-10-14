@@ -74,7 +74,7 @@ Setting up the registry tokens is described in [docs/sdk-publishing.md](../docs/
 ### Good to know
 
 - A holder export starts a scan on the server before it reads anything. If the request that starts it is aborted or times out after the server accepted it, the SDK never learns the id and cannot cancel it; such a scan ends by itself (see `Scans:Retention` in the README) and counts against `Scans:MaxActive` until then.
-- The Rust SDK cannot report the status of an error answer that is not the API's JSON (a gateway's HTML page); it surfaces it as `Error::Decode`, which counts as retryable.
+- The Rust SDK cannot report the status of an error answer that is not the API's JSON (a gateway's HTML page); it surfaces it as `Error::Decode` (not retryable by `is_retryable()`; treat it as transient yourself behind such a gateway).
 
 ### Tests
 

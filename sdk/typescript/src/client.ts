@@ -258,8 +258,19 @@ export class AvmBalanceIndexer {
 
   private async call<T>(run: () => Promise<T>): Promise<T> {
     try {
-      return await run();
+      const value = await run();
+      if (value === null || value === undefined) {
+        throw new DecodeError(`Unexpected response from ${this.baseUrl}: the body is empty`);
+      }
+      return value;
     } catch (error) {
+      if (error instanceof DecodeError) {
+        throw error;
+      }
+      if (error instanceof TypeError) {
+        // The generated mapping met JSON of another shape (for example {"error": "x"} where a list is documented).
+        throw new DecodeError(`Unexpected response from ${this.baseUrl}: ${error.message}`, error);
+      }
       if (error instanceof ResponseError) {
         throw await toApiError(error.response);
       }

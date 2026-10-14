@@ -127,7 +127,7 @@ jobs:
       - run: dotnet build AvmBalanceIndexer.Client.slnx -c Release
       - run: dotnet test AvmBalanceIndexer.Client.slnx -c Release --no-build
       - name: Pack (both target frameworks)
-        run: dotnet pack src/AvmBalanceIndexer.Client -c Release --no-build -o ../../artifacts
+        run: dotnet pack src/AvmBalanceIndexer.Client -c Release --no-build -o ../artifacts
 
   go:
     name: Go ${{ matrix.go }}

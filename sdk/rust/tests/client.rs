@@ -186,7 +186,6 @@ async fn a_declared_error_status_without_json_is_a_decode_error() {
     let error = client(&server, ChainId::AlgorandMainnet).token(TokenKind::Asa, 1).await.unwrap_err();
 
     assert!(matches!(error, Error::Decode(_)));
-    assert!(error.is_retryable(), "a gateway's HTML error page is worth a retry");
 }
 
 #[tokio::test]

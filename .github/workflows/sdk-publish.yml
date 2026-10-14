@@ -227,7 +227,7 @@ jobs:
         working-directory: sdk/dotnet
         run: |
           dotnet test AvmBalanceIndexer.Client.slnx -c Release
-          dotnet pack src/AvmBalanceIndexer.Client -c Release --no-build -o ../../artifacts
+          dotnet pack src/AvmBalanceIndexer.Client -c Release --no-build -o ../artifacts
       - name: Push
         if: steps.need.outputs.publish == 'true'
         env:

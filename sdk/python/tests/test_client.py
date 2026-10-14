@@ -202,9 +202,15 @@ def test_retry_after_may_be_an_http_date_and_nonsense_is_ignored(server):
 
 def test_argument_validation_errors_are_not_reported_as_decode_errors(server):
     client = AvmBalanceIndexer.algorand_mainnet(base_url=server.url)
-    with pytest.raises(ValueError) as caught:
-        client.account_tokens("ADDRESS", cursor=123)
-    assert not isinstance(caught.value, ResponseDecodeError)
+    for call in (
+        lambda: client.account_tokens("ADDRESS", cursor=123),
+        lambda: client.account_tokens("ADDRESS", include_zero="yes"),
+        lambda: client.account_tokens(None),
+        lambda: client.holder_scan(None),
+    ):
+        with pytest.raises(ValueError) as caught:
+            call()
+        assert not isinstance(caught.value, ResponseDecodeError)
     assert server.requests == []
 
 
@@ -317,7 +323,7 @@ def test_the_last_page_of_a_scan_that_finished_between_two_server_reads_is_not_r
     assert [h.account for h in client.export_holders("asa", 1, poll_interval=0.01)] == ["A", "B"]
 
 
-@pytest.mark.parametrize("interval", [0, -1.0])
+@pytest.mark.parametrize("interval", [0, -1.0, float("inf"), "1", None])
 def test_export_rejects_a_non_positive_poll_interval_before_it_starts_a_scan(server, interval):
     client = AvmBalanceIndexer.algorand_mainnet(base_url=server.url)
     with pytest.raises(ValueError):

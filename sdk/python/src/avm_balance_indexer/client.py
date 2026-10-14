@@ -200,7 +200,20 @@ class AvmBalanceIndexer:
     def __exit__(self, *exc_info) -> None:
         self.close()
 
+    @staticmethod
+    def _check_arguments(args, kwargs) -> None:
+        """What the generated methods would reject with a pydantic error, reported before anything is sent."""
+        for value in args:
+            if isinstance(value, bool) or not isinstance(value, (str, int)):
+                raise ValueError(f"Invalid argument {value!r}: expected a string or an integer")
+        for name in ("cursor",):
+            if kwargs.get(name) is not None and not isinstance(kwargs[name], str):
+                raise ValueError(f"{name} must be a string (got {kwargs[name]!r})")
+        if kwargs.get("include_zero") is not None and not isinstance(kwargs["include_zero"], bool):
+            raise ValueError(f"include_zero must be a boolean (got {kwargs['include_zero']!r})")
+
     def _call(self, function, *args, **kwargs):
+        self._check_arguments(args, kwargs)
         try:
             return function(*args, _request_timeout=self.timeout, **kwargs)
         except ApiException as error:
@@ -370,8 +383,8 @@ class AvmBalanceIndexer:
         cancels the scan on the server.
         """
         _limit(limit)  # before the scan exists
-        if not poll_interval > 0:
-            raise ValueError(f"poll_interval must be positive (got {poll_interval!r})")
+        if isinstance(poll_interval, bool) or not isinstance(poll_interval, (int, float)) or not 0 < poll_interval < float("inf"):
+            raise ValueError(f"poll_interval must be a positive number of seconds (got {poll_interval!r})")
         started = self.start_holder_scan(kind, token_id, round=round, include_zero=include_zero)
         scan_id = str(started.id)
         cursor: Optional[str] = None

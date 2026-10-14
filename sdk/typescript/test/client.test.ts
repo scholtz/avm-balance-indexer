@@ -180,6 +180,14 @@ describe("errors", () => {
     await assert.rejects(() => client.status(), DecodeError);
   });
 
+  it("maps JSON of the wrong shape and a null body to DecodeError", async () => {
+    const client = AvmBalanceIndexer.algorandMainnet({ baseUrl });
+    handler = (_request, response) => json(response, 200, { error: "x" });
+    await assert.rejects(() => client.holders("asa", 1), DecodeError);
+    handler = (_request, response) => json(response, 200, null);
+    await assert.rejects(() => client.status(), DecodeError);
+  });
+
   it("maps a refused connection to ConnectionError", async () => {
     const client = AvmBalanceIndexer.algorandMainnet({ baseUrl: "http://127.0.0.1:1" });
     await assert.rejects(() => client.status(), ConnectionError);
