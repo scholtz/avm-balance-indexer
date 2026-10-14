@@ -1,4 +1,4 @@
-{{- if and .Values.api.pathBase (not (regexMatch "^(/[A-Za-z0-9._~-]+)+$" .Values.api.pathBase)) }}
+{{- if and .Values.api.pathBase (or (not (regexMatch "^(/[A-Za-z0-9._~-]+)+$" .Values.api.pathBase)) (regexMatch "(^|/)[.]+(/|$)" .Values.api.pathBase)) }}
 {{- fail (printf "api.pathBase must be empty or start with a slash, have no trailing slash and contain only URL-safe segments, not %q" .Values.api.pathBase) }}
 {{- end }}
 apiVersion: v1

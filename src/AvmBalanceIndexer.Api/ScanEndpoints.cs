@@ -107,7 +107,7 @@ public static class ScanEndpoints
 
         var job = new ScanJob(Guid.NewGuid(), token, round, request?.IncludeZero ?? false, ScanState.Pending, 0, null, null, now, now, now + settings.Retention);
         await jobs.CreateAsync(job, cancellationToken).ConfigureAwait(false);
-        return Results.Accepted($"/v1/{chain.Chain}/scans/{job.Id}", ToResponse(job));
+        return Results.Accepted($"{http.Request.PathBase}/v1/{chain.Chain}/scans/{job.Id}", ToResponse(job));
     }
 
     private static async Task<IResult> GetJob(string id, IScanJobStore jobs, CancellationToken cancellationToken)
