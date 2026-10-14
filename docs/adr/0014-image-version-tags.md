@@ -18,7 +18,11 @@ version and which build an image is, without opening Git.
 - The string is stored as the image label `org.opencontainers.image.version`.
 - A rollback names the same tag; its commit (last segment) selects the chart and values that belong to it.
 
+- An image whose tag already exists in the registry is not rebuilt: the release tag and `latest` are put on the existing image (`imagetools create`), so what ran on testnet is what reaches production.
+
 ## Consequences
+
+- After `VERSION` is raised, release tags of the old line (`v1.0.N`) can still be deployed by image tag with the `ref` input, not by re-running the tag.
 
 - Image tags from before this ADR (`main-<sha7>`) stay valid for rollbacks given with an explicit `ref`.
 - Raising the major or minor version needs a commit that changes `VERSION` and a matching release tag.

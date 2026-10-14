@@ -103,9 +103,9 @@ a Cassandra with login (keys `username` and `password`, `storage.cassandra.exist
 
 1. Add the secrets and the variable (1), prepare the cluster (2), push to `main`. The testnet workflow builds the images, installs the release and waits until the API,
    worker and Cassandra are ready (the first Cassandra start takes a few minutes; the wait is 25 minutes). The smoke test only warns, because DNS and the certificate can lag.
-2. Production: merge to `main`, then `git tag v0.1.0 && git push origin v0.1.0`. Approve the runs in the `mainnet` and `voi` environments. MainNet starts the backfill from round 0; plan disk and time
+2. Production: merge to `main`, then `git tag v1.0.0 && git push origin v1.0.0`. Approve the runs in the `mainnet` and `voi` environments. MainNet starts the backfill from round 0; plan disk and time
    (benchmark figures in the README) and consider your own archival nodes (`algorand.gossipHosts`).
-3. Roll back or redeploy: Actions, *Deploy production*, Run workflow, give an existing image tag (for example `v0.1.0`). No images are built.
+3. Roll back or redeploy: Actions, *Deploy production*, Run workflow, give an existing image tag (for example `v1.0.0`). No images are built.
 4. Look at it: `kubectl -n avm-balance-indexer get pods -l app.kubernetes.io/instance=testnet` and `kubectl -n avm-balance-indexer logs deploy/testnet-algorand-testnet-worker`.
 
 Upgrades follow the rules of [operations.md](operations.md) automatically: when the release already exists, the deploy job first upgrades the worker alone
