@@ -311,6 +311,14 @@ def test_the_last_page_of_a_scan_that_finished_between_two_server_reads_is_not_r
     assert [h.account for h in client.export_holders("asa", 1, poll_interval=0.01)] == ["A", "B"]
 
 
+@pytest.mark.parametrize("interval", [0, -1.0])
+def test_export_rejects_a_non_positive_poll_interval_before_it_starts_a_scan(server, interval):
+    client = AvmBalanceIndexer.algorand_mainnet(base_url=server.url)
+    with pytest.raises(ValueError):
+        list(client.export_holders("asa", 1, poll_interval=interval))
+    assert server.requests == []
+
+
 def test_stopping_an_export_early_cancels_the_scan(server):
     def handler(request):
         if request["method"] == "POST":

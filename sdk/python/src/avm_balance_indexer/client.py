@@ -366,6 +366,8 @@ class AvmBalanceIndexer:
         cancels the scan on the server.
         """
         _limit(limit)  # before the scan exists
+        if not poll_interval > 0:
+            raise ValueError(f"poll_interval must be positive (got {poll_interval!r})")
         started = self.start_holder_scan(kind, token_id, round=round, include_zero=include_zero)
         scan_id = str(started.id)
         cursor: Optional[str] = None

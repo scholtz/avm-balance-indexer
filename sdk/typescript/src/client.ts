@@ -429,6 +429,9 @@ export class AvmBalanceIndexer {
    */
   async *exportHolders(kind: TokenKind, tokenId: Id, options: ExportHoldersOptions = {}): AsyncGenerator<HolderDto> {
     checkLimit(options.limit); // before the scan exists
+    if (options.pollIntervalMs !== undefined && !(options.pollIntervalMs > 0 && Number.isFinite(options.pollIntervalMs))) {
+      throw new RangeError(`pollIntervalMs must be a positive number (got ${String(options.pollIntervalMs)})`);
+    }
     const started = await this.startHolderScan(kind, tokenId, { round: options.round, includeZero: options.includeZero, signal: options.signal });
     const poll = options.pollIntervalMs ?? 1000;
     let cursor: string | undefined;

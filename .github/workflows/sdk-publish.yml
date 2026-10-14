@@ -3,7 +3,8 @@ name: Publish SDKs
 # When a change under sdk/ reaches main (or by hand, from main), every SDK that passes its tests is published to its registry unless that version is already there:
 #   npm (@scholtz/avm-balance-indexer), PyPI (avm-balance-indexer), NuGet (AvmBalanceIndexer.Client), crates.io (avm-balance-indexer), Go (git tag sdk/go/vX.Y.Z).
 # The version is sdk/VERSION; raise it (sdk/scripts/set-version.sh) to release. A registry whose secret is not configured is skipped with a notice.
-# Which secrets to create: docs/sdk-publishing.md. A secret is only visible to the step that publishes, never to the steps that install or test dependencies.
+# Which secrets to create: docs/sdk-publishing.md. A secret is only referenced by the step that publishes, never by the steps that install or test dependencies; for npm
+# and PyPI the build and test even run in a job of their own, without the environment and without the OIDC token.
 
 on:
   push:

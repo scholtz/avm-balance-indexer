@@ -333,6 +333,18 @@ describe("pagination", () => {
     assert.ok(!requests.some((r) => r.method === "DELETE"));
   });
 
+  it("rejects a non-positive poll interval before it starts a scan", async () => {
+    const client = AvmBalanceIndexer.algorandMainnet({ baseUrl });
+    for (const pollIntervalMs of [0, -1, Number.NaN]) {
+      await assert.rejects(async () => {
+        for await (const _ of client.exportHolders("asa", 1, { pollIntervalMs })) {
+          // never reached
+        }
+      }, RangeError);
+    }
+    assert.equal(requests.length, 0);
+  });
+
   it("rejects inherited property names as chains", () => {
     assert.throws(() => new AvmBalanceIndexer({ chain: "constructor" as never }), RangeError);
   });

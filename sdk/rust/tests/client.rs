@@ -339,6 +339,17 @@ async fn the_items_of_a_page_arrive_before_a_failed_scan_is_reported() {
 }
 
 #[tokio::test]
+async fn an_export_with_a_zero_poll_interval_is_rejected_before_it_starts_a_scan() {
+    let server = MockServer::start().await;
+    let indexer = client(&server, ChainId::AlgorandMainnet);
+
+    let mut holders = std::pin::pin!(indexer.export_holders_stream(TokenKind::Asa, 1, ExportOptions { poll_interval: Some(Duration::ZERO), ..Default::default() }));
+
+    assert!(matches!(holders.try_next().await, Err(Error::InvalidArgument(_))));
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn an_export_validates_the_page_size_before_it_starts_a_scan() {
     let server = MockServer::start().await;
     let indexer = client(&server, ChainId::AlgorandMainnet);

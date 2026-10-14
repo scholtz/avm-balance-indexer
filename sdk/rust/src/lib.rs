@@ -447,6 +447,9 @@ impl AvmBalanceIndexer {
                     Phase::Done => Ok(None),
                     Phase::Start => {
                         page_size(options.limit)?; // before the scan exists
+                        if options.poll_interval.is_some_and(|interval| interval.is_zero()) {
+                            return Err(Error::InvalidArgument("poll_interval must be positive".to_owned()));
+                        }
                         let started = self
                             .start_holder_scan(kind, token_id, ScanRequest { include_zero: options.include_zero, round: options.round })
                             .await?;

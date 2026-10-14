@@ -56,6 +56,7 @@ let any_size = indexer.export_holders_stream(TokenKind::Algo, 0, ExportOptions {
 
 - `limit` is 1 to 1000 (`u32` in the option structs; others return `Error::InvalidArgument`). `cursor` is opaque: pass back exactly what `next_cursor` returned, together with the same `round`.
 - A client is bound to one chain. Asking a deployment for another chain returns 404 ("This deployment does not serve that chain").
+- `Error::Api.body` holds the raw body only for statuses the API does not declare (for example a proxy's 502); for the declared errors (400, 404, 429, 503, 504) the message is the API's `error` text.
 - Streams borrow the client (`+ '_`); pin them (`std::pin::pin!` or `Box::pin`) before calling `try_next`.
 - Field names are snake_case and Rust keywords get a trailing underscore: `effect.type_`.
 - Rate limit of the public deployments: 600 requests per minute and client address. Prefer `limit: Some(1000)` over many small pages.

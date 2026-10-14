@@ -38,7 +38,7 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha }}
           ACTOR: ${{ github.actor }}
         run: |
-          changed="$(git diff --name-only "$BASE"...HEAD -- sdk ':!sdk/**/*.md' ':!sdk/**/tests/**' ':!sdk/**/test/**' ':!sdk/**/examples/**' ':!sdk/go/client_test.go' ':!sdk/rust/tests/**' ':!sdk/scripts/**' ':!sdk/.gitignore' ':!sdk/.gitattributes')"
+          changed="$(git diff --name-only "$BASE"...HEAD -- sdk ':!sdk/**/*.md' ':!sdk/*.md' ':!sdk/**/tests/**' ':!sdk/**/test/**' ':!sdk/**/examples/**' ':!sdk/go/client_test.go' ':!sdk/rust/tests/**' ':!sdk/scripts/**' ':!sdk/.gitignore' ':!sdk/.gitattributes')"
           if [ -n "$changed" ] && git diff --quiet "$BASE"...HEAD -- sdk/VERSION; then
             # Dependency updates by Dependabot change no behaviour of their own and are released with the next bump.
             if [ "$ACTOR" = "dependabot[bot]" ]; then
