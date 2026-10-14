@@ -7,7 +7,7 @@ on:
   workflow_call:
     inputs:
       environment:
-        description: GitHub environment (testnet or production); environment secrets override repository secrets
+        description: GitHub environment named like the release (testnet, mainnet or voi); environment secrets override repository secrets
         type: string
         required: true
       ref:
