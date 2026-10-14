@@ -14,7 +14,7 @@ ingress:
   host: testnet.balance-indexer.biatec.io
   tls:
     enabled: true
-    clusterIssuer: letsencrypt-prod
+    clusterIssuer: letsencrypt-dns
 api:
   # Behind the ingress every request comes from a cluster address: believe X-Forwarded-For so that the rate limit counts real clients.
   trustForwardedHeaders: true
