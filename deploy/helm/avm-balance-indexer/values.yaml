@@ -71,7 +71,7 @@ ingress:
     enabled: false
     # Secret that holds the certificate; defaults to <release>-<chain>-tls (created by cert-manager when clusterIssuer is set).
     secretName: ""
-    # Adds the cert-manager.io/cluster-issuer annotation, for example letsencrypt-prod.
+    # Adds the cert-manager.io/cluster-issuer annotation, for example letsencrypt-dns.
     clusterIssuer: ""
 
 api:

@@ -47,7 +47,7 @@ organisation forbids that). Make them public, or give the cluster a pull secret 
 ## 2. Kubernetes: namespace, deployer account and kube config
 
 Prerequisites in the cluster: an ingress controller (the chart leaves `ingress.className` empty, so the default class is used; set it in the overlay otherwise),
-[cert-manager](https://cert-manager.io) with a `ClusterIssuer` named `letsencrypt-prod` (or change/remove `ingress.tls.clusterIssuer` in the overlays and provide the
+[cert-manager](https://cert-manager.io) with a `ClusterIssuer` named `letsencrypt-dns` (or change/remove `ingress.tls.clusterIssuer` in the overlays and provide the
 TLS secret `<release>-<chain>-tls` yourself), DNS records for the three host names pointing at the ingress, and the data directories' disk (`/mnt/nvme1`) on the node that
 runs Cassandra.
 
