@@ -116,6 +116,12 @@ def _id(value: Id, what: str) -> int:
     return number
 
 
+def _limit(limit: Optional[int]) -> Optional[int]:
+    if limit is not None and (isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000):
+        raise ValueError(f"limit must be an integer from 1 to 1000 (got {limit!r})")
+    return limit
+
+
 def _kind(kind: str) -> str:
     if kind not in TOKEN_KINDS:
         raise ValueError(f"kind must be one of {', '.join(TOKEN_KINDS)} (got {kind!r})")
@@ -206,7 +212,7 @@ class AvmBalanceIndexer:
 
     def account_tokens(self, address: str, include_zero: Optional[bool] = None, cursor: Optional[str] = None, limit: Optional[int] = None) -> HoldingsResponse:
         """Current holdings of an account (one page)."""
-        return self._call(self._balances.get_account_tokens, self.chain, address, include_zero=include_zero, cursor=cursor, limit=limit)
+        return self._call(self._balances.get_account_tokens, self.chain, address, include_zero=include_zero, cursor=cursor, limit=_limit(limit))
 
     def balance(self, address: str, kind: str, token_id: Id, round: Optional[Id] = None) -> BalanceResponse:  # noqa: A002
         """End-of-round balance of an account and token. ``amount`` is a decimal string."""
@@ -239,7 +245,7 @@ class AvmBalanceIndexer:
             from_round=None if from_round is None else _id(from_round, "from_round"),
             to_round=None if to_round is None else _id(to_round, "to_round"),
             cursor=cursor,
-            limit=limit,
+            limit=_limit(limit),
         )
 
     def holders(
@@ -260,7 +266,7 @@ class AvmBalanceIndexer:
             round=None if round is None else _id(round, "round"),
             include_zero=include_zero,
             cursor=cursor,
-            limit=limit,
+            limit=_limit(limit),
         )
 
     def token(self, kind: str, token_id: Id) -> TokenResponse:
@@ -278,7 +284,7 @@ class AvmBalanceIndexer:
 
     def holder_scan_page(self, scan_id: str, cursor: Optional[str] = None, limit: Optional[int] = None) -> ScanHoldersResponse:
         """A result page of a scan (readable while it runs)."""
-        return self._call(self._scans.get_holder_scan_result, self.chain, scan_id, cursor=cursor, limit=limit)
+        return self._call(self._scans.get_holder_scan_result, self.chain, scan_id, cursor=cursor, limit=_limit(limit))
 
     def cancel_holder_scan(self, scan_id: str) -> ScanResponse:
         """Cancels a scan."""
@@ -290,7 +296,7 @@ class AvmBalanceIndexer:
         """Every holding of an account, page by page."""
         cursor: Optional[str] = None
         while True:
-            page = self.account_tokens(address, include_zero=include_zero, cursor=cursor, limit=limit)
+            page = self.account_tokens(address, include_zero=include_zero, cursor=cursor, limit=_limit(limit))
             yield from page.items
             cursor = page.next_cursor
             if not cursor:
@@ -308,7 +314,7 @@ class AvmBalanceIndexer:
         """Every effect of an account and token, newest first."""
         cursor: Optional[str] = None
         while True:
-            page = self.history(address, kind, token_id, from_round=from_round, to_round=to_round, cursor=cursor, limit=limit)
+            page = self.history(address, kind, token_id, from_round=from_round, to_round=to_round, cursor=cursor, limit=_limit(limit))
             yield from page.items
             cursor = page.next_cursor
             if not cursor:
@@ -329,7 +335,7 @@ class AvmBalanceIndexer:
         """
         cursor: Optional[str] = None
         while True:
-            page = self.holders(kind, token_id, round=round, include_zero=include_zero, cursor=cursor, limit=limit)
+            page = self.holders(kind, token_id, round=round, include_zero=include_zero, cursor=cursor, limit=_limit(limit))
             if round is None:
                 round = page.round
             yield from page.items
@@ -357,7 +363,7 @@ class AvmBalanceIndexer:
         finished = False
         try:
             while True:
-                page = self.holder_scan_page(scan_id, cursor=cursor, limit=limit)
+                page = self.holder_scan_page(scan_id, cursor=cursor, limit=_limit(limit))
                 yield from page.items
                 if page.complete:
                     finished = True
@@ -397,7 +403,7 @@ def _to_api_error(error: ApiException) -> ApiError:
     if headers:
         raw = headers.get("Retry-After") or headers.get("retry-after")
         try:
-            retry_after = float(raw) if raw is not None and float(raw) > 0 else None
+            retry_after = float(raw) if raw is not None and 0 < float(raw) < 1e9 else None
         except ValueError:
             retry_after = None
     return ApiError(error.status or 0, message, retry_after, body)

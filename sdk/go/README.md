@@ -90,6 +90,8 @@ err = indexer.ForEachHistory(ctx, "ACCOUNT…", avm.Algo, 0, nil, func(e avm.Eff
 
 ## Pagination and consistent reads
 
+A page size (`limit`) outside 1 to 1000 is refused before anything is sent (TypeScript `RangeError`, Python `ValueError`, .NET `ArgumentOutOfRangeException`, Go `ErrInvalidArgument`, Rust `Error::InvalidArgument`).
+
 List responses carry `IndexedRound` (the round the data is as of) and `NextCursor` (opaque, pass it back as `Cursor`; `nil` on the last page). The `ForEach…` helpers do this for you.
 `ForEachHolder` without `Round` **pins the round of the first page** for all following pages, so the walk is consistent while the indexer advances. Set `Round` yourself to read a past state.
 

@@ -136,6 +136,16 @@ func IsNotFound(err error) bool {
 	return errors.As(err, &apiError) && apiError.IsNotFound()
 }
 
+// ErrInvalidArgument is wrapped by the errors for arguments the SDK refuses before sending anything.
+var ErrInvalidArgument = errors.New("avmbalanceindexer: invalid argument")
+
+func checkLimit(limit *int32) error {
+	if limit != nil && (*limit < 1 || *limit > 1000) {
+		return fmt.Errorf("%w: limit must be 1 to 1000 (got %d)", ErrInvalidArgument, *limit)
+	}
+	return nil
+}
+
 // call runs one generated request and decodes the JSON answer.
 func call[T any](do func() (*http.Response, error)) (*T, error) {
 	response, err := do()
@@ -167,7 +177,7 @@ func toAPIError(response *http.Response, body []byte) *APIError {
 		message = parsed.Error
 	}
 	var retryAfter time.Duration
-	if seconds, err := strconv.ParseFloat(response.Header.Get("Retry-After"), 64); err == nil && seconds > 0 {
+	if seconds, err := strconv.ParseFloat(response.Header.Get("Retry-After"), 64); err == nil && seconds > 0 && seconds < 1e9 {
 		retryAfter = time.Duration(seconds * float64(time.Second))
 	}
 	return &APIError{Status: response.StatusCode, Message: message, RetryAfter: retryAfter, Body: body}
@@ -180,6 +190,11 @@ func (c *Client) Status(ctx context.Context) (*StatusResponse, error) {
 
 // AccountTokens returns one page of the current holdings of an account. params may be nil.
 func (c *Client) AccountTokens(ctx context.Context, address string, params *GetAccountTokensParams) (*HoldingsResponse, error) {
+	if params != nil {
+		if err := checkLimit(params.Limit); err != nil {
+			return nil, err
+		}
+	}
 	return call[HoldingsResponse](func() (*http.Response, error) {
 		return c.api.GetAccountTokens(ctx, c.chain, address, params)
 	})
@@ -194,6 +209,11 @@ func (c *Client) Balance(ctx context.Context, address string, kind TokenKind, to
 
 // History returns one page of the balance effects of an account and token, newest first. params may be nil.
 func (c *Client) History(ctx context.Context, address string, kind TokenKind, tokenID uint64, params *GetTokenHistoryParams) (*HistoryResponse, error) {
+	if params != nil {
+		if err := checkLimit(params.Limit); err != nil {
+			return nil, err
+		}
+	}
 	return call[HistoryResponse](func() (*http.Response, error) {
 		return c.api.GetTokenHistory(ctx, c.chain, address, kind, tokenID, params)
 	})
@@ -201,6 +221,11 @@ func (c *Client) History(ctx context.Context, address string, kind TokenKind, to
 
 // Holders returns one page of the holders of a token at the end of a round, in account order. params may be nil.
 func (c *Client) Holders(ctx context.Context, kind TokenKind, tokenID uint64, params *GetTokenHoldersParams) (*HoldersResponse, error) {
+	if params != nil {
+		if err := checkLimit(params.Limit); err != nil {
+			return nil, err
+		}
+	}
 	return call[HoldersResponse](func() (*http.Response, error) {
 		return c.api.GetTokenHolders(ctx, c.chain, kind, tokenID, params)
 	})
@@ -228,6 +253,11 @@ func (c *Client) HolderScan(ctx context.Context, id string) (*ScanResponse, erro
 
 // HolderScanPage returns a result page of a scan; it can be read while the scan runs. params may be nil.
 func (c *Client) HolderScanPage(ctx context.Context, id string, params *GetHolderScanResultParams) (*ScanHoldersResponse, error) {
+	if params != nil {
+		if err := checkLimit(params.Limit); err != nil {
+			return nil, err
+		}
+	}
 	return call[ScanHoldersResponse](func() (*http.Response, error) {
 		return c.api.GetHolderScanResult(ctx, c.chain, id, params)
 	})

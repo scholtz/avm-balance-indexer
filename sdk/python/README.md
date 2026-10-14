@@ -82,6 +82,8 @@ for effect in indexer.iter_history("ACCOUNT…", "algo", 0, from_round=1_000_000
 
 ## Pagination and consistent reads
 
+A page size (`limit`) outside 1 to 1000 is refused before anything is sent (TypeScript `RangeError`, Python `ValueError`, .NET `ArgumentOutOfRangeException`, Go `ErrInvalidArgument`, Rust `Error::InvalidArgument`).
+
 List responses carry `indexed_round` (the round the data is as of) and `next_cursor` (opaque, pass it back as `cursor`; `None` on the last page). The `iter_…` helpers do this for you.
 `iter_holders` without `round` **pins the round of the first page** for all following pages, so the walk is consistent while the indexer advances. Pass `round` yourself to read a past state.
 

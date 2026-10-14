@@ -20,7 +20,11 @@ internal partial class GeneratedClient
         foreach (var (name, value) in ExtraHeaders)
         {
             request.Headers.Remove(name);
-            request.Headers.TryAddWithoutValidation(name, value);
+            request.Content?.Headers.Remove(name);
+            if (!request.Headers.TryAddWithoutValidation(name, value))
+            {
+                request.Content?.Headers.TryAddWithoutValidation(name, value);
+            }
         }
     }
 }

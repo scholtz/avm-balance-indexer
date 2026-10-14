@@ -123,7 +123,8 @@ async fn convert(error: progenitor_client::Error<ErrorResponse>) -> Error {
 
 fn retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
     let seconds: f64 = headers.get("retry-after")?.to_str().ok()?.trim().parse().ok()?;
-    (seconds > 0.0).then(|| Duration::from_secs_f64(seconds))
+    // "inf", NaN and absurd values from a misbehaving proxy are ignored rather than turned into a panic.
+    (seconds > 0.0 && seconds < 1e9).then(|| Duration::from_secs_f64(seconds))
 }
 
 async fn unwrap<T>(result: std::result::Result<ResponseValue<T>, progenitor_client::Error<ErrorResponse>>) -> Result<T> {

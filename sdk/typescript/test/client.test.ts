@@ -276,6 +276,18 @@ describe("pagination", () => {
     assert.ok(requests.some((r) => r.method === "DELETE"));
   });
 
+  it("rejects a page size outside 1 to 1000 before sending anything", async () => {
+    const client = AvmBalanceIndexer.algorandMainnet({ baseUrl });
+    await assert.rejects(() => client.holders("asa", 1, { limit: 0 }), RangeError);
+    await assert.rejects(() => client.accountTokens("A", { limit: 5000 }), RangeError);
+    await assert.rejects(() => client.holders("asa", 1, { limit: 1.5 }), RangeError);
+    assert.equal(requests.length, 0);
+  });
+
+  it("rejects inherited property names as chains", () => {
+    assert.throws(() => new AvmBalanceIndexer({ chain: "constructor" as never }), RangeError);
+  });
+
   it("rejects blank and non-numeric ids", async () => {
     const client = AvmBalanceIndexer.algorandMainnet({ baseUrl });
     await assert.rejects(() => client.token("asa", ""), RangeError);

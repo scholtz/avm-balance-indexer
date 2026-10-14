@@ -163,6 +163,13 @@ function toNumber(value: Id, what: string): number {
   return n;
 }
 
+function checkLimit(limit: number | undefined): number | undefined {
+  if (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 1000)) {
+    throw new RangeError(`limit must be an integer from 1 to 1000 (got ${String(limit)})`);
+  }
+  return limit;
+}
+
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
@@ -202,7 +209,7 @@ export class AvmBalanceIndexer {
 
   constructor(options: ClientOptions = {}) {
     this.chain = options.chain ?? Chains.AlgorandMainnet;
-    if (!(this.chain in DEFAULT_BASE_URLS)) {
+    if (!Object.hasOwn(DEFAULT_BASE_URLS, this.chain)) {
       throw new RangeError(`Unknown chain "${String(this.chain)}"; use one of ${Object.values(Chains).join(", ")}`);
     }
     this.baseUrl = (options.baseUrl ?? DEFAULT_BASE_URLS[this.chain]).replace(/\/+$/, "");
@@ -286,7 +293,7 @@ export class AvmBalanceIndexer {
   accountTokens(address: string, options: AccountTokensOptions = {}): Promise<HoldingsResponse> {
     return this.call(() =>
       this.balances.getAccountTokens(
-        { chain: this.c, address, includeZero: options.includeZero, cursor: options.cursor, limit: options.limit },
+        { chain: this.c, address, includeZero: options.includeZero, cursor: options.cursor, limit: checkLimit(options.limit) },
         { signal: options.signal },
       ),
     );
@@ -320,7 +327,7 @@ export class AvmBalanceIndexer {
           fromRound: options.fromRound === undefined ? undefined : toNumber(options.fromRound, "fromRound"),
           toRound: options.toRound === undefined ? undefined : toNumber(options.toRound, "toRound"),
           cursor: options.cursor,
-          limit: options.limit,
+          limit: checkLimit(options.limit),
         },
         { signal: options.signal },
       ),
@@ -338,7 +345,7 @@ export class AvmBalanceIndexer {
           round: options.round === undefined ? undefined : toNumber(options.round, "round"),
           includeZero: options.includeZero,
           cursor: options.cursor,
-          limit: options.limit,
+          limit: checkLimit(options.limit),
         },
         { signal: options.signal },
       ),
@@ -375,7 +382,7 @@ export class AvmBalanceIndexer {
 
   /** A result page of a scan (readable while it runs). */
   holderScanPage(id: string, options: PageOptions = {}): Promise<ScanHoldersResponse> {
-    return this.call(() => this.scans.getHolderScanResult({ chain: this.c, id, cursor: options.cursor, limit: options.limit }, { signal: options.signal }));
+    return this.call(() => this.scans.getHolderScanResult({ chain: this.c, id, cursor: options.cursor, limit: checkLimit(options.limit) }, { signal: options.signal }));
   }
 
   /** Cancels a scan. */

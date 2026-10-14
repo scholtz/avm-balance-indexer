@@ -102,6 +102,16 @@ public sealed class AvmBalanceIndexerClient : IDisposable
         _ownsHttpClient = options.HttpClient is null;
         _http = options.HttpClient ?? new HttpClient { Timeout = options.Timeout };
         var headers = new Dictionary<string, string>(options.Headers);
+        foreach (var (name, value) in headers)
+        {
+            // Fail now, not silently on every request: a header the framework refuses.
+            using var probe = new HttpRequestMessage { Content = new ByteArrayContent([]) };
+            if (!probe.Headers.TryAddWithoutValidation(name, value) && !probe.Content.Headers.TryAddWithoutValidation(name, value))
+            {
+                throw new ArgumentException($"The header \"{name}\" cannot be sent.", nameof(options));
+            }
+        }
+
         _api = new GeneratedClient(_http)
         {
             ReadResponseAsString = true,
@@ -151,7 +161,7 @@ public sealed class AvmBalanceIndexerClient : IDisposable
 
     /// <summary>Current holdings of an account (one page).</summary>
     public Task<HoldingsResponse> GetAccountTokensAsync(string address, bool? includeZero = null, string? cursor = null, int? limit = null, CancellationToken cancellationToken = default) =>
-        CallAsync(() => _api.GetAccountTokensAsync(Chain, address, includeZero, cursor, limit, cancellationToken));
+        CallAsync(() => { ValidateLimit(limit); return _api.GetAccountTokensAsync(Chain, address, includeZero, cursor, limit, cancellationToken); });
 
     /// <summary>End-of-round balance of an account and token. <c>Amount</c> is a decimal string (use <see cref="System.Numerics.BigInteger.Parse(string)"/>).</summary>
     public Task<BalanceResponse> GetBalanceAsync(string address, TokenKind kind, ulong tokenId, ulong? round = null, CancellationToken cancellationToken = default) =>
@@ -159,11 +169,11 @@ public sealed class AvmBalanceIndexerClient : IDisposable
 
     /// <summary>Balance effects of an account and token, newest first (one page).</summary>
     public Task<HistoryResponse> GetHistoryAsync(string address, TokenKind kind, ulong tokenId, ulong? fromRound = null, ulong? toRound = null, string? cursor = null, int? limit = null, CancellationToken cancellationToken = default) =>
-        CallAsync(() => _api.GetTokenHistoryAsync(Chain, address, kind, tokenId, fromRound, toRound, cursor, limit, cancellationToken));
+        CallAsync(() => { ValidateLimit(limit); return _api.GetTokenHistoryAsync(Chain, address, kind, tokenId, fromRound, toRound, cursor, limit, cancellationToken); });
 
     /// <summary>Holders of a token at the end of a round (one page, in account order).</summary>
     public Task<HoldersResponse> GetHoldersAsync(TokenKind kind, ulong tokenId, ulong? round = null, bool? includeZero = null, string? cursor = null, int? limit = null, CancellationToken cancellationToken = default) =>
-        CallAsync(() => _api.GetTokenHoldersAsync(Chain, kind, tokenId, round, includeZero, cursor, limit, cancellationToken));
+        CallAsync(() => { ValidateLimit(limit); return _api.GetTokenHoldersAsync(Chain, kind, tokenId, round, includeZero, cursor, limit, cancellationToken); });
 
     /// <summary>Token metadata (symbol, name, decimals, standard).</summary>
     public Task<TokenResponse> GetTokenAsync(TokenKind kind, ulong tokenId, CancellationToken cancellationToken = default) =>
@@ -179,7 +189,7 @@ public sealed class AvmBalanceIndexerClient : IDisposable
 
     /// <summary>A result page of a scan (readable while it runs).</summary>
     public Task<ScanHoldersResponse> GetHolderScanPageAsync(string scanId, string? cursor = null, int? limit = null, CancellationToken cancellationToken = default) =>
-        CallAsync(() => _api.GetHolderScanResultAsync(Chain, scanId, cursor, limit, cancellationToken));
+        CallAsync(() => { ValidateLimit(limit); return _api.GetHolderScanResultAsync(Chain, scanId, cursor, limit, cancellationToken); });
 
     /// <summary>Cancels a scan.</summary>
     public Task<ScanResponse> CancelHolderScanAsync(string scanId, CancellationToken cancellationToken = default) =>
@@ -305,6 +315,14 @@ public sealed class AvmBalanceIndexerClient : IDisposable
         }
     }
 
+    private static void ValidateLimit(int? limit)
+    {
+        if (limit is < 1 or > 1000)
+        {
+            throw new ArgumentOutOfRangeException(nameof(limit), limit, "limit must be from 1 to 1000.");
+        }
+    }
+
     private async Task<T> CallAsync<T>(Func<Task<T>> call)
     {
         try
@@ -347,7 +365,7 @@ public sealed class AvmBalanceIndexerClient : IDisposable
         }
 
         TimeSpan? retryAfter = null;
-        if (error.Headers.TryGetValue("Retry-After", out var values) && double.TryParse(values.FirstOrDefault(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var seconds) && seconds > 0)
+        if (error.Headers.TryGetValue("Retry-After", out var values) && double.TryParse(values.FirstOrDefault(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var seconds) && seconds > 0 && seconds < 1e9)
         {
             retryAfter = TimeSpan.FromSeconds(seconds);
         }

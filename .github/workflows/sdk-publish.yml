@@ -51,12 +51,9 @@ jobs:
       VERSION: ${{ needs.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
-      - name: Is it needed?
+      - name: Is this version already published?
         id: need
-        env:
-          HAS_TOKEN: ${{ secrets.NPM_TOKEN != '' }}
         run: |
-          if [ "$HAS_TOKEN" != true ]; then echo "::notice title=npm::NPM_TOKEN is not set; skipping (docs/sdk-publishing.md)"; echo "publish=false" >> "$GITHUB_OUTPUT"; exit 0; fi
           status="$(curl -s -o /dev/null -w '%{http_code}' "https://registry.npmjs.org/@scholtz%2favm-balance-indexer/$VERSION")"
           case "$status" in
             200) echo "::notice title=npm::@scholtz/avm-balance-indexer $VERSION is already published"; echo "publish=false" >> "$GITHUB_OUTPUT" ;;
@@ -93,18 +90,28 @@ jobs:
     outputs:
       published: ${{ steps.done.outputs.published }}
     steps:
+      - name: Is the token configured?
+        id: token
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NPM_TOKEN" ]; then echo "::notice title=npm::NPM_TOKEN is not set (repository secret or secret of the environment sdk-publish); skipping (docs/sdk-publishing.md)"; echo "ok=false" >> "$GITHUB_OUTPUT"; else echo "ok=true" >> "$GITHUB_OUTPUT"; fi
       - uses: actions/download-artifact@v8
+        if: steps.token.outputs.ok == 'true'
         with:
           name: npm-package
       - uses: actions/setup-node@v4
+        if: steps.token.outputs.ok == 'true'
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
       - name: Publish the tested package
+        if: steps.token.outputs.ok == 'true'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish ./*.tgz --access public --provenance
       - id: done
+        if: steps.token.outputs.ok == 'true'
         run: echo "published=true" >> "$GITHUB_OUTPUT"
 
   pypi-build:
@@ -113,21 +120,13 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       publish: ${{ steps.need.outputs.publish }}
-      token: ${{ steps.need.outputs.token }}
     env:
       VERSION: ${{ needs.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
-      - name: Is it needed?
+      - name: Is this version already published?
         id: need
-        env:
-          HAS_TOKEN: ${{ secrets.PYPI_API_TOKEN != '' }}
-          TRUSTED: ${{ vars.PYPI_TRUSTED_PUBLISHING }}
         run: |
-          if [ "$HAS_TOKEN" != true ] && [ "$TRUSTED" != "true" ]; then
-            echo "::notice title=PyPI::Neither PYPI_API_TOKEN nor the variable PYPI_TRUSTED_PUBLISHING=true is set; skipping (docs/sdk-publishing.md)"; echo "publish=false" >> "$GITHUB_OUTPUT"; exit 0
-          fi
-          echo "token=$HAS_TOKEN" >> "$GITHUB_OUTPUT"
           status="$(curl -s -o /dev/null -w '%{http_code}' "https://pypi.org/pypi/avm-balance-indexer/$VERSION/json")"
           case "$status" in
             200) echo "::notice title=PyPI::avm-balance-indexer $VERSION is already published"; echo "publish=false" >> "$GITHUB_OUTPUT" ;;
@@ -165,19 +164,33 @@ jobs:
     outputs:
       published: ${{ steps.done.outputs.published }}
     steps:
+      - name: Which credentials are configured?
+        id: credentials
+        env:
+          PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+          TRUSTED: ${{ vars.PYPI_TRUSTED_PUBLISHING }}
+        run: |
+          if [ -n "$PYPI_API_TOKEN" ]; then echo "mode=token" >> "$GITHUB_OUTPUT"
+          elif [ "$TRUSTED" = true ]; then echo "mode=trusted" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice title=PyPI::Neither PYPI_API_TOKEN nor the variable PYPI_TRUSTED_PUBLISHING=true is set; skipping (docs/sdk-publishing.md)"
+            echo "mode=none" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/download-artifact@v8
+        if: steps.credentials.outputs.mode != 'none'
         with:
           name: python-dist
           path: dist
       - name: Upload with the API token
-        if: needs.pypi-build.outputs.token == 'true'
+        if: steps.credentials.outputs.mode == 'token'
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}
       - name: Upload with trusted publishing
-        if: needs.pypi-build.outputs.token != 'true'
+        if: steps.credentials.outputs.mode == 'trusted'
         uses: pypa/gh-action-pypi-publish@release/v1
       - id: done
+        if: steps.credentials.outputs.mode != 'none'
         run: echo "published=true" >> "$GITHUB_OUTPUT"
 
   nuget:

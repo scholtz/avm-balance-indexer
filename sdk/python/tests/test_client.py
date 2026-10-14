@@ -144,6 +144,16 @@ def test_invalid_arguments_never_reach_the_server(server):
     assert server.requests == []
 
 
+@pytest.mark.parametrize("limit", [0, 1001, 1.5, True, "10"])
+def test_a_page_size_outside_1_to_1000_never_reaches_the_server(server, limit):
+    client = AvmBalanceIndexer.algorand_mainnet(base_url=server.url)
+    with pytest.raises(ValueError):
+        client.holders("asa", 1, limit=limit)
+    with pytest.raises(ValueError):
+        client.account_tokens("ADDRESS", limit=limit)
+    assert server.requests == []
+
+
 def test_scan_request_is_posted(server):
     server.handler = lambda r: (202, scan_body("Pending", False), {})
     client = AvmBalanceIndexer.algorand_mainnet(base_url=server.url)

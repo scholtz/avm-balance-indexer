@@ -98,6 +98,8 @@ await foreach (var effect in indexer.EnumerateHistoryAsync("ACCOUNT…", TokenKi
 
 ## Pagination and consistent reads
 
+A page size (`limit`) outside 1 to 1000 is refused before anything is sent (TypeScript `RangeError`, Python `ValueError`, .NET `ArgumentOutOfRangeException`, Go `ErrInvalidArgument`, Rust `Error::InvalidArgument`).
+
 List responses carry `IndexedRound` (the round the data is as of) and `NextCursor` (opaque, pass it back as `cursor`; `null` on the last page). The `Enumerate…Async` helpers do this for you.
 `EnumerateHoldersAsync` without `round` **pins the round of the first page** for all following pages, so the walk is consistent while the indexer advances. Pass `round` yourself to read a past state.
 

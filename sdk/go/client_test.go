@@ -137,6 +137,20 @@ func TestQueryParameters(t *testing.T) {
 	}
 }
 
+func TestAPageSizeOutsideOneToAThousandIsRejectedBeforeSending(t *testing.T) {
+	server, requests := fakeServer(t, func(r *http.Request) (int, any, map[string]string) { return 500, map[string]any{"error": "unexpected"}, nil })
+	client, _ := avm.New(avm.AlgorandMainnet, &avm.Options{BaseURL: server.URL})
+	for _, limit := range []int32{0, -1, 1001} {
+		limit := limit
+		if _, err := client.Holders(context.Background(), avm.Asa, 1, &avm.GetTokenHoldersParams{Limit: &limit}); !errors.Is(err, avm.ErrInvalidArgument) {
+			t.Errorf("limit %d: expected ErrInvalidArgument, got %v", limit, err)
+		}
+	}
+	if len(*requests) != 0 {
+		t.Errorf("%d requests were sent", len(*requests))
+	}
+}
+
 func TestErrorStatusBecomesAPIError(t *testing.T) {
 	server, _ := fakeServer(t, func(r *http.Request) (int, any, map[string]string) {
 		return 429, map[string]any{"error": "slow down"}, map[string]string{"Retry-After": "7"}

@@ -97,6 +97,26 @@ public sealed class ClientTests
     }
 
     [Fact]
+    public async Task A_Page_Size_Outside_1_To_1000_Is_Rejected_Before_Sending()
+    {
+        var handler = new FakeHandler(_ => Json(HttpStatusCode.OK, new { }));
+        using var client = Client(handler);
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => client.GetHoldersAsync(TokenKind.Asa, 1, limit: 0));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => client.GetAccountTokensAsync("A", limit: 5000));
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public void A_Header_The_Framework_Refuses_Fails_At_Construction()
+    {
+        var options = new AvmBalanceIndexerOptions { BaseUrl = new Uri("http://indexer.test") };
+        options.Headers["bad header name"] = "x";
+
+        Assert.Throws<ArgumentException>(() => new AvmBalanceIndexerClient(options));
+    }
+
+    [Fact]
     public async Task Query_Parameters_And_Enum_Values_Are_Serialised()
     {
         var handler = new FakeHandler(_ => Json(HttpStatusCode.OK, new { token = new { kind = "asa", tokenId = 31566704 }, round = 9, indexedRound = 9, items = Array.Empty<object>(), nextCursor = (string?)null }));
