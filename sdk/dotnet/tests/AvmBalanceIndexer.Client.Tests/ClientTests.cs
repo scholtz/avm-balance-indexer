@@ -257,6 +257,37 @@ public sealed class ClientTests
     }
 
     [Fact]
+    public async Task An_Export_Validates_The_Page_Size_Before_It_Starts_A_Scan()
+    {
+        var handler = new FakeHandler(_ => Json(HttpStatusCode.OK, new { }));
+        using var client = Client(handler);
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () =>
+        {
+            await foreach (var _ in client.ExportHoldersAsync(TokenKind.Asa, 1, limit: 0))
+            {
+            }
+        });
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task Stopping_Inside_The_Last_Page_Does_Not_Cancel_A_Finished_Scan()
+    {
+        var handler = new FakeHandler(request => request.Method == HttpMethod.Post
+            ? Json(HttpStatusCode.Accepted, Scan("Pending", false))
+            : Json(HttpStatusCode.OK, new { id = "11111111-1111-1111-1111-111111111111", state = "Completed", complete = true, round = 5, items = new[] { Holder("A"), Holder("B") }, nextCursor = (string?)null }));
+        using var client = Client(handler);
+
+        await foreach (var _ in client.ExportHoldersAsync(TokenKind.Asa, 1))
+        {
+            break;
+        }
+
+        Assert.DoesNotContain(handler.Requests, r => r.Method == HttpMethod.Delete);
+    }
+
+    [Fact]
     public async Task Stopping_An_Export_Early_Cancels_The_Scan()
     {
         var handler = new FakeHandler(request =>

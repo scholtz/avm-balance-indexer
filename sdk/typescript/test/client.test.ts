@@ -284,6 +284,30 @@ describe("pagination", () => {
     assert.equal(requests.length, 0);
   });
 
+  it("validates the page size of an export before it starts a scan", async () => {
+    const client = AvmBalanceIndexer.algorandMainnet({ baseUrl });
+    await assert.rejects(async () => {
+      for await (const _ of client.exportHolders("asa", 1, { limit: 0 })) {
+        // never reached
+      }
+    }, RangeError);
+    assert.equal(requests.length, 0);
+  });
+
+  it("does not cancel a scan that has finished when the consumer stops inside the last page", async () => {
+    handler = (request, response) => {
+      if (request.method === "POST") json(response, 202, scanBody("Pending", false));
+      else json(response, 200, { id: "s1", state: "Completed", complete: true, round: 5, items: [holder("A"), holder("B")], nextCursor: null });
+    };
+    const client = AvmBalanceIndexer.algorandMainnet({ baseUrl });
+
+    for await (const _ of client.exportHolders("asa", 1)) {
+      break;
+    }
+
+    assert.ok(!requests.some((r) => r.method === "DELETE"));
+  });
+
   it("rejects inherited property names as chains", () => {
     assert.throws(() => new AvmBalanceIndexer({ chain: "constructor" as never }), RangeError);
   });

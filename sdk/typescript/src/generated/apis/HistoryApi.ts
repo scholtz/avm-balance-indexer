@@ -56,8 +56,8 @@ export interface HistoryApiInterface {
      * @param {string} address 
      * @param {TokenKind} kind Token kind: algo (native), asa (Algorand Standard Asset, also ARC-20) or arc200 (application token).
      * @param {number} tokenId Asset id, application id, or 0 for the native token.
-     * @param {number} [fromRound] Chain round (end-of-round state). Omit for the latest published round.
-     * @param {number} [toRound] Chain round (end-of-round state). Omit for the latest published round.
+     * @param {number} [fromRound] Oldest round to include. Omit for no lower bound.
+     * @param {number} [toRound] Newest round to include. Omit for no upper bound.
      * @param {string} [cursor] Opaque cursor from the previous page\&#39;s nextCursor.
      * @param {number} [limit] Page size, 1 to 1000 (default 100).
      * @param {*} [options] Override http request option.

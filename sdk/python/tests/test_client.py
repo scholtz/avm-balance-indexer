@@ -281,6 +281,29 @@ def test_stopping_an_export_early_cancels_the_scan(server):
     assert any(r["method"] == "DELETE" for r in server.requests)
 
 
+def test_export_validates_the_page_size_before_it_starts_a_scan(server):
+    client = AvmBalanceIndexer.algorand_mainnet(base_url=server.url)
+    with pytest.raises(ValueError):
+        list(client.export_holders("asa", 1, limit=0))
+    assert server.requests == []
+
+
+def test_stopping_inside_the_last_page_does_not_cancel_a_finished_scan(server):
+    def handler(request):
+        if request["method"] == "POST":
+            return 202, scan_body("Pending", False), {}
+        return 200, {"id": "s", "state": "Completed", "complete": True, "round": 5, "items": [holder("A"), holder("B")], "nextCursor": None}, {}
+
+    server.handler = handler
+    client = AvmBalanceIndexer.algorand_mainnet(base_url=server.url)
+
+    export = client.export_holders("asa", 1)
+    assert next(export).account == "A"
+    export.close()
+
+    assert not any(r["method"] == "DELETE" for r in server.requests)
+
+
 @pytest.mark.parametrize("bad", ["", " ", "1.5", 1.9, True, None, -1])
 def test_blank_or_non_integer_ids_are_rejected(server, bad):
     client = AvmBalanceIndexer.algorand_mainnet(base_url=server.url)

@@ -9,7 +9,8 @@ The workflow [`Publish SDKs`](../.github/workflows/sdk-publish.yml) runs when a 
 1. **Verify**: the whole [`SDKs`](../.github/workflows/sdk.yml) workflow (versions, regenerated code, tests and packaging of all five languages). Nothing is published if it fails.
 2. **Per registry**, in parallel: if the secret of that registry is configured and **the version in `sdk/VERSION` is not in the registry yet**, the package is tested again and published.
    Otherwise the job ends with a notice ("secret not set" or "already published"); that is not an error.
-3. **Go**: the tag `sdk/go/vX.Y.Z` is created (the Go module proxy serves tags, there is nothing to upload).
+3. **Go**: the tag `sdk/go/vX.Y.Z` is created (the Go module proxy serves tags, there is nothing to upload), but only together with a registry release of this run, so that all SDKs of one version are built from one commit.
+   If you publish no package to any registry, create the tag by hand: `git tag -a sdk/go/vX.Y.Z -m "Go SDK X.Y.Z" <commit> && git push origin sdk/go/vX.Y.Z`.
 4. **Release**: a GitHub release `sdk-vX.Y.Z` with generated notes, once.
 
 So *code change merged* publishes only when the version was raised. Raise it in the same pull request: `sdk/scripts/set-version.sh 1.1.0` (all manifests) and commit. MAJOR = breaking change of the SDK surface,
@@ -21,7 +22,7 @@ MINOR = new feature, PATCH = fix or regenerated code. A pull request that change
 | PyPI | `avm-balance-indexer` | secret `PYPI_API_TOKEN` **or** variable `PYPI_TRUSTED_PUBLISHING=true` | yes |
 | NuGet | `AvmBalanceIndexer.Client` | secret `NUGET_API_KEY` | yes |
 | crates.io | `avm-balance-indexer` | secret `CARGO_REGISTRY_TOKEN` | yes |
-| Go modules | `github.com/scholtz/avm-balance-indexer/sdk/go` | none (the built-in `GITHUB_TOKEN` pushes the tag) | no |
+| Go modules | `github.com/scholtz/avm-balance-indexer/sdk/go` | none (the built-in `GITHUB_TOKEN` pushes the tag) | tagged with the first registry release |
 
 The package names are the defaults of this repository. If a name is taken or you publish under another account, change it in `sdk/typescript/package.json`, `sdk/python/pyproject.toml`,
 `sdk/dotnet/src/AvmBalanceIndexer.Client/AvmBalanceIndexer.Client.csproj` and `sdk/rust/Cargo.toml` (and the existence checks in `sdk-publish.yml`, which use the same names).

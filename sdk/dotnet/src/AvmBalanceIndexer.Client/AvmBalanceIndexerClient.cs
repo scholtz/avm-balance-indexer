@@ -257,6 +257,7 @@ public sealed class AvmBalanceIndexerClient : IDisposable
     /// </summary>
     public async IAsyncEnumerable<HolderDto> ExportHoldersAsync(TokenKind kind, ulong tokenId, ulong? round = null, bool? includeZero = null, TimeSpan? pollInterval = null, int? limit = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        ValidateLimit(limit); // before the scan exists
         var started = await StartHolderScanAsync(kind, tokenId, round, includeZero, cancellationToken).ConfigureAwait(false);
         var scanId = started.Id.ToString();
         var wait = pollInterval ?? TimeSpan.FromSeconds(1);
@@ -267,6 +268,9 @@ public sealed class AvmBalanceIndexerClient : IDisposable
             while (true)
             {
                 var page = await GetHolderScanPageAsync(scanId, cursor, limit, cancellationToken).ConfigureAwait(false);
+
+                // A finished scan has nothing left to release, whatever the consumer does with the last rows.
+                finished = page.Complete;
                 foreach (var item in page.Items)
                 {
                     yield return item;
@@ -274,7 +278,6 @@ public sealed class AvmBalanceIndexerClient : IDisposable
 
                 if (page.Complete)
                 {
-                    finished = true;
                     yield break;
                 }
 

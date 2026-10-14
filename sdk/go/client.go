@@ -358,6 +358,9 @@ type ExportOptions struct {
 // ExportHolders exports every holder of a token through an asynchronous scan: it starts the scan, waits for it and calls fn for each
 // holder. It works for tokens of any size and returns a *ScanError if the scan fails or is cancelled. Stopping early (fn returns an error, the context ends) cancels the scan on the server.
 func (c *Client) ExportHolders(ctx context.Context, kind TokenKind, tokenID uint64, options ExportOptions, fn func(HolderDto) error) error {
+	if err := checkLimit(options.Limit); err != nil { // before the scan exists
+		return err
+	}
 	started, err := c.StartHolderScan(ctx, kind, tokenID, &ScanRequest{Round: options.Round, IncludeZero: options.IncludeZero})
 	if err != nil {
 		return err
@@ -382,13 +385,14 @@ func (c *Client) ExportHolders(ctx context.Context, kind TokenKind, tokenID uint
 		if err != nil {
 			return err
 		}
+		// A finished scan has nothing left to release, whatever fn does with the last rows.
+		finished = result.Complete
 		for _, item := range result.Items {
 			if err := fn(item); err != nil {
 				return err
 			}
 		}
 		if result.Complete {
-			finished = true
 			return nil
 		}
 		if result.NextCursor != nil && *result.NextCursor != "" {

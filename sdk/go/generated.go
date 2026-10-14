@@ -189,10 +189,10 @@ type GetTokenBalanceParams struct {
 
 // GetTokenHistoryParams defines parameters for GetTokenHistory.
 type GetTokenHistoryParams struct {
-	// FromRound Chain round (end-of-round state). Omit for the latest published round.
+	// FromRound Oldest round to include. Omit for no lower bound.
 	FromRound *uint64 `form:"fromRound,omitempty" json:"fromRound,omitempty"`
 
-	// ToRound Chain round (end-of-round state). Omit for the latest published round.
+	// ToRound Newest round to include. Omit for no upper bound.
 	ToRound *uint64 `form:"toRound,omitempty" json:"toRound,omitempty"`
 
 	// Cursor Opaque cursor from the previous page's nextCursor.

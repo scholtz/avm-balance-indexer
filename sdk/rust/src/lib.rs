@@ -442,6 +442,7 @@ impl AvmBalanceIndexer {
                 match phase {
                     Phase::Done => Ok(None),
                     Phase::Start => {
+                        page_size(options.limit)?; // before the scan exists
                         let started = self
                             .start_holder_scan(kind, token_id, ScanRequest { include_zero: options.include_zero, round: options.round })
                             .await?;

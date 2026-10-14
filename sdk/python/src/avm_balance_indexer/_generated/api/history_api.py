@@ -48,8 +48,8 @@ class HistoryApi:
         address: StrictStr,
         kind: Annotated[TokenKind, Field(description="Token kind: algo (native), asa (Algorand Standard Asset, also ARC-20) or arc200 (application token).")],
         token_id: Annotated[StrictInt, Field(description="Asset id, application id, or 0 for the native token.")],
-        from_round: Annotated[Optional[StrictInt], Field(description="Chain round (end-of-round state). Omit for the latest published round.")] = None,
-        to_round: Annotated[Optional[StrictInt], Field(description="Chain round (end-of-round state). Omit for the latest published round.")] = None,
+        from_round: Annotated[Optional[StrictInt], Field(description="Oldest round to include. Omit for no lower bound.")] = None,
+        to_round: Annotated[Optional[StrictInt], Field(description="Newest round to include. Omit for no upper bound.")] = None,
         cursor: Annotated[Optional[StrictStr], Field(description="Opaque cursor from the previous page's nextCursor.")] = None,
         limit: Annotated[Optional[Annotated[int, Field(le=1000, strict=True, ge=1)]], Field(description="Page size, 1 to 1000 (default 100).")] = None,
         _request_timeout: Union[
@@ -77,9 +77,9 @@ class HistoryApi:
         :type kind: TokenKind
         :param token_id: Asset id, application id, or 0 for the native token. (required)
         :type token_id: int
-        :param from_round: Chain round (end-of-round state). Omit for the latest published round.
+        :param from_round: Oldest round to include. Omit for no lower bound.
         :type from_round: int
-        :param to_round: Chain round (end-of-round state). Omit for the latest published round.
+        :param to_round: Newest round to include. Omit for no upper bound.
         :type to_round: int
         :param cursor: Opaque cursor from the previous page's nextCursor.
         :type cursor: str
@@ -147,8 +147,8 @@ class HistoryApi:
         address: StrictStr,
         kind: Annotated[TokenKind, Field(description="Token kind: algo (native), asa (Algorand Standard Asset, also ARC-20) or arc200 (application token).")],
         token_id: Annotated[StrictInt, Field(description="Asset id, application id, or 0 for the native token.")],
-        from_round: Annotated[Optional[StrictInt], Field(description="Chain round (end-of-round state). Omit for the latest published round.")] = None,
-        to_round: Annotated[Optional[StrictInt], Field(description="Chain round (end-of-round state). Omit for the latest published round.")] = None,
+        from_round: Annotated[Optional[StrictInt], Field(description="Oldest round to include. Omit for no lower bound.")] = None,
+        to_round: Annotated[Optional[StrictInt], Field(description="Newest round to include. Omit for no upper bound.")] = None,
         cursor: Annotated[Optional[StrictStr], Field(description="Opaque cursor from the previous page's nextCursor.")] = None,
         limit: Annotated[Optional[Annotated[int, Field(le=1000, strict=True, ge=1)]], Field(description="Page size, 1 to 1000 (default 100).")] = None,
         _request_timeout: Union[
@@ -176,9 +176,9 @@ class HistoryApi:
         :type kind: TokenKind
         :param token_id: Asset id, application id, or 0 for the native token. (required)
         :type token_id: int
-        :param from_round: Chain round (end-of-round state). Omit for the latest published round.
+        :param from_round: Oldest round to include. Omit for no lower bound.
         :type from_round: int
-        :param to_round: Chain round (end-of-round state). Omit for the latest published round.
+        :param to_round: Newest round to include. Omit for no upper bound.
         :type to_round: int
         :param cursor: Opaque cursor from the previous page's nextCursor.
         :type cursor: str
@@ -246,8 +246,8 @@ class HistoryApi:
         address: StrictStr,
         kind: Annotated[TokenKind, Field(description="Token kind: algo (native), asa (Algorand Standard Asset, also ARC-20) or arc200 (application token).")],
         token_id: Annotated[StrictInt, Field(description="Asset id, application id, or 0 for the native token.")],
-        from_round: Annotated[Optional[StrictInt], Field(description="Chain round (end-of-round state). Omit for the latest published round.")] = None,
-        to_round: Annotated[Optional[StrictInt], Field(description="Chain round (end-of-round state). Omit for the latest published round.")] = None,
+        from_round: Annotated[Optional[StrictInt], Field(description="Oldest round to include. Omit for no lower bound.")] = None,
+        to_round: Annotated[Optional[StrictInt], Field(description="Newest round to include. Omit for no upper bound.")] = None,
         cursor: Annotated[Optional[StrictStr], Field(description="Opaque cursor from the previous page's nextCursor.")] = None,
         limit: Annotated[Optional[Annotated[int, Field(le=1000, strict=True, ge=1)]], Field(description="Page size, 1 to 1000 (default 100).")] = None,
         _request_timeout: Union[
@@ -275,9 +275,9 @@ class HistoryApi:
         :type kind: TokenKind
         :param token_id: Asset id, application id, or 0 for the native token. (required)
         :type token_id: int
-        :param from_round: Chain round (end-of-round state). Omit for the latest published round.
+        :param from_round: Oldest round to include. Omit for no lower bound.
         :type from_round: int
-        :param to_round: Chain round (end-of-round state). Omit for the latest published round.
+        :param to_round: Newest round to include. Omit for no upper bound.
         :type to_round: int
         :param cursor: Opaque cursor from the previous page's nextCursor.
         :type cursor: str

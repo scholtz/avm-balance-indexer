@@ -310,6 +310,42 @@ func TestExportHoldersWaitsForTheScanAndKeepsItsCursor(t *testing.T) {
 	}
 }
 
+func TestExportValidatesThePageSizeBeforeStartingAScan(t *testing.T) {
+	server, requests := fakeServer(t, func(r *http.Request) (int, any, map[string]string) {
+		return 500, map[string]any{"error": "unexpected"}, nil
+	})
+	client, _ := avm.New(avm.AlgorandMainnet, &avm.Options{BaseURL: server.URL})
+	limit := int32(0)
+
+	err := client.ExportHolders(context.Background(), avm.Asa, 1, avm.ExportOptions{Limit: &limit}, func(avm.HolderDto) error { return nil })
+
+	if !errors.Is(err, avm.ErrInvalidArgument) || len(*requests) != 0 {
+		t.Fatalf("err %v, %d requests", err, len(*requests))
+	}
+}
+
+func TestStoppingInsideTheLastPageDoesNotCancelAFinishedScan(t *testing.T) {
+	server, requests := fakeServer(t, func(r *http.Request) (int, any, map[string]string) {
+		if r.Method == http.MethodPost {
+			return 202, scan("Pending", false, nil), nil
+		}
+		return 200, map[string]any{"id": "11111111-1111-1111-1111-111111111111", "state": "Completed", "complete": true, "round": 5, "items": []any{holder("A"), holder("B")}, "nextCursor": nil}, nil
+	})
+	client, _ := avm.New(avm.AlgorandMainnet, &avm.Options{BaseURL: server.URL})
+	stop := errors.New("enough")
+
+	err := client.ExportHolders(context.Background(), avm.Asa, 1, avm.ExportOptions{}, func(avm.HolderDto) error { return stop })
+
+	if !errors.Is(err, stop) {
+		t.Fatalf("expected the callback error, got %v", err)
+	}
+	for _, request := range *requests {
+		if request.Method == http.MethodDelete {
+			t.Error("a finished scan was cancelled")
+		}
+	}
+}
+
 func TestStoppingAnExportEarlyCancelsTheScan(t *testing.T) {
 	server, requests := fakeServer(t, func(r *http.Request) (int, any, map[string]string) {
 		switch r.Method {

@@ -2145,11 +2145,9 @@ impl Client {
     ///   ARC-20) or arc200 (application token).
     /// - `token_id`: Asset id, application id, or 0 for the native token.
     /// - `cursor`: Opaque cursor from the previous page's nextCursor.
-    /// - `from_round`: Chain round (end-of-round state). Omit for the latest
-    ///   published round.
+    /// - `from_round`: Oldest round to include. Omit for no lower bound.
     /// - `limit`: Page size, 1 to 1000 (default 100).
-    /// - `to_round`: Chain round (end-of-round state). Omit for the latest
-    ///   published round.
+    /// - `to_round`: Newest round to include. Omit for no upper bound.
     ///```ignore
     /// let response = client.get_token_history()
     ///    .chain(chain)

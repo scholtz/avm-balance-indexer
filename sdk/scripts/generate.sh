@@ -30,7 +30,7 @@ cache_mount="$(cd "$cache_dir" && { pwd -W 2>/dev/null || pwd; })"
 docker_run() { docker run --rm "${user_args[@]}" -v "$mount_dir:/repo" "$@"; }
 
 # Generated files are committed with LF endings whatever the OS that generated them.
-normalize() { find "$1" -type f \( -name '*.ts' -o -name '*.py' -o -name '*.cs' -o -name '*.go' -o -name '*.json' -o -name '*.md' \) -exec sed -i 's/\r$//' {} +; }
+normalize() { find "$1" -type f \( -name '*.ts' -o -name '*.py' -o -name '*.cs' -o -name '*.go' -o -name '*.rs' -o -name '*.json' -o -name '*.md' \) -exec sed -i 's/\r$//' {} +; }
 
 generate_typescript() {
   local out="sdk/typescript/src/generated"

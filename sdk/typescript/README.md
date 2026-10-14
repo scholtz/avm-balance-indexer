@@ -3,7 +3,7 @@
 Typed client for the [AVM Balance Indexer](../../README.md): token balances, holders and history for **Algorand MainNet**, **Algorand TestNet** and **Voi**.
 Native ALGO/VOI, ASAs (including ARC-20 Smart ASAs) and ARC-200 application tokens, at the end of any indexed round.
 
-- Zero runtime dependencies (uses `fetch`), Node 20.3+, Deno and Bun, ESM, full type definitions. Browsers need a proxy: the indexer sends no CORS headers (see "Choosing the deployment").
+- Zero runtime dependencies (uses `fetch`), Node 20.3+, Deno and Bun, full type definitions. ESM only: from CommonJS use `await import("@scholtz/avm-balance-indexer")` (Node 22.12+ can also `require` it). Browsers need a proxy: the indexer sends no CORS headers (see "Choosing the deployment").
 - Request and response types are **generated from the OpenAPI specification** of the service; a small hand-written layer adds defaults, pagination and errors.
 - Works out of the box against the public deployments and against your own.
 

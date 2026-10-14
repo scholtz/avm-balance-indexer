@@ -317,6 +317,17 @@ async fn the_items_of_a_page_arrive_before_a_failed_scan_is_reported() {
 }
 
 #[tokio::test]
+async fn an_export_validates_the_page_size_before_it_starts_a_scan() {
+    let server = MockServer::start().await;
+    let indexer = client(&server, ChainId::AlgorandMainnet);
+
+    let mut holders = std::pin::pin!(indexer.export_holders_stream(TokenKind::Asa, 1, ExportOptions { limit: Some(0), ..Default::default() }));
+
+    assert!(matches!(holders.try_next().await, Err(Error::InvalidArgument(_))));
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn an_export_of_a_failed_scan_is_an_error() {
     let server = MockServer::start().await;
     Mock::given(method("POST")).respond_with(ResponseTemplate::new(202).set_body_json(scan("Failed", false, Some("boom")))).mount(&server).await;

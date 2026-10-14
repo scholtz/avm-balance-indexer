@@ -10,8 +10,7 @@ on:
       - "sdk/**"
       - ".github/workflows/sdk.yml"
       - ".github/workflows/sdk-publish.yml"
-      - "src/AvmBalanceIndexer.Api/**"
-      - "src/AvmBalanceIndexer.Domain/**"
+      - "src/**" # anything the API document is rendered from
       - "tests/AvmBalanceIndexer.Api.Tests/**"
   workflow_call:
 

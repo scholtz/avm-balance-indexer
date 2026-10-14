@@ -490,8 +490,8 @@ namespace AvmBalanceIndexer.Client.Generated
         /// <param name="chain">The chain this deployment serves.</param>
         /// <param name="kind">Token kind: algo (native), asa (Algorand Standard Asset, also ARC-20) or arc200 (application token).</param>
         /// <param name="tokenId">Asset id, application id, or 0 for the native token.</param>
-        /// <param name="fromRound">Chain round (end-of-round state). Omit for the latest published round.</param>
-        /// <param name="toRound">Chain round (end-of-round state). Omit for the latest published round.</param>
+        /// <param name="fromRound">Oldest round to include. Omit for no lower bound.</param>
+        /// <param name="toRound">Newest round to include. Omit for no upper bound.</param>
         /// <param name="cursor">Opaque cursor from the previous page's nextCursor.</param>
         /// <param name="limit">Page size, 1 to 1000 (default 100).</param>
         /// <returns>OK</returns>

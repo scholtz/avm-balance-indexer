@@ -431,6 +431,7 @@ export class AvmBalanceIndexer {
    * of any size. Throws {@link ScanError} if the scan fails or is cancelled. Stopping early (break, error, abort) cancels the scan on the server.
    */
   async *exportHolders(kind: TokenKind, tokenId: Id, options: ExportHoldersOptions = {}): AsyncGenerator<HolderDto> {
+    checkLimit(options.limit); // before the scan exists
     const started = await this.startHolderScan(kind, tokenId, { round: options.round, includeZero: options.includeZero, signal: options.signal });
     const poll = options.pollIntervalMs ?? 1000;
     let cursor: string | undefined;
@@ -438,9 +439,10 @@ export class AvmBalanceIndexer {
     try {
       for (;;) {
         const page = await this.holderScanPage(started.id, { cursor, limit: options.limit, signal: options.signal });
+        // A finished scan has nothing left to release, whatever the consumer does with the last rows.
+        finished = page.complete;
         yield* page.items;
         if (page.complete) {
-          finished = true;
           return;
         }
         if (page.nextCursor) {

@@ -280,9 +280,10 @@ jobs:
 
   go:
     name: Go module
-    # The tag is immutable too: it is pushed last, behind the same approval, and only when no registry job failed.
+    # The tag is immutable too: it is pushed last, behind the same approval, and only together with a registry release of this run (so that
+    # all SDKs of one version are built from one commit), and only when no registry job failed.
     needs: [version, npm, pypi, nuget, crates]
-    if: ${{ !cancelled() && needs.version.result == 'success' && !contains(needs.*.result, 'failure') }}
+    if: ${{ !cancelled() && needs.version.result == 'success' && !contains(needs.*.result, 'failure') && (needs.npm.outputs.published == 'true' || needs.pypi.outputs.published == 'true' || needs.nuget.outputs.published == 'true' || needs.crates.outputs.published == 'true') }}
     runs-on: ubuntu-latest
     environment: sdk-publish
     permissions:

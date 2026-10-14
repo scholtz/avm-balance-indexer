@@ -114,8 +114,16 @@ internal static class OpenApiRefinements
                 parameter.Description = "Asset id, application id, or 0 for the native token.";
                 parameter.Schema = new OpenApiSchema { Type = JsonSchemaType.Integer, Format = "uint64" };
                 break;
-            case "round" or "fromRound" or "toRound":
+            case "round":
                 parameter.Description = "Chain round (end-of-round state). Omit for the latest published round.";
+                parameter.Schema = new OpenApiSchema { Type = JsonSchemaType.Integer, Format = "uint64" };
+                break;
+            case "fromRound":
+                parameter.Description = "Oldest round to include. Omit for no lower bound.";
+                parameter.Schema = new OpenApiSchema { Type = JsonSchemaType.Integer, Format = "uint64" };
+                break;
+            case "toRound":
+                parameter.Description = "Newest round to include. Omit for no upper bound.";
                 parameter.Schema = new OpenApiSchema { Type = JsonSchemaType.Integer, Format = "uint64" };
                 break;
             case "includeZero":

@@ -362,7 +362,7 @@
           {
             "name": "fromRound",
             "in": "query",
-            "description": "Chain round (end-of-round state). Omit for the latest published round.",
+            "description": "Oldest round to include. Omit for no lower bound.",
             "schema": {
               "type": "integer",
               "format": "uint64"
@@ -371,7 +371,7 @@
           {
             "name": "toRound",
             "in": "query",
-            "description": "Chain round (end-of-round state). Omit for the latest published round.",
+            "description": "Newest round to include. Omit for no upper bound.",
             "schema": {
               "type": "integer",
               "format": "uint64"

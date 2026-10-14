@@ -198,6 +198,8 @@ class AvmBalanceIndexer:
         try:
             return function(*args, _request_timeout=self.timeout, **kwargs)
         except ApiException as error:
+            if _is_transport_failure(error):
+                raise IndexerConnectionError(f"Request to {self.base_url} failed: {error.reason or error}") from error
             raise _to_api_error(error) from error
         except urllib3.exceptions.HTTPError as error:
             raise IndexerConnectionError(f"Request to {self.base_url} failed: {error}") from error
@@ -357,6 +359,7 @@ class AvmBalanceIndexer:
         Works for tokens of any size. Raises :class:`ScanError` if the scan fails or is cancelled. Stopping early (``break``, ``close()``, an error)
         cancels the scan on the server.
         """
+        _limit(limit)  # before the scan exists
         started = self.start_holder_scan(kind, token_id, round=round, include_zero=include_zero)
         scan_id = str(started.id)
         cursor: Optional[str] = None
@@ -364,9 +367,10 @@ class AvmBalanceIndexer:
         try:
             while True:
                 page = self.holder_scan_page(scan_id, cursor=cursor, limit=_limit(limit))
+                # A finished scan has nothing left to release, whatever the consumer does with the last rows.
+                finished = page.complete
                 yield from page.items
                 if page.complete:
-                    finished = True
                     return
                 if page.next_cursor:
                     cursor = page.next_cursor
@@ -407,3 +411,8 @@ def _to_api_error(error: ApiException) -> ApiError:
         except ValueError:
             retry_after = None
     return ApiError(error.status or 0, message, retry_after, body)
+
+
+def _is_transport_failure(error: ApiException) -> bool:
+    """The generated client reports a TLS failure or an unusable connection as status 0 (or none)."""
+    return not error.status
