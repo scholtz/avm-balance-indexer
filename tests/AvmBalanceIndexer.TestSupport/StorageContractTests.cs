@@ -824,7 +824,7 @@ public abstract class StorageContractTests
         var blocks = Blocks(chain).ToArray();
         blocks[1] = chain.Block(2, [new TestPayment(Carol, Alice, 1_000_000)], rewards: RewardsAt(2));
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => CreateIndexer(storage, Adapter(blocks)).RunAsync(5, CancellationToken.None));
+        await Assert.ThrowsAsync<BalanceUnderflowException>(() => CreateIndexer(storage, Adapter(blocks)).RunAsync(5, CancellationToken.None));
 
         Assert.Equal(1UL, (await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!.IndexedRound);
         Assert.True((await storage.GetBalanceAtRoundAsync(Carol, Native, 1, CancellationToken.None)).IsZero);

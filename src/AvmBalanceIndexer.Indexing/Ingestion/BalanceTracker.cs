@@ -26,7 +26,7 @@ public sealed class BalanceTracker(IBalanceReadStore store, int maxCacheEntries)
     private Dictionary<HoldingKey, Amount> _old = [];
 
     /// <summary>Applies deltas in order and returns the resulting effects.</summary>
-    /// <exception cref="InvalidOperationException">A native or ASA delta would make a balance negative.</exception>
+    /// <exception cref="BalanceUnderflowException">A native or ASA delta would make a balance negative.</exception>
     public async Task<RoundEffects> ApplyAsync(IReadOnlyList<BalanceDelta> deltas, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(deltas);
@@ -64,11 +64,30 @@ public sealed class BalanceTracker(IBalanceReadStore store, int maxCacheEntries)
             var balance = working[key];
             var applied = delta;
 
-            if (creditLimit is { } limit)
+            if (delta.CloseOut == CloseOutRole.Credit)
+            {
+                // The destination of a close-out receives what the closer's debit removed; a credit alone is a normalizer defect.
+                var received = creditLimit ?? throw new InvalidOperationException(
+                    $"Round {delta.Id.Round}: the close-out credit of {delta.Token} (effect {delta.Id.Ordinal}) does not follow its debit.");
+                creditLimit = null;
+                if (received.IsZero)
+                {
+                    continue;
+                }
+
+                applied = delta with { Delta = received };
+            }
+            else if (creditLimit is { } limit)
             {
                 // The credit half of a transfer whose debit was limited moves the same, smaller amount.
                 applied = delta with { Delta = limit };
                 creditLimit = null;
+            }
+            else if (delta.CloseOut == CloseOutRole.Debit)
+            {
+                // The block does not state the closed amount (early protocols): the closer's whole remaining balance moves.
+                applied = delta with { Delta = -balance.Value };
+                creditLimit = balance.Value;
             }
             else if (delta.Token.Kind == TokenKind.Arc200 && balance.Value + delta.Delta < BigInteger.Zero)
             {
@@ -90,6 +109,11 @@ public sealed class BalanceTracker(IBalanceReadStore store, int maxCacheEntries)
             if (applied.Delta.IsZero && applied != delta)
             {
                 continue;
+            }
+
+            if (balance.Value + applied.Delta < BigInteger.Zero)
+            {
+                throw new BalanceUnderflowException(applied, balance);
             }
 
             var after = balance.Apply(applied.Delta);

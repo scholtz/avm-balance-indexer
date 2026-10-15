@@ -257,6 +257,15 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
         {
             // Closing out sends the sender's remaining units to the destination and removes the holding.
             var closing = new BigInteger(apply.AssetClosingAmount);
+            if (closing.IsZero)
+            {
+                // Either the holding was empty or the protocol does not record the closed amount (no aca before the protocol that
+                // reports it, e.g. TestNet round 4848388): the ordered indexer moves the sender's whole remaining balance.
+                round.Add(sender, BigInteger.Zero, token, EffectType.AssetOptOut, destination, path, keepZero: true, closeOut: CloseOutRole.Debit);
+                round.Add(destination, BigInteger.Zero, token, EffectType.AssetTransfer, sender, path, keepZero: true, closeOut: CloseOutRole.Credit);
+                return;
+            }
+
             round.Add(sender, -closing, token, EffectType.AssetOptOut, destination, path, keepZero: true);
             round.Add(destination, closing, token, EffectType.AssetTransfer, sender, path);
         }
@@ -348,7 +357,7 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
             Add(account, delta, TokenKey.Native, type, counterparty, path);
 
         // keepZero records the effect although it changes no balance (opt-in, opt-out, creation).
-        public void Add(DomainAddress account, BigInteger delta, TokenKey token, EffectType type, DomainAddress? counterparty, int[] path, bool keepZero = false)
+        public void Add(DomainAddress account, BigInteger delta, TokenKey token, EffectType type, DomainAddress? counterparty, int[] path, bool keepZero = false, CloseOutRole closeOut = CloseOutRole.None)
         {
             if (delta.IsZero && !keepZero)
             {
@@ -356,7 +365,7 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
             }
 
             var id = new EffectId(Round, _transactionIndex, _transactionId, path, _deltas.Count);
-            _deltas.Add(new BalanceDelta(id, account, token, type, delta, counterparty));
+            _deltas.Add(new BalanceDelta(id, account, token, type, delta, counterparty, closeOut));
         }
     }
 }
