@@ -35,7 +35,7 @@ jobs:
     outputs:
       version: ${{ steps.read.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: read
         run: |
           bash sdk/scripts/check-versions.sh
@@ -51,7 +51,7 @@ jobs:
     env:
       VERSION: ${{ needs.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Is this version already published?
         id: need
         run: |
@@ -124,7 +124,7 @@ jobs:
     env:
       VERSION: ${{ needs.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Is this version already published?
         id: need
         run: |
@@ -204,7 +204,7 @@ jobs:
     env:
       VERSION: ${{ needs.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Is it needed?
         id: need
         env:
@@ -247,7 +247,7 @@ jobs:
     env:
       VERSION: ${{ needs.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Is it needed?
         id: need
         env:
@@ -295,7 +295,7 @@ jobs:
     env:
       VERSION: ${{ needs.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Tag sdk/go/v${{ needs.version.outputs.version }}
@@ -330,7 +330,7 @@ jobs:
       CRATES: ${{ needs.crates.outputs.published }}
       GO: ${{ needs.go.outputs.published }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Create or extend the release sdk-v${{ needs.version.outputs.version }}
         run: |
           tag="sdk-v$VERSION"

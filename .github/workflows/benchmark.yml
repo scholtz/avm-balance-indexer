@@ -68,7 +68,7 @@ jobs:
           --health-cmd "pg_isready -U avm -d postgres"
           --health-interval 5s --health-timeout 3s --health-retries 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
@@ -114,7 +114,7 @@ jobs:
           --health-cmd "cqlsh -e 'describe cluster' localhost 9042"
           --health-interval 15s --health-timeout 10s --health-retries 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
@@ -149,7 +149,7 @@ jobs:
     # Two overlapping runs (the schedule and a manual start) must not race for the branch.
     concurrency: benchmark-publish
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
