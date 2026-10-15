@@ -54,7 +54,7 @@ jobs:
           dotnet-version: 9.0.x
       - name: The OpenAPI document is the one the API publishes (test in the API suite)
         run: dotnet test tests/AvmBalanceIndexer.Api.Tests --filter "FullyQualifiedName~OpenApiSpecTests" -v q
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: sdk/.cache
           key: sdk-generate-${{ hashFiles('sdk/scripts/generate.sh') }}
@@ -164,7 +164,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
