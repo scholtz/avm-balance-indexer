@@ -11,3 +11,19 @@ updates:
   - package-ecosystem: docker
     directory: /docker
     schedule: { interval: weekly }
+  # SDK dependencies (the generated code and the lock files change with them: regenerate with sdk/scripts/generate.sh when a PR touches the spec).
+  - package-ecosystem: npm
+    directory: /sdk/typescript
+    schedule: { interval: weekly }
+  - package-ecosystem: pip
+    directory: /sdk/python
+    schedule: { interval: weekly }
+  - package-ecosystem: gomod
+    directory: /sdk/go
+    schedule: { interval: weekly }
+  - package-ecosystem: cargo
+    directory: /sdk/rust
+    schedule: { interval: weekly }
+  - package-ecosystem: nuget
+    directory: /sdk/dotnet
+    schedule: { interval: weekly }

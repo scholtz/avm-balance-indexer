@@ -160,6 +160,8 @@ public sealed class ApiHardeningTests : IDisposable
         using var response = await client.GetAsync(Status);
 
         Assert.Equal(HttpStatusCode.GatewayTimeout, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+        Assert.Equal("The request took too long.", body.GetProperty("error").GetString());
     }
 
     [Fact]
@@ -330,7 +332,7 @@ public sealed class ApiHardeningTests : IDisposable
     }
 
     [Fact]
-    public async Task The_Chain_Parameter_Defaults_To_The_Chain_The_Deployment_Serves()
+    public async Task The_Chain_Parameter_Is_Prefilled_With_The_Chain_The_Deployment_Serves()
     {
         using var client = Create();
 
@@ -339,7 +341,8 @@ public sealed class ApiHardeningTests : IDisposable
         Assert.Equal("/", document.GetProperty("servers")[0].GetProperty("url").GetString());
         var parameters = document.GetProperty("paths").GetProperty("/v1/{chain}/status").GetProperty("get").GetProperty("parameters");
         var chain = parameters.EnumerateArray().Single(static p => p.GetProperty("name").GetString() == "chain");
-        Assert.Equal("algorand-testnet", chain.GetProperty("schema").GetProperty("default").GetString());
+        Assert.Equal("algorand-testnet", chain.GetProperty("example").GetString());
+        Assert.Equal(["algorand-mainnet", "algorand-testnet", "voi"], document.GetProperty("components").GetProperty("schemas").GetProperty("ChainId").GetProperty("enum").EnumerateArray().Select(static e => e.GetString()));
     }
 
     [Fact]

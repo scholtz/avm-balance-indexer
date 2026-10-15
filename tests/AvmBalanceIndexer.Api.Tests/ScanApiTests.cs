@@ -43,7 +43,7 @@ public sealed class ScanApiTests : IAsyncLifetime
         return Task.CompletedTask;
     }
 
-    private void Start(int maxActive, InMemoryChainStorage? storage = null, string pathBase = "")
+    private void Start(int maxActive, InMemoryChainStorage? storage = null, string pathBase = "", IScanJobStore? scanStore = null)
     {
         storage ??= _storage;
         _client?.Dispose();
@@ -60,7 +60,7 @@ public sealed class ScanApiTests : IAsyncLifetime
                 services.RemoveAll<IChainStorage>();
                 services.RemoveAll<IScanJobStore>();
                 services.AddSingleton<IChainStorage>(storage);
-                services.AddSingleton<IScanJobStore>((IScanJobStore)storage);
+                services.AddSingleton(scanStore ?? (IScanJobStore)storage);
             });
         });
         _client = _factory.CreateClient();
@@ -90,7 +90,68 @@ public sealed class ScanApiTests : IAsyncLifetime
         public override Task<bool> CancelAsync(Guid id, DateTimeOffset now, CancellationToken cancellationToken) => Task.FromResult(false);
     }
 
+    /// <summary>A store whose scan looks Running when the endpoint reads the job first and is Completed when the page has been read.</summary>
+    private sealed class FinishingDuringReadScanStore(IScanJobStore inner, int rows = 2) : IScanJobStore
+    {
+        private int _reads;
+
+        public Task<ScanJob?> GetJobAsync(Guid id, CancellationToken cancellationToken) =>
+            inner.GetJobAsync(id, cancellationToken).ContinueWith(
+                static (t, state) => t.Result is { } job ? job with { State = Interlocked.Increment(ref ((FinishingDuringReadScanStore)state!)._reads) == 1 ? ScanState.Running : ScanState.Completed } : null,
+                this,
+                cancellationToken);
+
+        public Task<Page<Holding>> GetResultAsync(Guid id, string? cursor, int limit, CancellationToken cancellationToken) =>
+            Task.FromResult(new Page<Holding>([.. Enumerable.Range(0, rows).Select(Row)], null, 2));
+
+        public Task CreateAsync(ScanJob job, CancellationToken cancellationToken) => inner.CreateAsync(job, cancellationToken);
+
+        public Task<int> CountActiveAsync(DateTimeOffset now, CancellationToken cancellationToken) => inner.CountActiveAsync(now, cancellationToken);
+
+        public Task<ScanJob?> ClaimNextAsync(string owner, DateTimeOffset now, DateTimeOffset staleBefore, CancellationToken cancellationToken) => inner.ClaimNextAsync(owner, now, staleBefore, cancellationToken);
+
+        public Task<bool> AppendAsync(Guid id, string owner, IReadOnlyList<Holding> items, string? nextCursor, DateTimeOffset now, CancellationToken cancellationToken) => inner.AppendAsync(id, owner, items, nextCursor, now, cancellationToken);
+
+        public Task<bool> CompleteAsync(Guid id, string owner, DateTimeOffset now, CancellationToken cancellationToken) => inner.CompleteAsync(id, owner, now, cancellationToken);
+
+        public Task<bool> FailAsync(Guid id, string owner, string reason, DateTimeOffset now, CancellationToken cancellationToken) => inner.FailAsync(id, owner, reason, now, cancellationToken);
+
+        public Task<bool> CancelAsync(Guid id, DateTimeOffset now, CancellationToken cancellationToken) => inner.CancelAsync(id, now, cancellationToken);
+
+        public Task<int> DeleteExpiredAsync(DateTimeOffset now, CancellationToken cancellationToken) => inner.DeleteExpiredAsync(now, cancellationToken);
+    }
+
     private static Holding Row(int index) => new(TestChain.Account(300 + index), TokenKey.Native, Amount.From((ulong)index + 1), true, 2);
+
+    [Fact]
+    public async Task A_Page_Of_A_Scan_That_Finished_While_It_Was_Read_Is_Reported_Complete()
+    {
+        var (_, created) = await PostAsync(TokenScans);
+        var id = created.GetProperty("id").GetGuid();
+        Start(maxActive: 20, scanStore: new FinishingDuringReadScanStore(_storage));
+
+        var (status, page) = await GetAsync($"/v1/algorand-testnet/scans/{id}/holders");
+
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.Equal(2, page.GetProperty("items").GetArrayLength());
+        Assert.Equal(JsonValueKind.Null, page.GetProperty("nextCursor").ValueKind);
+        Assert.Equal("Completed", page.GetProperty("state").GetString());
+        Assert.True(page.GetProperty("complete").GetBoolean());
+    }
+
+    [Fact]
+    public async Task An_Empty_Page_Of_A_Running_Scan_Is_Not_Reported_Complete()
+    {
+        var (_, created) = await PostAsync(TokenScans);
+        var id = created.GetProperty("id").GetGuid();
+        Start(maxActive: 20, scanStore: new FinishingDuringReadScanStore(_storage, rows: 0));
+
+        var (_, page) = await GetAsync($"/v1/algorand-testnet/scans/{id}/holders");
+
+        // Rows may be appended after an empty page: the reader has to ask again.
+        Assert.Equal(0, page.GetProperty("items").GetArrayLength());
+        Assert.False(page.GetProperty("complete").GetBoolean());
+    }
 
     [Fact]
     public async Task A_Scan_Is_Accepted_With_A_Location_And_Defaults_To_The_Latest_Round()

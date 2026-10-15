@@ -1,0 +1,40 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "avm-balance-indexer"
+version = "1.0.0"
+description = "Python SDK for the AVM Balance Indexer: token balances, holders and history for Algorand, Algorand TestNet and Voi."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+keywords = ["algorand", "voi", "avm", "asa", "arc200", "arc20", "indexer", "balances", "sdk"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Typing :: Typed",
+]
+dependencies = [
+  "urllib3>=2.1.0,<3.0.0",
+  "python-dateutil>=2.8.2",
+  "pydantic>=2",
+  "typing-extensions>=4.7.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "build>=1.2"]
+
+[project.urls]
+Homepage = "https://github.com/scholtz/avm-balance-indexer/tree/main/sdk/python"
+Issues = "https://github.com/scholtz/avm-balance-indexer/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/avm_balance_indexer"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "README.md", "AGENTS.md", "LICENSE", "pyproject.toml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

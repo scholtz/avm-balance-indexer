@@ -17,6 +17,9 @@ var api = builder.Configuration.GetSection(ApiOptions.SectionName).Get<ApiOption
 Validator.ValidateObject(api, new ValidationContext(api), validateAllProperties: true);
 builder.Services.AddOpenApi(options =>
 {
+    // OpenAPI 3.0 (not the 3.1 default): the code generators of the SDKs (sdk/) read 3.0 reliably.
+    options.OpenApiVersion = Microsoft.OpenApi.OpenApiSpecVersion.OpenApi3_0;
+
     // A relative server address: the UI calls the origin it was loaded from, whatever scheme and host a TLS-terminating ingress shows the pod.
     options.AddDocumentTransformer((document, _, _) =>
     {
@@ -24,6 +27,8 @@ builder.Services.AddOpenApi(options =>
         return Task.CompletedTask;
     });
     options.AddOperationTransformer<ChainParameterTransformer>();
+    options.AddDocumentTransformer(OpenApiRefinements.Apply);
+    options.AddSchemaTransformer(OpenApiRefinements.ApplyToSchema);
 });
 builder.Services.AddResponseCompression(options =>
 {
@@ -117,6 +122,14 @@ app.Use(async (context, next) =>
     await next();
 });
 app.UseExceptionHandler();
+app.UseStatusCodePages(static async context =>
+{
+    // The request timeout ends a request with an empty 504; clients get the same JSON error as for every other failure.
+    if (context.HttpContext.Response.StatusCode == StatusCodes.Status504GatewayTimeout)
+    {
+        await context.HttpContext.Response.WriteAsJsonAsync(new ErrorResponse("The request took too long."));
+    }
+});
 // The package serves its bundle precompressed (Content-Encoding set), but only to clients that accept gzip; the others would make the
 // compression middleware recompress megabytes of static files on every request.
 app.UseWhen(

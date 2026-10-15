@@ -1,0 +1,1611 @@
+{
+  "openapi": "3.0.4",
+  "info": {
+    "title": "AVM Balance Indexer API",
+    "description": "Token balances, holders and history for Algorand-family chains (ALGO, ASA, ARC-20, ARC-200). Every deployment serves one chain under /v1/{chain}. Amounts and deltas are decimal strings; rounds are integers.",
+    "version": "v1"
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "paths": {
+    "/v1/{chain}/status": {
+      "get": {
+        "tags": [
+          "Status"
+        ],
+        "summary": "Indexed round, target round, lag and ingestion state",
+        "operationId": "GetChainStatus",
+        "parameters": [
+          {
+            "name": "chain",
+            "in": "path",
+            "description": "The chain this deployment serves.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ChainId"
+            },
+            "example": "algorand-testnet"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Gateway Timeout",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/{chain}/accounts/{address}/tokens": {
+      "get": {
+        "tags": [
+          "Balances"
+        ],
+        "summary": "Current token holdings of an account",
+        "description": "Holdings ordered by token kind and id. Zero balances (opt-ins) are listed with includeZero=true. Page with nextCursor.",
+        "operationId": "GetAccountTokens",
+        "parameters": [
+          {
+            "name": "chain",
+            "in": "path",
+            "description": "The chain this deployment serves.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ChainId"
+            },
+            "example": "algorand-testnet"
+          },
+          {
+            "name": "address",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "includeZero",
+            "in": "query",
+            "description": "Also list accounts that are opted in but hold zero.",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor from the previous page\u0027s nextCursor.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1 to 1000 (default 100).",
+            "schema": {
+              "maximum": 1000,
+              "minimum": 1,
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HoldingsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Gateway Timeout",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/{chain}/accounts/{address}/tokens/{kind}/{tokenId}/balance": {
+      "get": {
+        "tags": [
+          "Balances"
+        ],
+        "summary": "End-of-round balance of an account",
+        "description": "The balance after the last effect at or before the round (default: the latest published round), including rounds without activity. An explicit published round is cacheable.",
+        "operationId": "GetTokenBalance",
+        "parameters": [
+          {
+            "name": "chain",
+            "in": "path",
+            "description": "The chain this deployment serves.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ChainId"
+            },
+            "example": "algorand-testnet"
+          },
+          {
+            "name": "address",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "path",
+            "description": "Token kind: algo (native), asa (Algorand Standard Asset, also ARC-20) or arc200 (application token).",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TokenKind"
+            }
+          },
+          {
+            "name": "tokenId",
+            "in": "path",
+            "description": "Asset id, application id, or 0 for the native token.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint64"
+            }
+          },
+          {
+            "name": "round",
+            "in": "query",
+            "description": "Chain round (end-of-round state). Omit for the latest published round.",
+            "schema": {
+              "type": "integer",
+              "format": "uint64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BalanceResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Gateway Timeout",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/{chain}/accounts/{address}/tokens/{kind}/{tokenId}/transactions": {
+      "get": {
+        "tags": [
+          "History"
+        ],
+        "summary": "Balance effects of an account and token, newest first",
+        "description": "Every change of the balance with its signed delta, the balance after it and the transaction it came from. Limit the range with fromRound and toRound.",
+        "operationId": "GetTokenHistory",
+        "parameters": [
+          {
+            "name": "chain",
+            "in": "path",
+            "description": "The chain this deployment serves.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ChainId"
+            },
+            "example": "algorand-testnet"
+          },
+          {
+            "name": "address",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "path",
+            "description": "Token kind: algo (native), asa (Algorand Standard Asset, also ARC-20) or arc200 (application token).",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TokenKind"
+            }
+          },
+          {
+            "name": "tokenId",
+            "in": "path",
+            "description": "Asset id, application id, or 0 for the native token.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint64"
+            }
+          },
+          {
+            "name": "fromRound",
+            "in": "query",
+            "description": "Oldest round to include. Omit for no lower bound.",
+            "schema": {
+              "type": "integer",
+              "format": "uint64"
+            }
+          },
+          {
+            "name": "toRound",
+            "in": "query",
+            "description": "Newest round to include. Omit for no upper bound.",
+            "schema": {
+              "type": "integer",
+              "format": "uint64"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor from the previous page\u0027s nextCursor.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1 to 1000 (default 100).",
+            "schema": {
+              "maximum": 1000,
+              "minimum": 1,
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistoryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Gateway Timeout",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/{chain}/tokens/{kind}/{tokenId}/holders": {
+      "get": {
+        "tags": [
+          "Holders"
+        ],
+        "summary": "Holders of a token at the end of a round",
+        "description": "Holders in account order. For a very large token at a past round use an asynchronous scan. Pass the same round while paging.",
+        "operationId": "GetTokenHolders",
+        "parameters": [
+          {
+            "name": "chain",
+            "in": "path",
+            "description": "The chain this deployment serves.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ChainId"
+            },
+            "example": "algorand-testnet"
+          },
+          {
+            "name": "kind",
+            "in": "path",
+            "description": "Token kind: algo (native), asa (Algorand Standard Asset, also ARC-20) or arc200 (application token).",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TokenKind"
+            }
+          },
+          {
+            "name": "tokenId",
+            "in": "path",
+            "description": "Asset id, application id, or 0 for the native token.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint64"
+            }
+          },
+          {
+            "name": "round",
+            "in": "query",
+            "description": "Chain round (end-of-round state). Omit for the latest published round.",
+            "schema": {
+              "type": "integer",
+              "format": "uint64"
+            }
+          },
+          {
+            "name": "includeZero",
+            "in": "query",
+            "description": "Also list accounts that are opted in but hold zero.",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor from the previous page\u0027s nextCursor.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1 to 1000 (default 100).",
+            "schema": {
+              "maximum": 1000,
+              "minimum": 1,
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HoldersResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Gateway Timeout",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/{chain}/tokens/{kind}/{tokenId}": {
+      "get": {
+        "tags": [
+          "Tokens"
+        ],
+        "summary": "Token metadata",
+        "operationId": "GetToken",
+        "parameters": [
+          {
+            "name": "chain",
+            "in": "path",
+            "description": "The chain this deployment serves.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ChainId"
+            },
+            "example": "algorand-testnet"
+          },
+          {
+            "name": "kind",
+            "in": "path",
+            "description": "Token kind: algo (native), asa (Algorand Standard Asset, also ARC-20) or arc200 (application token).",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TokenKind"
+            }
+          },
+          {
+            "name": "tokenId",
+            "in": "path",
+            "description": "Asset id, application id, or 0 for the native token.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Gateway Timeout",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/{chain}/tokens/{kind}/{tokenId}/holders/scans": {
+      "post": {
+        "tags": [
+          "Scans"
+        ],
+        "summary": "Start an asynchronous export of every holder of a token at a round",
+        "description": "Accepted at once; poll the scan and read the result pages. The body is optional: { \u0022round\u0022: 123, \u0022includeZero\u0022: false }.",
+        "operationId": "CreateHolderScan",
+        "parameters": [
+          {
+            "name": "chain",
+            "in": "path",
+            "description": "The chain this deployment serves.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ChainId"
+            },
+            "example": "algorand-testnet"
+          },
+          {
+            "name": "kind",
+            "in": "path",
+            "description": "Token kind: algo (native), asa (Algorand Standard Asset, also ARC-20) or arc200 (application token).",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TokenKind"
+            }
+          },
+          {
+            "name": "tokenId",
+            "in": "path",
+            "description": "Asset id, application id, or 0 for the native token.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScanRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScanResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Gateway Timeout",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/{chain}/scans/{id}": {
+      "get": {
+        "tags": [
+          "Scans"
+        ],
+        "summary": "State and progress of a scan",
+        "operationId": "GetHolderScan",
+        "parameters": [
+          {
+            "name": "chain",
+            "in": "path",
+            "description": "The chain this deployment serves.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ChainId"
+            },
+            "example": "algorand-testnet"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScanResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Gateway Timeout",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Scans"
+        ],
+        "summary": "Cancel a scan",
+        "operationId": "CancelHolderScan",
+        "parameters": [
+          {
+            "name": "chain",
+            "in": "path",
+            "description": "The chain this deployment serves.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ChainId"
+            },
+            "example": "algorand-testnet"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScanResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Gateway Timeout",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/{chain}/scans/{id}/holders": {
+      "get": {
+        "tags": [
+          "Scans"
+        ],
+        "summary": "Result pages of a scan (also while it is running)",
+        "description": "Without a nextCursor and with complete=false, repeat the same request a moment later.",
+        "operationId": "GetHolderScanResult",
+        "parameters": [
+          {
+            "name": "chain",
+            "in": "path",
+            "description": "The chain this deployment serves.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ChainId"
+            },
+            "example": "algorand-testnet"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor from the previous page\u0027s nextCursor.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1 to 1000 (default 100).",
+            "schema": {
+              "maximum": 1000,
+              "minimum": 1,
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScanHoldersResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Gateway Timeout",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "BalanceResponse": {
+        "required": [
+          "account",
+          "token",
+          "round",
+          "amount",
+          "indexedRound"
+        ],
+        "type": "object",
+        "properties": {
+          "account": {
+            "type": "string"
+          },
+          "token": {
+            "$ref": "#/components/schemas/TokenRef"
+          },
+          "round": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "amount": {
+            "type": "string"
+          },
+          "indexedRound": {
+            "type": "integer",
+            "format": "uint64"
+          }
+        }
+      },
+      "ChainId": {
+        "enum": [
+          "algorand-mainnet",
+          "algorand-testnet",
+          "voi"
+        ],
+        "type": "string",
+        "description": "The chain a deployment indexes."
+      },
+      "EffectDto": {
+        "required": [
+          "round",
+          "intraRoundOrder",
+          "ordinal",
+          "transactionId",
+          "innerPath",
+          "type",
+          "delta",
+          "balanceAfter",
+          "counterparty"
+        ],
+        "type": "object",
+        "properties": {
+          "round": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "intraRoundOrder": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "ordinal": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "transactionId": {
+            "type": "string"
+          },
+          "innerPath": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32"
+            }
+          },
+          "type": {
+            "type": "string"
+          },
+          "delta": {
+            "type": "string"
+          },
+          "balanceAfter": {
+            "type": "string"
+          },
+          "counterparty": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "ErrorResponse": {
+        "required": [
+          "error"
+        ],
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        },
+        "description": "The body of an error response: a message, and for some errors extra fields that name the offending values."
+      },
+      "HistoryResponse": {
+        "required": [
+          "account",
+          "token",
+          "indexedRound",
+          "items",
+          "nextCursor"
+        ],
+        "type": "object",
+        "properties": {
+          "account": {
+            "type": "string"
+          },
+          "token": {
+            "$ref": "#/components/schemas/TokenRef"
+          },
+          "indexedRound": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EffectDto"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "HolderDto": {
+        "required": [
+          "account",
+          "amount",
+          "optedIn",
+          "lastChangedRound"
+        ],
+        "type": "object",
+        "properties": {
+          "account": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "string"
+          },
+          "optedIn": {
+            "type": "boolean"
+          },
+          "lastChangedRound": {
+            "type": "integer",
+            "format": "uint64"
+          }
+        }
+      },
+      "HoldersResponse": {
+        "required": [
+          "token",
+          "round",
+          "indexedRound",
+          "items",
+          "nextCursor"
+        ],
+        "type": "object",
+        "properties": {
+          "token": {
+            "$ref": "#/components/schemas/TokenRef"
+          },
+          "round": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "indexedRound": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HolderDto"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "HoldingDto": {
+        "required": [
+          "token",
+          "amount",
+          "optedIn",
+          "lastChangedRound"
+        ],
+        "type": "object",
+        "properties": {
+          "token": {
+            "$ref": "#/components/schemas/TokenRef"
+          },
+          "amount": {
+            "type": "string"
+          },
+          "optedIn": {
+            "type": "boolean"
+          },
+          "lastChangedRound": {
+            "type": "integer",
+            "format": "uint64"
+          }
+        }
+      },
+      "HoldingsResponse": {
+        "required": [
+          "account",
+          "indexedRound",
+          "items",
+          "nextCursor"
+        ],
+        "type": "object",
+        "properties": {
+          "account": {
+            "type": "string"
+          },
+          "indexedRound": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HoldingDto"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "ScanHoldersResponse": {
+        "required": [
+          "id",
+          "state",
+          "complete",
+          "round",
+          "items",
+          "nextCursor"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string"
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "round": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HolderDto"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "ScanRequest": {
+        "type": "object",
+        "properties": {
+          "round": {
+            "type": "integer",
+            "format": "uint64",
+            "nullable": true
+          },
+          "includeZero": {
+            "type": "boolean",
+            "nullable": true
+          }
+        }
+      },
+      "ScanResponse": {
+        "required": [
+          "id",
+          "state",
+          "token",
+          "round",
+          "includeZero",
+          "holdersFound",
+          "complete",
+          "error",
+          "createdAt",
+          "updatedAt",
+          "expiresAt"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string"
+          },
+          "token": {
+            "$ref": "#/components/schemas/TokenRef"
+          },
+          "round": {
+            "type": "integer",
+            "format": "uint64"
+          },
+          "includeZero": {
+            "type": "boolean"
+          },
+          "holdersFound": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "StatusResponse": {
+        "required": [
+          "chain",
+          "provider",
+          "state",
+          "indexedRound",
+          "targetRound",
+          "lag",
+          "updatedAt"
+        ],
+        "type": "object",
+        "properties": {
+          "chain": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "indexedRound": {
+            "type": "integer",
+            "format": "uint64",
+            "nullable": true
+          },
+          "targetRound": {
+            "type": "integer",
+            "format": "uint64",
+            "nullable": true
+          },
+          "lag": {
+            "type": "integer",
+            "format": "uint64",
+            "nullable": true
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "description": "Indexed round, target round, lag and ingestion state of the chain this deployment serves."
+      },
+      "TokenKind": {
+        "enum": [
+          "algo",
+          "asa",
+          "arc200"
+        ],
+        "type": "string",
+        "description": "algo (native, token id 0), asa (Algorand Standard Asset, also ARC-20 Smart ASAs) or arc200 (application token)."
+      },
+      "TokenRef": {
+        "required": [
+          "kind",
+          "tokenId"
+        ],
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "tokenId": {
+            "type": "integer",
+            "format": "uint64"
+          }
+        }
+      },
+      "TokenResponse": {
+        "required": [
+          "token",
+          "symbol",
+          "name",
+          "decimals",
+          "standard",
+          "standardVerified",
+          "creator",
+          "controllingAppId",
+          "createdRound",
+          "deletedRound"
+        ],
+        "type": "object",
+        "properties": {
+          "token": {
+            "$ref": "#/components/schemas/TokenRef"
+          },
+          "symbol": {
+            "type": "string",
+            "nullable": true
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "decimals": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "standard": {
+            "type": "string"
+          },
+          "standardVerified": {
+            "type": "boolean"
+          },
+          "creator": {
+            "type": "string",
+            "nullable": true
+          },
+          "controllingAppId": {
+            "type": "integer",
+            "format": "uint64",
+            "nullable": true
+          },
+          "createdRound": {
+            "type": "integer",
+            "format": "uint64",
+            "nullable": true
+          },
+          "deletedRound": {
+            "type": "integer",
+            "format": "uint64",
+            "nullable": true
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "Status"
+    },
+    {
+      "name": "Balances"
+    },
+    {
+      "name": "History"
+    },
+    {
+      "name": "Holders"
+    },
+    {
+      "name": "Tokens"
+    },
+    {
+      "name": "Scans"
+    }
+  ]
+}
