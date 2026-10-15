@@ -90,24 +90,28 @@ rebuild into a new keyspace.
 Choose how to switch:
 
 - **The deployment is stalled or serves wrong data** (TestNet after #115): change the keyspace in the release values. The API switches to the rebuilt data at once and reports a low
-  `indexedRound` until it catches up; the old keyspace stays untouched, so restoring the old value switches back (with another rollout).
+  `indexedRound` until it catches up (every response carries `indexedRound`, so clients can tell, but balances and holders are incomplete until then); the old keyspace stays untouched, so restoring
+  the old value switches back with another rollout, as long as the old keyspace has not been dropped.
 - **The deployment is healthy and must keep serving** (MainNet): run a second release with its own keyspace next to it, compare, and switch the first release only when the rebuilt
   one has lag 0 and agrees with the chain.
 
 Steps:
 
 1. Set `storage.cassandra.keyspace` in `deploy/helm/values/<env>-<chain>.yaml` to a new name (`avm_testnet_2`, then `_3`, ...) and merge it. The worker creates the keyspace
-   (`createKeyspace: true`) and indexes from genesis. An API pod that cannot use the new keyspace yet is not ready and Kubernetes keeps the old pod until the worker has created it.
+   (`createKeyspace: true`; only the worker applies the schema) and indexes from genesis. An API pod that cannot use the new keyspace yet is not ready and Kubernetes keeps the old pod until the worker has
+   created it. The worker of the old keyspace is replaced by the rollout; when it was still indexing, set `worker.strategy=Recreate` for this release so that two writers never download side by side.
 2. Watch `GET /v1/{chain}/status`: `state` is `Backfilling`, `indexedRound` rises, and the worker pod does not restart (`kubectl -n avm-balance-indexer logs deploy/<release>-<chain>-worker`).
    The worker log line `Indexing of <chain> stopped after round <R> ...` names the cause if it stops.
 3. When `state` is `Following`, compare with the chain: pick accounts that received asset close-outs and compare
    `GET /v1/{chain}/accounts/{address}/tokens/asa/{id}/balance?round=R` with the holding from the Nodely indexer (`GET https://<chain>-idx.4160.nodely.dev/v2/accounts/{address}/assets/{id}`
    for the current round), plus the checks of the reindex bullet above.
-4. Reclaim the space with `DROP KEYSPACE <old keyspace>;` through `cqlsh` on the Cassandra pod once nobody needs the old data. Both keyspaces share the node's disk (`cassandra.embedded.hostPath`)
-   while they coexist: check the free space before a rebuild of a large chain.
+4. Reclaim the space with `DROP KEYSPACE <old keyspace>;` through `cqlsh` on the Cassandra pod once nobody needs the old data. The drop cannot be undone and ends the rollback option of step 1
+   (the old name would be recreated empty). Both keyspaces share the node's disk (`cassandra.embedded.hostPath`) while they coexist: check the free space before a rebuild of a large chain.
 
 Which deployments need it after #115: every database that indexed an asset close-out (`aclose`) of protocols v0 to v24. On TestNet the range that was indexed (rounds 0 to 4,982,988)
-contains such close-outs. MainNet ran the same early protocols and has to be treated as affected until the comparison of step 3 says otherwise. Voi launched on a recent protocol and
+contains such close-outs. MainNet ran the same early protocols and is affected as soon as its indexed range holds one asset close-out with an amount: list them with the Nodely indexer
+(`GET https://<chain>-idx.4160.nodely.dev/v2/transactions?tx-type=axfer&min-round=A&max-round=B&limit=1000`, keep `asset-transfer-transaction.close-to` set and `close-amount` above 0; a block of a protocol
+before v25 has no `aca`). Each such transaction proves the missing credit for its `close-to` account, and that account is the one to compare in step 3. Voi launched on a recent protocol and
 is expected to be unaffected; this was not verified.
 
 ## Monitoring and alerts
