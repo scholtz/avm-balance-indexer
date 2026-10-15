@@ -21,56 +21,38 @@ import { mapValues } from '../runtime.js';
 export interface EffectDto {
     /**
      * 
-     * @type {number}
-     * @memberof EffectDto
      */
     round: number;
     /**
      * 
-     * @type {number}
-     * @memberof EffectDto
      */
     intraRoundOrder: number;
     /**
      * 
-     * @type {number}
-     * @memberof EffectDto
      */
     ordinal: number;
     /**
      * 
-     * @type {string}
-     * @memberof EffectDto
      */
     transactionId: string;
     /**
      * 
-     * @type {Array<number>}
-     * @memberof EffectDto
      */
     innerPath: Array<number>;
     /**
      * 
-     * @type {string}
-     * @memberof EffectDto
      */
     type: string;
     /**
      * 
-     * @type {string}
-     * @memberof EffectDto
      */
     delta: string;
     /**
      * 
-     * @type {string}
-     * @memberof EffectDto
      */
     balanceAfter: string;
     /**
      * 
-     * @type {string}
-     * @memberof EffectDto
      */
     counterparty: string | null;
 }

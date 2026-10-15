@@ -12,7 +12,7 @@
  * Do not edit the class manually.
  */
 
-import { mapValues } from '../runtime.js';
+import { mapValues, parseDate, parseDateTime, serializeDate, serializeDateTime } from '../runtime.js';
 import type { TokenRef } from './TokenRef.js';
 import {
     TokenRefFromJSON,
@@ -29,68 +29,46 @@ import {
 export interface ScanResponse {
     /**
      * 
-     * @type {string}
-     * @memberof ScanResponse
      */
     id: string;
     /**
      * 
-     * @type {string}
-     * @memberof ScanResponse
      */
     state: string;
     /**
      * 
-     * @type {TokenRef}
-     * @memberof ScanResponse
      */
     token: TokenRef;
     /**
      * 
-     * @type {number}
-     * @memberof ScanResponse
      */
     round: number;
     /**
      * 
-     * @type {boolean}
-     * @memberof ScanResponse
      */
     includeZero: boolean;
     /**
      * 
-     * @type {number}
-     * @memberof ScanResponse
      */
     holdersFound: number;
     /**
      * 
-     * @type {boolean}
-     * @memberof ScanResponse
      */
     complete: boolean;
     /**
      * 
-     * @type {string}
-     * @memberof ScanResponse
      */
     error: string | null;
     /**
      * 
-     * @type {Date}
-     * @memberof ScanResponse
      */
     createdAt: Date;
     /**
      * 
-     * @type {Date}
-     * @memberof ScanResponse
      */
     updatedAt: Date;
     /**
      * 
-     * @type {Date}
-     * @memberof ScanResponse
      */
     expiresAt: Date;
 }
@@ -131,9 +109,9 @@ export function ScanResponseFromJSONTyped(json: any, ignoreDiscriminator: boolea
         'holdersFound': json['holdersFound'],
         'complete': json['complete'],
         'error': json['error'],
-        'createdAt': (new Date(json['createdAt'])),
-        'updatedAt': (new Date(json['updatedAt'])),
-        'expiresAt': (new Date(json['expiresAt'])),
+        'createdAt': (json['createdAt'] == null ? json['createdAt'] : parseDateTime(json['createdAt'])),
+        'updatedAt': (json['updatedAt'] == null ? json['updatedAt'] : parseDateTime(json['updatedAt'])),
+        'expiresAt': (json['expiresAt'] == null ? json['expiresAt'] : parseDateTime(json['expiresAt'])),
     };
 }
 
@@ -156,9 +134,9 @@ export function ScanResponseToJSONTyped(value?: ScanResponse | null, ignoreDiscr
         'holdersFound': value['holdersFound'],
         'complete': value['complete'],
         'error': value['error'],
-        'createdAt': ((value['createdAt']).toISOString()),
-        'updatedAt': ((value['updatedAt']).toISOString()),
-        'expiresAt': ((value['expiresAt']).toISOString()),
+        'createdAt': value['createdAt'] == null ? value['createdAt'] : serializeDateTime(value['createdAt']),
+        'updatedAt': value['updatedAt'] == null ? value['updatedAt'] : serializeDateTime(value['updatedAt']),
+        'expiresAt': value['expiresAt'] == null ? value['expiresAt'] : serializeDateTime(value['expiresAt']),
     };
 }
 

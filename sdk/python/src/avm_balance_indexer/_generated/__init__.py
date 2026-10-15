@@ -87,3 +87,4 @@ from avm_balance_indexer._generated.models.status_response import StatusResponse
 from avm_balance_indexer._generated.models.token_kind import TokenKind as TokenKind
 from avm_balance_indexer._generated.models.token_ref import TokenRef as TokenRef
 from avm_balance_indexer._generated.models.token_response import TokenResponse as TokenResponse
+

@@ -20,7 +20,7 @@
 export const ChainId = {
     AlgorandMainnet: 'algorand-mainnet',
     AlgorandTestnet: 'algorand-testnet',
-    Voi: 'voi'
+    Voi: 'voi',
 } as const;
 export type ChainId = typeof ChainId[keyof typeof ChainId];
 

@@ -21,14 +21,10 @@ import { mapValues } from '../runtime.js';
 export interface ScanRequest {
     /**
      * 
-     * @type {number}
-     * @memberof ScanRequest
      */
     round?: number | null;
     /**
      * 
-     * @type {boolean}
-     * @memberof ScanRequest
      */
     includeZero?: boolean | null;
 }
@@ -50,8 +46,8 @@ export function ScanRequestFromJSONTyped(json: any, ignoreDiscriminator: boolean
     }
     return {
         
-        'round': json['round'] == null ? undefined : json['round'],
-        'includeZero': json['includeZero'] == null ? undefined : json['includeZero'],
+        'round': json['round'] === undefined ? undefined : json['round'] === null ? null : json['round'],
+        'includeZero': json['includeZero'] === undefined ? undefined : json['includeZero'] === null ? null : json['includeZero'],
     };
 }
 

@@ -21,8 +21,6 @@ import { mapValues } from '../runtime.js';
 export interface ErrorResponse {
     /**
      * 
-     * @type {string}
-     * @memberof ErrorResponse
      */
     error: string;
 }

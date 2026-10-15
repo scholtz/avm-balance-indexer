@@ -36,32 +36,22 @@ import {
 export interface HistoryResponse {
     /**
      * 
-     * @type {string}
-     * @memberof HistoryResponse
      */
     account: string;
     /**
      * 
-     * @type {TokenRef}
-     * @memberof HistoryResponse
      */
     token: TokenRef;
     /**
      * 
-     * @type {number}
-     * @memberof HistoryResponse
      */
     indexedRound: number;
     /**
      * 
-     * @type {Array<EffectDto>}
-     * @memberof HistoryResponse
      */
     items: Array<EffectDto>;
     /**
      * 
-     * @type {string}
-     * @memberof HistoryResponse
      */
     nextCursor: string | null;
 }

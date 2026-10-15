@@ -8,9 +8,9 @@
 # CI runs this and fails when it changes a committed file (workflow "SDKs").
 set -euo pipefail
 
-OPENAPI_GENERATOR_IMAGE="openapitools/openapi-generator-cli:v7.14.0"
-GO_IMAGE="golang:1.24"
-OAPI_CODEGEN="github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.5.0"
+OPENAPI_GENERATOR_IMAGE="openapitools/openapi-generator-cli:v7.26.0"
+GO_IMAGE="golang:1.25"
+OAPI_CODEGEN="github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.8.0"
 PROGENITOR_VERSION="0.15.1"
 RUST_NIGHTLY="nightly-2026-10-01"
 

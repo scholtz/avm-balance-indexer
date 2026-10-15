@@ -12,52 +12,95 @@
  * Do not edit the class manually.
  */
 
-
 import * as runtime from '../runtime.js';
-import type {
-  ChainId,
-  ErrorResponse,
-  ScanHoldersResponse,
-  ScanRequest,
-  ScanResponse,
-  TokenKind,
-} from '../models/index.js';
 import {
+    type ChainId,
     ChainIdFromJSON,
     ChainIdToJSON,
+} from '../models/ChainId.js';
+import {
+    type ErrorResponse,
     ErrorResponseFromJSON,
     ErrorResponseToJSON,
+} from '../models/ErrorResponse.js';
+import {
+    type ScanHoldersResponse,
     ScanHoldersResponseFromJSON,
     ScanHoldersResponseToJSON,
+} from '../models/ScanHoldersResponse.js';
+import {
+    type ScanRequest,
     ScanRequestFromJSON,
     ScanRequestToJSON,
+} from '../models/ScanRequest.js';
+import {
+    type ScanResponse,
     ScanResponseFromJSON,
     ScanResponseToJSON,
+} from '../models/ScanResponse.js';
+import {
+    type TokenKind,
     TokenKindFromJSON,
     TokenKindToJSON,
-} from '../models/index.js';
+} from '../models/TokenKind.js';
 
 export interface CancelHolderScanRequest {
+    /**
+     * The chain this deployment serves.
+     */
     chain: ChainId;
+    /**
+     * 
+     */
     id: string;
 }
 
 export interface CreateHolderScanRequest {
+    /**
+     * The chain this deployment serves.
+     */
     chain: ChainId;
+    /**
+     * Token kind: algo (native), asa (Algorand Standard Asset, also ARC-20) or arc200 (application token).
+     */
     kind: TokenKind;
+    /**
+     * Asset id, application id, or 0 for the native token.
+     */
     tokenId: number;
+    /**
+     * 
+     */
     scanRequest?: ScanRequest;
 }
 
 export interface GetHolderScanRequest {
+    /**
+     * The chain this deployment serves.
+     */
     chain: ChainId;
+    /**
+     * 
+     */
     id: string;
 }
 
 export interface GetHolderScanResultRequest {
+    /**
+     * The chain this deployment serves.
+     */
     chain: ChainId;
+    /**
+     * 
+     */
     id: string;
+    /**
+     * Opaque cursor from the previous page's nextCursor.
+     */
     cursor?: string;
+    /**
+     * Page size, 1 to 1000 (default 100).
+     */
     limit?: number;
 }
 
@@ -68,6 +111,15 @@ export interface GetHolderScanResultRequest {
  * @interface ScansApiInterface
  */
 export interface ScansApiInterface {
+    /**
+     * Creates request options for cancelHolderScan without sending the request
+     * @param {ChainId} chain The chain this deployment serves.
+     * @param {string} id 
+     * @throws {RequiredError}
+     * @memberof ScansApiInterface
+     */
+    cancelHolderScanRequestOpts(requestParameters: CancelHolderScanRequest): Promise<runtime.RequestOpts>;
+
     /**
      * 
      * @summary Cancel a scan
@@ -83,6 +135,17 @@ export interface ScansApiInterface {
      * Cancel a scan
      */
     cancelHolderScan(requestParameters: CancelHolderScanRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<ScanResponse>;
+
+    /**
+     * Creates request options for createHolderScan without sending the request
+     * @param {ChainId} chain The chain this deployment serves.
+     * @param {TokenKind} kind Token kind: algo (native), asa (Algorand Standard Asset, also ARC-20) or arc200 (application token).
+     * @param {number} tokenId Asset id, application id, or 0 for the native token.
+     * @param {ScanRequest} [scanRequest] 
+     * @throws {RequiredError}
+     * @memberof ScansApiInterface
+     */
+    createHolderScanRequestOpts(requestParameters: CreateHolderScanRequest): Promise<runtime.RequestOpts>;
 
     /**
      * Accepted at once; poll the scan and read the result pages. The body is optional: { \"round\": 123, \"includeZero\": false }.
@@ -104,6 +167,15 @@ export interface ScansApiInterface {
     createHolderScan(requestParameters: CreateHolderScanRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<ScanResponse>;
 
     /**
+     * Creates request options for getHolderScan without sending the request
+     * @param {ChainId} chain The chain this deployment serves.
+     * @param {string} id 
+     * @throws {RequiredError}
+     * @memberof ScansApiInterface
+     */
+    getHolderScanRequestOpts(requestParameters: GetHolderScanRequest): Promise<runtime.RequestOpts>;
+
+    /**
      * 
      * @summary State and progress of a scan
      * @param {ChainId} chain The chain this deployment serves.
@@ -118,6 +190,17 @@ export interface ScansApiInterface {
      * State and progress of a scan
      */
     getHolderScan(requestParameters: GetHolderScanRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<ScanResponse>;
+
+    /**
+     * Creates request options for getHolderScanResult without sending the request
+     * @param {ChainId} chain The chain this deployment serves.
+     * @param {string} id 
+     * @param {string} [cursor] Opaque cursor from the previous page\&#39;s nextCursor.
+     * @param {number} [limit] Page size, 1 to 1000 (default 100).
+     * @throws {RequiredError}
+     * @memberof ScansApiInterface
+     */
+    getHolderScanResultRequestOpts(requestParameters: GetHolderScanResultRequest): Promise<runtime.RequestOpts>;
 
     /**
      * Without a nextCursor and with complete=false, repeat the same request a moment later.
@@ -146,9 +229,9 @@ export interface ScansApiInterface {
 export class ScansApi extends runtime.BaseAPI implements ScansApiInterface {
 
     /**
-     * Cancel a scan
+     * Creates request options for cancelHolderScan without sending the request
      */
-    async cancelHolderScanRaw(requestParameters: CancelHolderScanRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<ScanResponse>> {
+    async cancelHolderScanRequestOpts(requestParameters: CancelHolderScanRequest): Promise<runtime.RequestOpts> {
         if (requestParameters['chain'] == null) {
             throw new runtime.RequiredError(
                 'chain',
@@ -169,15 +252,23 @@ export class ScansApi extends runtime.BaseAPI implements ScansApiInterface {
 
 
         let urlPath = `/v1/{chain}/scans/{id}`;
-        urlPath = urlPath.replace(`{${"chain"}}`, encodeURIComponent(String(requestParameters['chain'])));
-        urlPath = urlPath.replace(`{${"id"}}`, encodeURIComponent(String(requestParameters['id'])));
+        urlPath = urlPath.replace('{chain}', encodeURIComponent(String(requestParameters['chain'])));
+        urlPath = urlPath.replace('{id}', encodeURIComponent(String(requestParameters['id'])));
 
-        const response = await this.request({
+        return {
             path: urlPath,
             method: 'DELETE',
             headers: headerParameters,
             query: queryParameters,
-        }, initOverrides);
+        };
+    }
+
+    /**
+     * Cancel a scan
+     */
+    async cancelHolderScanRaw(requestParameters: CancelHolderScanRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<ScanResponse>> {
+        const requestOptions = await this.cancelHolderScanRequestOpts(requestParameters);
+        const response = await this.request(requestOptions, initOverrides);
 
         return new runtime.JSONApiResponse(response, (jsonValue) => ScanResponseFromJSON(jsonValue));
     }
@@ -191,10 +282,9 @@ export class ScansApi extends runtime.BaseAPI implements ScansApiInterface {
     }
 
     /**
-     * Accepted at once; poll the scan and read the result pages. The body is optional: { \"round\": 123, \"includeZero\": false }.
-     * Start an asynchronous export of every holder of a token at a round
+     * Creates request options for createHolderScan without sending the request
      */
-    async createHolderScanRaw(requestParameters: CreateHolderScanRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<ScanResponse>> {
+    async createHolderScanRequestOpts(requestParameters: CreateHolderScanRequest): Promise<runtime.RequestOpts> {
         if (requestParameters['chain'] == null) {
             throw new runtime.RequiredError(
                 'chain',
@@ -224,17 +314,26 @@ export class ScansApi extends runtime.BaseAPI implements ScansApiInterface {
 
 
         let urlPath = `/v1/{chain}/tokens/{kind}/{tokenId}/holders/scans`;
-        urlPath = urlPath.replace(`{${"chain"}}`, encodeURIComponent(String(requestParameters['chain'])));
-        urlPath = urlPath.replace(`{${"kind"}}`, encodeURIComponent(String(requestParameters['kind'])));
-        urlPath = urlPath.replace(`{${"tokenId"}}`, encodeURIComponent(String(requestParameters['tokenId'])));
+        urlPath = urlPath.replace('{chain}', encodeURIComponent(String(requestParameters['chain'])));
+        urlPath = urlPath.replace('{kind}', encodeURIComponent(String(requestParameters['kind'])));
+        urlPath = urlPath.replace('{tokenId}', encodeURIComponent(String(requestParameters['tokenId'])));
 
-        const response = await this.request({
+        return {
             path: urlPath,
             method: 'POST',
             headers: headerParameters,
             query: queryParameters,
             body: ScanRequestToJSON(requestParameters['scanRequest']),
-        }, initOverrides);
+        };
+    }
+
+    /**
+     * Accepted at once; poll the scan and read the result pages. The body is optional: { \"round\": 123, \"includeZero\": false }.
+     * Start an asynchronous export of every holder of a token at a round
+     */
+    async createHolderScanRaw(requestParameters: CreateHolderScanRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<ScanResponse>> {
+        const requestOptions = await this.createHolderScanRequestOpts(requestParameters);
+        const response = await this.request(requestOptions, initOverrides);
 
         return new runtime.JSONApiResponse(response, (jsonValue) => ScanResponseFromJSON(jsonValue));
     }
@@ -249,9 +348,9 @@ export class ScansApi extends runtime.BaseAPI implements ScansApiInterface {
     }
 
     /**
-     * State and progress of a scan
+     * Creates request options for getHolderScan without sending the request
      */
-    async getHolderScanRaw(requestParameters: GetHolderScanRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<ScanResponse>> {
+    async getHolderScanRequestOpts(requestParameters: GetHolderScanRequest): Promise<runtime.RequestOpts> {
         if (requestParameters['chain'] == null) {
             throw new runtime.RequiredError(
                 'chain',
@@ -272,15 +371,23 @@ export class ScansApi extends runtime.BaseAPI implements ScansApiInterface {
 
 
         let urlPath = `/v1/{chain}/scans/{id}`;
-        urlPath = urlPath.replace(`{${"chain"}}`, encodeURIComponent(String(requestParameters['chain'])));
-        urlPath = urlPath.replace(`{${"id"}}`, encodeURIComponent(String(requestParameters['id'])));
+        urlPath = urlPath.replace('{chain}', encodeURIComponent(String(requestParameters['chain'])));
+        urlPath = urlPath.replace('{id}', encodeURIComponent(String(requestParameters['id'])));
 
-        const response = await this.request({
+        return {
             path: urlPath,
             method: 'GET',
             headers: headerParameters,
             query: queryParameters,
-        }, initOverrides);
+        };
+    }
+
+    /**
+     * State and progress of a scan
+     */
+    async getHolderScanRaw(requestParameters: GetHolderScanRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<ScanResponse>> {
+        const requestOptions = await this.getHolderScanRequestOpts(requestParameters);
+        const response = await this.request(requestOptions, initOverrides);
 
         return new runtime.JSONApiResponse(response, (jsonValue) => ScanResponseFromJSON(jsonValue));
     }
@@ -294,10 +401,9 @@ export class ScansApi extends runtime.BaseAPI implements ScansApiInterface {
     }
 
     /**
-     * Without a nextCursor and with complete=false, repeat the same request a moment later.
-     * Result pages of a scan (also while it is running)
+     * Creates request options for getHolderScanResult without sending the request
      */
-    async getHolderScanResultRaw(requestParameters: GetHolderScanResultRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<ScanHoldersResponse>> {
+    async getHolderScanResultRequestOpts(requestParameters: GetHolderScanResultRequest): Promise<runtime.RequestOpts> {
         if (requestParameters['chain'] == null) {
             throw new runtime.RequiredError(
                 'chain',
@@ -326,15 +432,24 @@ export class ScansApi extends runtime.BaseAPI implements ScansApiInterface {
 
 
         let urlPath = `/v1/{chain}/scans/{id}/holders`;
-        urlPath = urlPath.replace(`{${"chain"}}`, encodeURIComponent(String(requestParameters['chain'])));
-        urlPath = urlPath.replace(`{${"id"}}`, encodeURIComponent(String(requestParameters['id'])));
+        urlPath = urlPath.replace('{chain}', encodeURIComponent(String(requestParameters['chain'])));
+        urlPath = urlPath.replace('{id}', encodeURIComponent(String(requestParameters['id'])));
 
-        const response = await this.request({
+        return {
             path: urlPath,
             method: 'GET',
             headers: headerParameters,
             query: queryParameters,
-        }, initOverrides);
+        };
+    }
+
+    /**
+     * Without a nextCursor and with complete=false, repeat the same request a moment later.
+     * Result pages of a scan (also while it is running)
+     */
+    async getHolderScanResultRaw(requestParameters: GetHolderScanResultRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<ScanHoldersResponse>> {
+        const requestOptions = await this.getHolderScanResultRequestOpts(requestParameters);
+        const response = await this.request(requestOptions, initOverrides);
 
         return new runtime.JSONApiResponse(response, (jsonValue) => ScanHoldersResponseFromJSON(jsonValue));
     }

@@ -314,7 +314,7 @@ def test_the_last_page_of_a_scan_that_finished_between_two_server_reads_is_not_r
             return 202, scan_body("Pending", False), {}
         if parsed.path.endswith("/holders"):
             # Rows, no cursor and not complete: the job looked running when the endpoint read it and was finished when the store did.
-            return 200, {"id": "s", "state": "Running", "complete": False, "round": 5, "items": [holder("A"), holder("B")], "nextCursor": None}, {}
+            return 200, {"id": "11111111-1111-1111-1111-111111111111", "state": "Running", "complete": False, "round": 5, "items": [holder("A"), holder("B")], "nextCursor": None}, {}
         return 200, scan_body("Completed", True), {}
 
     server.handler = handler
@@ -337,7 +337,7 @@ def test_stopping_an_export_early_cancels_the_scan(server):
             return 202, scan_body("Pending", False), {}
         if request["method"] == "DELETE":
             return 200, scan_body("Cancelled", False), {}
-        return 200, {"id": "s", "state": "Running", "complete": False, "round": 5, "items": [holder("A"), holder("B")], "nextCursor": "c1"}, {}
+        return 200, {"id": "11111111-1111-1111-1111-111111111111", "state": "Running", "complete": False, "round": 5, "items": [holder("A"), holder("B")], "nextCursor": "c1"}, {}
 
     server.handler = handler
     client = AvmBalanceIndexer.algorand_mainnet(base_url=server.url)
@@ -360,7 +360,7 @@ def test_stopping_inside_the_last_page_does_not_cancel_a_finished_scan(server):
     def handler(request):
         if request["method"] == "POST":
             return 202, scan_body("Pending", False), {}
-        return 200, {"id": "s", "state": "Completed", "complete": True, "round": 5, "items": [holder("A"), holder("B")], "nextCursor": None}, {}
+        return 200, {"id": "11111111-1111-1111-1111-111111111111", "state": "Completed", "complete": True, "round": 5, "items": [holder("A"), holder("B")], "nextCursor": None}, {}
 
     server.handler = handler
     client = AvmBalanceIndexer.algorand_mainnet(base_url=server.url)
@@ -386,7 +386,7 @@ def test_export_holders_raises_when_the_scan_failed(server):
         if request["method"] == "POST":
             return 202, scan_body("Failed", False, "boom"), {}
         if path.endswith("/holders"):
-            return 200, {"id": "s", "state": "Failed", "complete": False, "round": 5, "items": [], "nextCursor": None}, {}
+            return 200, {"id": "11111111-1111-1111-1111-111111111111", "state": "Failed", "complete": False, "round": 5, "items": [], "nextCursor": None}, {}
         return 200, scan_body("Failed", False, "boom"), {}
 
     server.handler = handler

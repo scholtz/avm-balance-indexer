@@ -29,62 +29,42 @@ import {
 export interface TokenResponse {
     /**
      * 
-     * @type {TokenRef}
-     * @memberof TokenResponse
      */
     token: TokenRef;
     /**
      * 
-     * @type {string}
-     * @memberof TokenResponse
      */
     symbol: string | null;
     /**
      * 
-     * @type {string}
-     * @memberof TokenResponse
      */
     name: string | null;
     /**
      * 
-     * @type {number}
-     * @memberof TokenResponse
      */
     decimals: number | null;
     /**
      * 
-     * @type {string}
-     * @memberof TokenResponse
      */
     standard: string;
     /**
      * 
-     * @type {boolean}
-     * @memberof TokenResponse
      */
     standardVerified: boolean;
     /**
      * 
-     * @type {string}
-     * @memberof TokenResponse
      */
     creator: string | null;
     /**
      * 
-     * @type {number}
-     * @memberof TokenResponse
      */
     controllingAppId: number | null;
     /**
      * 
-     * @type {number}
-     * @memberof TokenResponse
      */
     createdRound: number | null;
     /**
      * 
-     * @type {number}
-     * @memberof TokenResponse
      */
     deletedRound: number | null;
 }

@@ -36,32 +36,22 @@ import {
 export interface HoldersResponse {
     /**
      * 
-     * @type {TokenRef}
-     * @memberof HoldersResponse
      */
     token: TokenRef;
     /**
      * 
-     * @type {number}
-     * @memberof HoldersResponse
      */
     round: number;
     /**
      * 
-     * @type {number}
-     * @memberof HoldersResponse
      */
     indexedRound: number;
     /**
      * 
-     * @type {Array<HolderDto>}
-     * @memberof HoldersResponse
      */
     items: Array<HolderDto>;
     /**
      * 
-     * @type {string}
-     * @memberof HoldersResponse
      */
     nextCursor: string | null;
 }

@@ -12,32 +12,56 @@
  * Do not edit the class manually.
  */
 
-
 import * as runtime from '../runtime.js';
-import type {
-  ChainId,
-  ErrorResponse,
-  HoldersResponse,
-  TokenKind,
-} from '../models/index.js';
 import {
+    type ChainId,
     ChainIdFromJSON,
     ChainIdToJSON,
+} from '../models/ChainId.js';
+import {
+    type ErrorResponse,
     ErrorResponseFromJSON,
     ErrorResponseToJSON,
+} from '../models/ErrorResponse.js';
+import {
+    type HoldersResponse,
     HoldersResponseFromJSON,
     HoldersResponseToJSON,
+} from '../models/HoldersResponse.js';
+import {
+    type TokenKind,
     TokenKindFromJSON,
     TokenKindToJSON,
-} from '../models/index.js';
+} from '../models/TokenKind.js';
 
 export interface GetTokenHoldersRequest {
+    /**
+     * The chain this deployment serves.
+     */
     chain: ChainId;
+    /**
+     * Token kind: algo (native), asa (Algorand Standard Asset, also ARC-20) or arc200 (application token).
+     */
     kind: TokenKind;
+    /**
+     * Asset id, application id, or 0 for the native token.
+     */
     tokenId: number;
+    /**
+     * Chain round (end-of-round state). Omit for the latest published round.
+     */
     round?: number;
+    /**
+     * Also list accounts that are opted in but hold zero.
+     */
     includeZero?: boolean;
+    /**
+     * Opaque cursor from the previous page's nextCursor.
+     */
     cursor?: string;
+    /**
+     * Page size, 1 to 1000 (default 100).
+     */
     limit?: number;
 }
 
@@ -48,6 +72,20 @@ export interface GetTokenHoldersRequest {
  * @interface HoldersApiInterface
  */
 export interface HoldersApiInterface {
+    /**
+     * Creates request options for getTokenHolders without sending the request
+     * @param {ChainId} chain The chain this deployment serves.
+     * @param {TokenKind} kind Token kind: algo (native), asa (Algorand Standard Asset, also ARC-20) or arc200 (application token).
+     * @param {number} tokenId Asset id, application id, or 0 for the native token.
+     * @param {number} [round] Chain round (end-of-round state). Omit for the latest published round.
+     * @param {boolean} [includeZero] Also list accounts that are opted in but hold zero.
+     * @param {string} [cursor] Opaque cursor from the previous page\&#39;s nextCursor.
+     * @param {number} [limit] Page size, 1 to 1000 (default 100).
+     * @throws {RequiredError}
+     * @memberof HoldersApiInterface
+     */
+    getTokenHoldersRequestOpts(requestParameters: GetTokenHoldersRequest): Promise<runtime.RequestOpts>;
+
     /**
      * Holders in account order. For a very large token at a past round use an asynchronous scan. Pass the same round while paging.
      * @summary Holders of a token at the end of a round
@@ -78,10 +116,9 @@ export interface HoldersApiInterface {
 export class HoldersApi extends runtime.BaseAPI implements HoldersApiInterface {
 
     /**
-     * Holders in account order. For a very large token at a past round use an asynchronous scan. Pass the same round while paging.
-     * Holders of a token at the end of a round
+     * Creates request options for getTokenHolders without sending the request
      */
-    async getTokenHoldersRaw(requestParameters: GetTokenHoldersRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<HoldersResponse>> {
+    async getTokenHoldersRequestOpts(requestParameters: GetTokenHoldersRequest): Promise<runtime.RequestOpts> {
         if (requestParameters['chain'] == null) {
             throw new runtime.RequiredError(
                 'chain',
@@ -125,16 +162,25 @@ export class HoldersApi extends runtime.BaseAPI implements HoldersApiInterface {
 
 
         let urlPath = `/v1/{chain}/tokens/{kind}/{tokenId}/holders`;
-        urlPath = urlPath.replace(`{${"chain"}}`, encodeURIComponent(String(requestParameters['chain'])));
-        urlPath = urlPath.replace(`{${"kind"}}`, encodeURIComponent(String(requestParameters['kind'])));
-        urlPath = urlPath.replace(`{${"tokenId"}}`, encodeURIComponent(String(requestParameters['tokenId'])));
+        urlPath = urlPath.replace('{chain}', encodeURIComponent(String(requestParameters['chain'])));
+        urlPath = urlPath.replace('{kind}', encodeURIComponent(String(requestParameters['kind'])));
+        urlPath = urlPath.replace('{tokenId}', encodeURIComponent(String(requestParameters['tokenId'])));
 
-        const response = await this.request({
+        return {
             path: urlPath,
             method: 'GET',
             headers: headerParameters,
             query: queryParameters,
-        }, initOverrides);
+        };
+    }
+
+    /**
+     * Holders in account order. For a very large token at a past round use an asynchronous scan. Pass the same round while paging.
+     * Holders of a token at the end of a round
+     */
+    async getTokenHoldersRaw(requestParameters: GetTokenHoldersRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<HoldersResponse>> {
+        const requestOptions = await this.getTokenHoldersRequestOpts(requestParameters);
+        const response = await this.request(requestOptions, initOverrides);
 
         return new runtime.JSONApiResponse(response, (jsonValue) => HoldersResponseFromJSON(jsonValue));
     }

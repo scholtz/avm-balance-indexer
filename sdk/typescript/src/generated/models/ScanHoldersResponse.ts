@@ -29,38 +29,26 @@ import {
 export interface ScanHoldersResponse {
     /**
      * 
-     * @type {string}
-     * @memberof ScanHoldersResponse
      */
     id: string;
     /**
      * 
-     * @type {string}
-     * @memberof ScanHoldersResponse
      */
     state: string;
     /**
      * 
-     * @type {boolean}
-     * @memberof ScanHoldersResponse
      */
     complete: boolean;
     /**
      * 
-     * @type {number}
-     * @memberof ScanHoldersResponse
      */
     round: number;
     /**
      * 
-     * @type {Array<HolderDto>}
-     * @memberof ScanHoldersResponse
      */
     items: Array<HolderDto>;
     /**
      * 
-     * @type {string}
-     * @memberof ScanHoldersResponse
      */
     nextCursor: string | null;
 }

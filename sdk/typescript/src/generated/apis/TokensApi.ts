@@ -12,28 +12,40 @@
  * Do not edit the class manually.
  */
 
-
 import * as runtime from '../runtime.js';
-import type {
-  ChainId,
-  ErrorResponse,
-  TokenKind,
-  TokenResponse,
-} from '../models/index.js';
 import {
+    type ChainId,
     ChainIdFromJSON,
     ChainIdToJSON,
+} from '../models/ChainId.js';
+import {
+    type ErrorResponse,
     ErrorResponseFromJSON,
     ErrorResponseToJSON,
+} from '../models/ErrorResponse.js';
+import {
+    type TokenKind,
     TokenKindFromJSON,
     TokenKindToJSON,
+} from '../models/TokenKind.js';
+import {
+    type TokenResponse,
     TokenResponseFromJSON,
     TokenResponseToJSON,
-} from '../models/index.js';
+} from '../models/TokenResponse.js';
 
 export interface GetTokenRequest {
+    /**
+     * The chain this deployment serves.
+     */
     chain: ChainId;
+    /**
+     * Token kind: algo (native), asa (Algorand Standard Asset, also ARC-20) or arc200 (application token).
+     */
     kind: TokenKind;
+    /**
+     * Asset id, application id, or 0 for the native token.
+     */
     tokenId: number;
 }
 
@@ -44,6 +56,16 @@ export interface GetTokenRequest {
  * @interface TokensApiInterface
  */
 export interface TokensApiInterface {
+    /**
+     * Creates request options for getToken without sending the request
+     * @param {ChainId} chain The chain this deployment serves.
+     * @param {TokenKind} kind Token kind: algo (native), asa (Algorand Standard Asset, also ARC-20) or arc200 (application token).
+     * @param {number} tokenId Asset id, application id, or 0 for the native token.
+     * @throws {RequiredError}
+     * @memberof TokensApiInterface
+     */
+    getTokenRequestOpts(requestParameters: GetTokenRequest): Promise<runtime.RequestOpts>;
+
     /**
      * 
      * @summary Token metadata
@@ -69,9 +91,9 @@ export interface TokensApiInterface {
 export class TokensApi extends runtime.BaseAPI implements TokensApiInterface {
 
     /**
-     * Token metadata
+     * Creates request options for getToken without sending the request
      */
-    async getTokenRaw(requestParameters: GetTokenRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<TokenResponse>> {
+    async getTokenRequestOpts(requestParameters: GetTokenRequest): Promise<runtime.RequestOpts> {
         if (requestParameters['chain'] == null) {
             throw new runtime.RequiredError(
                 'chain',
@@ -99,16 +121,24 @@ export class TokensApi extends runtime.BaseAPI implements TokensApiInterface {
 
 
         let urlPath = `/v1/{chain}/tokens/{kind}/{tokenId}`;
-        urlPath = urlPath.replace(`{${"chain"}}`, encodeURIComponent(String(requestParameters['chain'])));
-        urlPath = urlPath.replace(`{${"kind"}}`, encodeURIComponent(String(requestParameters['kind'])));
-        urlPath = urlPath.replace(`{${"tokenId"}}`, encodeURIComponent(String(requestParameters['tokenId'])));
+        urlPath = urlPath.replace('{chain}', encodeURIComponent(String(requestParameters['chain'])));
+        urlPath = urlPath.replace('{kind}', encodeURIComponent(String(requestParameters['kind'])));
+        urlPath = urlPath.replace('{tokenId}', encodeURIComponent(String(requestParameters['tokenId'])));
 
-        const response = await this.request({
+        return {
             path: urlPath,
             method: 'GET',
             headers: headerParameters,
             query: queryParameters,
-        }, initOverrides);
+        };
+    }
+
+    /**
+     * Token metadata
+     */
+    async getTokenRaw(requestParameters: GetTokenRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<TokenResponse>> {
+        const requestOptions = await this.getTokenRequestOpts(requestParameters);
+        const response = await this.request(requestOptions, initOverrides);
 
         return new runtime.JSONApiResponse(response, (jsonValue) => TokenResponseFromJSON(jsonValue));
     }
