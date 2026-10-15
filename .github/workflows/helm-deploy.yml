@@ -102,7 +102,7 @@ jobs:
       cancel-in-progress: false
     timeout-minutes: 70
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
       - uses: azure/setup-helm@v5
