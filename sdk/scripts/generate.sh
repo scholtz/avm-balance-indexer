@@ -45,7 +45,6 @@ generate_typescript() {
 generate_python() {
   local out="sdk/python/src/avm_balance_indexer/_generated" tmp="sdk/.generated-python" spec_py="sdk/.spec-python.json"
   rm -rf "${repo_dir:?}/$out" "${repo_dir:?}/$tmp"
-  trap 'rm -f "$repo_dir/$spec_py"' RETURN
   command -v jq > /dev/null || { echo "generate.sh: jq is required to generate the Python client (apt install jq, choco install jq)" >&2; exit 1; }
   # openapi-generator >= 7.2x types `format: uuid` as uuid.UUID and ignores --type-mappings for it (the type comes from the
   # format in PythonClientCodegen.getPydanticType; tried with 7.26.0). 1.0.0 exposed these ids as StrictStr and callers compare
