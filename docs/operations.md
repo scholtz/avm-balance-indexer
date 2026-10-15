@@ -85,17 +85,30 @@ Rules that every release has to respect (they come from the ADRs):
 
 A fix in the normalizer or the tracker only changes rounds that are indexed afterwards. Rows already written stay as they were, so a stalled or wrong deployment
 keeps stalling until it is rebuilt (issue #115 was fixed in code, yet the TestNet worker kept failing on the old rows). Cassandra rows must not be edited (ADR 0003), so
-rebuild into a new keyspace:
+rebuild into a new keyspace.
 
-1. Set `storage.cassandra.keyspace` of the release to a new name (`avm_testnet_2`, then `_3`, ...) in `deploy/helm/values/<env>-<chain>.yaml` and merge it. The worker creates the
-   keyspace (`createKeyspace: true`) and indexes from genesis; the old keyspace is not touched, so reverting the value switches back. A new worker pod becomes ready within a minute, the API
-   pod follows once the schema exists, and until then the previous API pod keeps answering from the old keyspace.
-2. Watch `GET /v1/{chain}/status`: `state` is `Backfilling`, `indexedRound` rises, and the pod does not restart (`kubectl -n avm-balance-indexer logs deploy/<release>-<chain>-worker`). The worker log line
-   `Indexing of <chain> stopped after round <R> ...` names the cause if it stops.
-3. When `state` is `Following`, compare with the chain as described above. The Nodely indexer answers `GET /v2/accounts/{address}/assets/{id}` for the current balance of any holding.
-4. Reclaim the space: `DROP KEYSPACE avm_testnet;` through `cqlsh` on the Cassandra pod, after nobody needs the old data.
+Choose how to switch:
 
-Which deployments need it after #115: every database that indexed an asset close-out (`aclose`) of protocols v0 to v24. On TestNet the range that was indexed (rounds 0 to 4,982,988) contains such close-outs. MainNet ran the same early protocols and has to be treated as affected until a comparison says otherwise (take an account that received an early close-out and compare its holding with the Nodely indexer). Voi launched on a recent protocol and is expected to be unaffected; this was not verified.
+- **The deployment is stalled or serves wrong data** (TestNet after #115): change the keyspace in the release values. The API switches to the rebuilt data at once and reports a low
+  `indexedRound` until it catches up; the old keyspace stays untouched, so restoring the old value switches back (with another rollout).
+- **The deployment is healthy and must keep serving** (MainNet): run a second release with its own keyspace next to it, compare, and switch the first release only when the rebuilt
+  one has lag 0 and agrees with the chain.
+
+Steps:
+
+1. Set `storage.cassandra.keyspace` in `deploy/helm/values/<env>-<chain>.yaml` to a new name (`avm_testnet_2`, then `_3`, ...) and merge it. The worker creates the keyspace
+   (`createKeyspace: true`) and indexes from genesis. An API pod that cannot use the new keyspace yet is not ready and Kubernetes keeps the old pod until the worker has created it.
+2. Watch `GET /v1/{chain}/status`: `state` is `Backfilling`, `indexedRound` rises, and the worker pod does not restart (`kubectl -n avm-balance-indexer logs deploy/<release>-<chain>-worker`).
+   The worker log line `Indexing of <chain> stopped after round <R> ...` names the cause if it stops.
+3. When `state` is `Following`, compare with the chain: pick accounts that received asset close-outs and compare
+   `GET /v1/{chain}/accounts/{address}/tokens/asa/{id}/balance?round=R` with the holding from the Nodely indexer (`GET https://<chain>-idx.4160.nodely.dev/v2/accounts/{address}/assets/{id}`
+   for the current round), plus the checks of the reindex bullet above.
+4. Reclaim the space with `DROP KEYSPACE <old keyspace>;` through `cqlsh` on the Cassandra pod once nobody needs the old data. Both keyspaces share the node's disk (`cassandra.embedded.hostPath`)
+   while they coexist: check the free space before a rebuild of a large chain.
+
+Which deployments need it after #115: every database that indexed an asset close-out (`aclose`) of protocols v0 to v24. On TestNet the range that was indexed (rounds 0 to 4,982,988)
+contains such close-outs. MainNet ran the same early protocols and has to be treated as affected until the comparison of step 3 says otherwise. Voi launched on a recent protocol and
+is expected to be unaffected; this was not verified.
 
 ## Monitoring and alerts
 
@@ -121,7 +134,7 @@ Also watch the database itself: disk, replication, connections, vacuum and bloat
 | Symptom | Cause | What to do |
 |---|---|---|
 | Worker exits with a *chain divergence* | A block does not link to the stored cursor (archive served another chain, or the database holds a different history). Indexing stopped on purpose, nothing is written on top (ADR 0002). A message that another writer moved the cursor first means two writers raced; when it follows a lost lease the replica simply goes back to standby and does not exit. | Check `Algorand:GossipHosts` and `Algorand:ExpectedGenesisHash` and the node. If the database is wrong, reindex into a fresh one. If it names another writer, look for a second deployment on the same database. |
-| Worker exits with *Balance underflow in round N* and the status stays on `Backfilling` or `Following` | The indexed balance of an account is lower than the chain's, so an earlier effect was missed or counted wrongly (the chain itself never overdraws). The log line `Indexing of <chain> stopped after round <R> ... : <reason>` carries the round, transaction id, effect, token, account, counterparty, the indexed balance and the missing amount (addresses in Algorand text form). Retrying cannot help; the pod restarts and stops again. | Compare the account's history for the token with an indexer of the chain (`/v2/accounts/{address}/transactions?asset-id=...`) to find the credit that is missing in `/v1/{chain}/accounts/{address}/tokens/{kind}/{id}/history`, fix the normalizer with a test for that era and reindex, because everything indexed with the defect is wrong (issue #115: asset close-outs before the protocol that records `aca`). |
+| Worker exits with *Balance underflow in round N* and the status stays on `Backfilling` or `Following` | The indexed balance of an account is lower than the chain's, so an earlier effect was missed or counted wrongly (the chain itself never overdraws). The log line `Indexing of <chain> stopped after round <R> ... : <reason>` carries the round, transaction id, effect, token, account, counterparty, the indexed balance and the missing amount (addresses in Algorand text form). Retrying cannot help; the pod restarts and stops again. | Compare the account's history for the token with an indexer of the chain (`/v2/accounts/{address}/transactions?asset-id=...`) to find the credit that is missing in `/v1/{chain}/accounts/{address}/tokens/{kind}/{id}/transactions`, fix the normalizer with a test for that era and reindex, because everything indexed with the defect is wrong (issue #115: asset close-outs before the protocol that records `aca`). |
 | Worker exits after many transient failures | `Indexer:MaxConsecutiveFailures` consecutive failures without progress (archive or algod unreachable, or a block the archive never serves). | Fix the source; the orchestrator restarts the pod and indexing resumes from the cursor. |
 | `avm.worker.is_leader` is 0 on all replicas | Database unreachable, or a lease that has not expired yet. PostgreSQL releases the lease when the dead session is dropped (about 30 s with the lease session keepalives); Cassandra after `Storage:Cassandra:LeaseTtlSeconds`. | Wait one TTL; check database reachability. |
 | Repeated lease losses | Cassandra timeouts or an unstable PostgreSQL connection. | Raise `Storage:Cassandra:LeaseTtlSeconds` (a lease renewal must fit well inside it) or fix the network; check `ReadTimeoutSeconds` is not set below what the cluster can do. |

@@ -4,7 +4,7 @@ storage:
   provider: Cassandra
   cassandra:
     # avm_testnet was indexed before asset close-outs of protocols below v25 were fixed (#115) and cannot be repaired in place
-    # (ADR 0003): this keyspace is rebuilt from genesis. Drop avm_testnet once this one agrees with the chain (docs/operations.md).
+    # (ADR 0003): this keyspace is rebuilt from genesis. Drop avm_testnet once this one agrees with the chain (#119, docs/operations.md).
     keyspace: avm_testnet_2
     replicationFactor: 1
 cassandra:
