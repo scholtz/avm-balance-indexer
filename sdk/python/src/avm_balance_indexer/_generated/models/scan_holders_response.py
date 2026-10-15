@@ -19,7 +19,6 @@ import json
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
-from uuid import UUID
 from avm_balance_indexer._generated.models.holder_dto import HolderDto
 from typing import Optional, Set
 from typing_extensions import Self
@@ -29,7 +28,7 @@ class ScanHoldersResponse(BaseModel):
     """
     ScanHoldersResponse
     """ # noqa: E501
-    id: UUID
+    id: str
     state: StrictStr
     complete: StrictBool
     round: StrictInt

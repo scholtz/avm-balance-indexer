@@ -36,7 +36,8 @@ generate_typescript() {
   local out="sdk/typescript/src/generated"
   rm -rf "${repo_dir:?}/$out"
   docker_run -w /repo "$OPENAPI_GENERATOR_IMAGE" generate -i "$spec_rel" -g typescript-fetch -o "/repo/$out" \
-    --additional-properties=importFileExtension=.js,supportsES6=true,typescriptThreePlus=true,withInterfaces=false > /dev/null
+    --additional-properties=importFileExtension=.js,supportsES6=true,typescriptThreePlus=true,withInterfaces=false \
+    --global-property=apiTests=false,modelTests=false,apiDocs=false,modelDocs=false > /dev/null
   rm -rf "${repo_dir:?}/$out/.openapi-generator" "${repo_dir:?}/$out/.openapi-generator-ignore"
   normalize "$repo_dir/$out"
 }
@@ -48,6 +49,9 @@ generate_python() {
     --additional-properties=packageName=avm_balance_indexer._generated,projectName=avm-balance-indexer,library=urllib3 \
     --global-property=apiTests=false,modelTests=false,apiDocs=false,modelDocs=false > /dev/null
   mv "$repo_dir/$tmp/avm_balance_indexer/_generated" "$repo_dir/$out"
+  # openapi-generator >= 7.2x types `format: uuid` as uuid.UUID (it ignores --type-mappings for formats). 1.0.0 exposed
+  # these ids as str and callers compare and serialize them as strings, so the public type is kept.
+  find "$repo_dir/$out/models" -name '*.py' -exec perl -ni -e 'next if /^from uuid import UUID$/; s/\bUUID\b/str/g; print' {} +
   rm -rf "${repo_dir:?}/$tmp"
   normalize "$repo_dir/$out"
 }

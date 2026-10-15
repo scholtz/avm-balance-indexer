@@ -132,6 +132,8 @@ def with_retry(call, attempts=4):
 
 The public deployments limit each client address to 600 data requests per minute.
 
+Requests honour the `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` and `NO_PROXY` environment variables (and the operating system proxy settings), as urllib3 and requests do; add a local indexer to `NO_PROXY` when a proxy is configured.
+
 ## Development
 
 ```sh

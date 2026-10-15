@@ -20,7 +20,6 @@ import json
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
-from uuid import UUID
 from avm_balance_indexer._generated.models.token_ref import TokenRef
 from typing import Optional, Set
 from typing_extensions import Self
@@ -30,7 +29,7 @@ class ScanResponse(BaseModel):
     """
     ScanResponse
     """ # noqa: E501
-    id: UUID
+    id: str
     state: StrictStr
     token: TokenRef
     round: StrictInt

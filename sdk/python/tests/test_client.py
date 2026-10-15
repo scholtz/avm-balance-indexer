@@ -314,7 +314,7 @@ def test_the_last_page_of_a_scan_that_finished_between_two_server_reads_is_not_r
             return 202, scan_body("Pending", False), {}
         if parsed.path.endswith("/holders"):
             # Rows, no cursor and not complete: the job looked running when the endpoint read it and was finished when the store did.
-            return 200, {"id": "11111111-1111-1111-1111-111111111111", "state": "Running", "complete": False, "round": 5, "items": [holder("A"), holder("B")], "nextCursor": None}, {}
+            return 200, {"id": "s", "state": "Running", "complete": False, "round": 5, "items": [holder("A"), holder("B")], "nextCursor": None}, {}
         return 200, scan_body("Completed", True), {}
 
     server.handler = handler
@@ -337,7 +337,7 @@ def test_stopping_an_export_early_cancels_the_scan(server):
             return 202, scan_body("Pending", False), {}
         if request["method"] == "DELETE":
             return 200, scan_body("Cancelled", False), {}
-        return 200, {"id": "11111111-1111-1111-1111-111111111111", "state": "Running", "complete": False, "round": 5, "items": [holder("A"), holder("B")], "nextCursor": "c1"}, {}
+        return 200, {"id": "s", "state": "Running", "complete": False, "round": 5, "items": [holder("A"), holder("B")], "nextCursor": "c1"}, {}
 
     server.handler = handler
     client = AvmBalanceIndexer.algorand_mainnet(base_url=server.url)
@@ -360,7 +360,7 @@ def test_stopping_inside_the_last_page_does_not_cancel_a_finished_scan(server):
     def handler(request):
         if request["method"] == "POST":
             return 202, scan_body("Pending", False), {}
-        return 200, {"id": "11111111-1111-1111-1111-111111111111", "state": "Completed", "complete": True, "round": 5, "items": [holder("A"), holder("B")], "nextCursor": None}, {}
+        return 200, {"id": "s", "state": "Completed", "complete": True, "round": 5, "items": [holder("A"), holder("B")], "nextCursor": None}, {}
 
     server.handler = handler
     client = AvmBalanceIndexer.algorand_mainnet(base_url=server.url)
@@ -386,7 +386,7 @@ def test_export_holders_raises_when_the_scan_failed(server):
         if request["method"] == "POST":
             return 202, scan_body("Failed", False, "boom"), {}
         if path.endswith("/holders"):
-            return 200, {"id": "11111111-1111-1111-1111-111111111111", "state": "Failed", "complete": False, "round": 5, "items": [], "nextCursor": None}, {}
+            return 200, {"id": "s", "state": "Failed", "complete": False, "round": 5, "items": [], "nextCursor": None}, {}
         return 200, scan_body("Failed", False, "boom"), {}
 
     server.handler = handler
@@ -394,3 +394,20 @@ def test_export_holders_raises_when_the_scan_failed(server):
 
     with pytest.raises(ScanError, match="Failed: boom"):
         list(client.export_holders("asa", 1, poll_interval=0.01))
+
+
+def test_scan_ids_stay_strings():
+    # The generated models keep `format: uuid` ids as str (generate.sh post-processes them): callers compare them to stored strings.
+    from avm_balance_indexer import ScanResponse
+
+    scan = ScanResponse.from_dict(scan_body("Running", False))
+    assert scan.id == "11111111-1111-1111-1111-111111111111"
+    assert json.dumps({"scan": scan.id})
+
+
+def test_generated_models_accept_python_field_names():
+    # Needs pydantic >= 2.11 (validate_by_name in the generated ConfigDict); the floor in pyproject.toml guarantees it.
+    from avm_balance_indexer._generated.models.scan_request import ScanRequest
+
+    assert ScanRequest(include_zero=True).include_zero is True
+    assert ScanRequest(includeZero=True).include_zero is True
