@@ -54,6 +54,8 @@ generate_python() {
   # code (PythonClientCodegen.getPydanticType), so `--type-mappings=UUID=str --import-mappings=UUID=` is ignored (tried with
   # 7.26.0); only the annotation and its import are rewritten, descriptions are left alone.
   find "$repo_dir/$out/models" -name '*.py' -exec perl -ni -e 'next if /^from uuid import UUID$/; s/^(\s+\w+: )UUID$/$1StrictStr/; s/^(\s+\w+: )Optional\[UUID\]/$1Optional[StrictStr]/; print' {} +
+  if grep -rlw UUID "$repo_dir/$out/models"; then echo "generate.sh: a uuid annotation survived the StrictStr rewrite (see above); extend the rewrite" >&2; exit 1; fi
+  if grep -rlw StrictStr "$repo_dir/$out/models" | xargs -r grep -L '^from pydantic import .*StrictStr' | grep .; then echo "generate.sh: a model uses StrictStr without importing it (see above)" >&2; exit 1; fi
   rm -rf "${repo_dir:?}/$tmp"
   normalize "$repo_dir/$out"
 }

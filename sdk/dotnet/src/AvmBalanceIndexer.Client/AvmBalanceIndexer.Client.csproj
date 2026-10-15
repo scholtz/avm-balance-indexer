@@ -3,7 +3,7 @@
   <PropertyGroup>
     <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
     <PackageId>AvmBalanceIndexer.Client</PackageId>
-    <Version>1.0.1</Version>
+    <Version>1.1.0</Version>
     <Authors>scholtz</Authors>
     <Description>.NET SDK for the AVM Balance Indexer: token balances, holders and history for Algorand, Algorand TestNet and Voi.</Description>
     <PackageTags>algorand;voi;avm;asa;arc200;arc20;indexer;balances;sdk</PackageTags>

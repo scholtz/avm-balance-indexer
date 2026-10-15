@@ -488,4 +488,15 @@ func TestStartHolderScanOmitsUnsetFields(t *testing.T) {
 	if _, present := body["includeZero"]; present || len(body) != 1 {
 		t.Errorf("unexpected body %s", (*requests)[0].Body)
 	}
+
+	// A field set to its zero value is a pointer and is still sent.
+	includeZero, zero := false, uint64(0)
+	if _, err := client.StartHolderScan(context.Background(), avm.Asa, 1, &avm.ScanRequest{IncludeZero: &includeZero, Round: &zero}); err != nil {
+		t.Fatal(err)
+	}
+	body = nil
+	_ = json.Unmarshal([]byte((*requests)[1].Body), &body)
+	if body["includeZero"] != false || body["round"] != float64(0) {
+		t.Errorf("unexpected body %s", (*requests)[1].Body)
+	}
 }

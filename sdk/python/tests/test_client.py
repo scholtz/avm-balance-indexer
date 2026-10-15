@@ -415,8 +415,16 @@ def test_scan_ids_stay_strict_strings():
 
 def test_proxy_environment_is_honoured_and_no_proxy_bypasses_it(server, monkeypatch):
     # openapi-generator >= 7.2x reads the proxy variables itself (urllib3 does not); documented in the README.
+    import socket
+
     server.handler = lambda request: (200, {"chain": "algorand-mainnet", "provider": "PostgreSql", "state": "Following", "indexedRound": 10, "targetRound": 11, "lag": 1, "updatedAt": "2026-10-14T10:00:00Z"}, {})
-    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:9")  # nothing listens on the discard port
+    for name in ("http_proxy", "https_proxy", "all_proxy", "no_proxy"):  # lower-case variants win in getproxies_environment
+        monkeypatch.delenv(name, raising=False)
+        monkeypatch.delenv(name.upper(), raising=False)
+    with socket.socket() as probe:  # a port nothing listens on
+        probe.bind(("127.0.0.1", 0))
+        dead_port = probe.getsockname()[1]
+    monkeypatch.setenv("HTTP_PROXY", f"http://127.0.0.1:{dead_port}")
     monkeypatch.setenv("NO_PROXY", "127.0.0.1")
     AvmBalanceIndexer.algorand_mainnet(base_url=server.url).status()
     assert len(server.requests) == 1
