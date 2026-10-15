@@ -69,12 +69,25 @@ public class AssetEffectNormalizerTests
             AssetEffects(block));
     }
 
+    private const string ProtocolV20 = "https://github.com/algorandfoundation/specs/tree/4a9db6a25595c6fd097cf9cc137cc83027787eaa";
+    private const string ProtocolV25 = "https://github.com/algorandfoundation/specs/tree/bea19289bf41217d2c0af30522fa222ef1366466";
+
     [Fact]
-    public void Closing_Out_Without_A_Stated_Amount_Leaves_The_Amount_To_The_Balance_Tracker()
+    public void Closing_Out_An_Empty_Holding_Still_Records_The_Opt_Out()
     {
-        // Early protocols do not record the closed amount (no aca in the apply data; TestNet round 4848388): the closer's whole
-        // remaining balance moves, which only the running balance knows. A block that states no amount may also close an empty holding.
-        var block = Normalize(Chain.Block(5, [new TestPayment(Alice, Bob, 0, Asset: TestAsset.CloseOut(Asset, Carol, closingAmount: 0, amount: 15))]));
+        // From v25 an absent aca is a real zero, so the delta stays exact (the default test protocol is a modern one).
+        var block = Normalize(Chain.Block(5, [new TestPayment(Alice, Alice, 0, Asset: TestAsset.CloseOut(Asset, Bob, closingAmount: 0))]));
+
+        Assert.Equal([(Alice, EffectType.AssetOptOut, 0L)], AssetEffects(block));
+        Assert.All(block.Deltas, static d => Assert.Equal(CloseOutRole.None, d.CloseOut));
+    }
+
+    [Fact]
+    public void Closing_Out_Without_A_Stated_Amount_Leaves_The_Amount_To_The_Balance_Tracker_Before_V25()
+    {
+        // Protocols before v25 do not record the closed amount (no aca in the apply data; TestNet round 4848388, protocol v20): the
+        // closer's whole remaining balance moves, which only the running balance knows.
+        var block = Normalize(Chain.Block(5, [new TestPayment(Alice, Bob, 0, Asset: TestAsset.CloseOut(Asset, Carol, closingAmount: 0, amount: 15))], protocol: ProtocolV20));
 
         Assert.Equal(
             [
@@ -86,6 +99,17 @@ public class AssetEffectNormalizerTests
             [.. block.Deltas.Where(static d => d.Token == Token).Select(static d => (d.Account, d.Type, (long)d.Delta, d.CloseOut))]);
         Assert.Equal(Carol, block.Deltas.Single(static d => d.CloseOut == CloseOutRole.Debit).Counterparty);
         Assert.Equal(Alice, block.Deltas.Single(static d => d.CloseOut == CloseOutRole.Credit).Counterparty);
+    }
+
+    [Fact]
+    public void A_Stated_Closing_Amount_Stays_Exact_In_Every_Protocol()
+    {
+        foreach (var protocol in new[] { ProtocolV20, ProtocolV25 })
+        {
+            var block = Normalize(Chain.Block(5, [new TestPayment(Alice, Alice, 0, Asset: TestAsset.CloseOut(Asset, Bob, closingAmount: 60))], protocol: protocol));
+
+            Assert.Equal([(Alice, EffectType.AssetOptOut, -60L), (Bob, EffectType.AssetTransfer, 60L)], AssetEffects(block));
+        }
     }
 
     [Fact]

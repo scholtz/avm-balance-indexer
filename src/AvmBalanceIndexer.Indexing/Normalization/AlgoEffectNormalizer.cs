@@ -39,7 +39,7 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
             : throw new InvalidDataException($"Round {block.Round}: block header has no fee sink.");
 
         var transactions = block.ApplyData;
-        var round = new RoundBuilder(block.Round, feeSink, assets);
+        var round = new RoundBuilder(block.Round, feeSink, assets, ConsensusProtocols.RecordsAssetClosingAmount(header.CurrentProtocol ?? string.Empty));
 
         round.BeginTransaction(0, string.Empty);
         ApplyStartOfBlock(round, block, previousRewards);
@@ -257,10 +257,10 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
         {
             // Closing out sends the sender's remaining units to the destination and removes the holding.
             var closing = new BigInteger(apply.AssetClosingAmount);
-            if (closing.IsZero)
+            if (closing.IsZero && !round.RecordsAssetClosingAmount)
             {
-                // Either the holding was empty or the protocol does not record the closed amount (no aca before the protocol that
-                // reports it, e.g. TestNet round 4848388): the ordered indexer moves the sender's whole remaining balance.
+                // Protocols before v25 never record the closed amount (e.g. TestNet round 4848388): the ordered indexer moves the
+                // sender's whole remaining balance. From v25 an absent aca is a real zero and stays exact.
                 round.Add(sender, BigInteger.Zero, token, EffectType.AssetOptOut, destination, path, keepZero: true, closeOut: CloseOutRole.Debit);
                 round.Add(destination, BigInteger.Zero, token, EffectType.AssetTransfer, sender, path, keepZero: true, closeOut: CloseOutRole.Credit);
                 return;
@@ -310,7 +310,7 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
     private static DomainAddress ToDomain(Algorand.Address? address, string role) =>
         address is null ? throw new InvalidDataException($"A transaction has no {role} address.") : new DomainAddress(address.Bytes);
 
-    private sealed class RoundBuilder(ulong round, DomainAddress feeSink, IAssetDirectory assets)
+    private sealed class RoundBuilder(ulong round, DomainAddress feeSink, IAssetDirectory assets, bool recordsAssetClosingAmount)
     {
         private readonly List<BalanceDelta> _deltas = [];
         private readonly List<TokenInfo> _tokenChanges = [];
@@ -322,6 +322,9 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
         public ulong Round { get; } = round;
 
         public DomainAddress FeeSink { get; } = feeSink;
+
+        /// <summary>Whether the block's protocol states the amount of an asset close-out (v25 and later).</summary>
+        public bool RecordsAssetClosingAmount { get; } = recordsAssetClosingAmount;
 
         public IReadOnlyList<BalanceDelta> Deltas => _deltas;
 

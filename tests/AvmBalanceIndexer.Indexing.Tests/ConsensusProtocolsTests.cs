@@ -23,4 +23,15 @@ public class ConsensusProtocolsTests
         Assert.Equal(flat, ConsensusProtocols.UsesFlatPaysetCommitment(protocol));
         Assert.Equal(genesisHashRequired, ConsensusProtocols.RequiresGenesisHash(protocol));
     }
+
+    [Theory]
+    [InlineData("v0", false)]
+    [InlineData("v12", false)]
+    [InlineData("https://github.com/algorandfoundation/specs/tree/4a9db6a25595c6fd097cf9cc137cc83027787eaa", false)] // v20, TestNet round 4848388
+    [InlineData("https://github.com/algorandfoundation/specs/tree/3a83c4c743f8b17adfd73944b4319c25722a6782", false)] // v24
+    [InlineData("https://github.com/algorandfoundation/specs/tree/bea19289bf41217d2c0af30522fa222ef1366466", true)] // v25, EnableAssetCloseAmount
+    [InlineData("https://github.com/algorandfoundation/specs/tree/d050b3cade6d5c664df8bd729bf219f179812595", true)] // TestNet round 15000054: later protocols are not in the legacy list
+    [InlineData("test-protocol", true)]
+    public void Only_Protocols_From_V25_Record_The_Asset_Closing_Amount(string protocol, bool recorded) =>
+        Assert.Equal(recorded, ConsensusProtocols.RecordsAssetClosingAmount(protocol));
 }

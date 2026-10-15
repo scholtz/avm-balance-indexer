@@ -130,7 +130,7 @@ public sealed partial class IndexerWorker(
     {
         try
         {
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
             var status = await storage.GetAsync(chain.Chain, timeout.Token).ConfigureAwait(false);
             return status is null ? "none" : status.IndexedRound.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }

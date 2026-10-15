@@ -18,6 +18,7 @@ namespace AvmBalanceIndexer.Indexing.Tests;
 public class AssetCloseOutIndexingTests
 {
     private const ulong Asset = 100;
+    private const string ProtocolV20 = "https://github.com/algorandfoundation/specs/tree/4a9db6a25595c6fd097cf9cc137cc83027787eaa";
 
     private static async Task<InMemoryChainStorage> IndexAsync(params BlockData[] blocks)
     {
@@ -39,7 +40,7 @@ public class AssetCloseOutIndexingTests
             chain.Block(2, [new TestPayment(Bob, Bob, 0, Asset: TestAsset.OptIn(Asset))], rewards: RewardsAt(2)),
             chain.Block(3, [new TestPayment(Alice, Bob, 0, Asset: TestAsset.Transfer(Asset, 300))], rewards: RewardsAt(3)),
             // The block does not say how much Bob's close-out moves (no aca): all 300 units go back to Alice.
-            chain.Block(4, [new TestPayment(Bob, Bob, 0, Asset: TestAsset.CloseOut(Asset, Alice, closingAmount: 0))], rewards: RewardsAt(4)),
+            chain.Block(4, [new TestPayment(Bob, Bob, 0, Asset: TestAsset.CloseOut(Asset, Alice, closingAmount: 0))], rewards: RewardsAt(4), protocol: ProtocolV20),
             // Before the fix the indexer believed Alice held 700 and stopped here with a balance underflow.
             chain.Block(5, [new TestPayment(Alice, Carol, 0, Asset: TestAsset.Transfer(Asset, 1_000))], rewards: RewardsAt(5)));
 

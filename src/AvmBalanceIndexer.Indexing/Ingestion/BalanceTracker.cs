@@ -68,7 +68,7 @@ public sealed class BalanceTracker(IBalanceReadStore store, int maxCacheEntries)
             {
                 // The destination of a close-out receives what the closer's debit removed; a credit alone is a normalizer defect.
                 var received = creditLimit ?? throw new InvalidOperationException(
-                    $"Round {delta.Id.Round}: the close-out credit of {delta.Token} (effect {delta.Id.Ordinal}) does not follow its debit.");
+                    $"Round {delta.Id.Round}, transaction {delta.Id.TransactionId}: the close-out credit of {delta.Token} (effect {delta.Id.Ordinal}) does not directly follow its debit.");
                 creditLimit = null;
                 if (received.IsZero)
                 {
@@ -86,6 +86,12 @@ public sealed class BalanceTracker(IBalanceReadStore store, int maxCacheEntries)
             else if (delta.CloseOut == CloseOutRole.Debit)
             {
                 // The block does not state the closed amount (early protocols): the closer's whole remaining balance moves.
+                if (index + 1 >= deltas.Count || deltas[index + 1].CloseOut != CloseOutRole.Credit)
+                {
+                    throw new InvalidOperationException(
+                        $"Round {delta.Id.Round}, transaction {delta.Id.TransactionId}: the close-out debit of {delta.Token} (effect {delta.Id.Ordinal}) is not directly followed by its credit.");
+                }
+
                 applied = delta with { Delta = -balance.Value };
                 creditLimit = balance.Value;
             }
