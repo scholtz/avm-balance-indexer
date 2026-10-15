@@ -81,6 +81,22 @@ Rules that every release has to respect (they come from the ADRs):
   `dotnet test tests/AvmBalanceIndexer.Live.Tests`; that test does not read a deployment.
 - Scan results are temporary (`Scans:Retention`) and are not worth backing up.
 
+### Reindex after a normalizer fix (runbook)
+
+A fix in the normalizer or the tracker only changes rounds that are indexed afterwards. Rows already written stay as they were, so a stalled or wrong deployment
+keeps stalling until it is rebuilt (issue #115 was fixed in code, yet the TestNet worker kept failing on the old rows). Cassandra rows must not be edited (ADR 0003), so
+rebuild into a new keyspace:
+
+1. Set `storage.cassandra.keyspace` of the release to a new name (`avm_testnet_2`, then `_3`, ...) in `deploy/helm/values/<env>-<chain>.yaml` and merge it. The worker creates the
+   keyspace (`createKeyspace: true`) and indexes from genesis; the old keyspace is not touched, so reverting the value switches back. A new worker pod becomes ready within a minute, the API
+   pod follows once the schema exists, and until then the previous API pod keeps answering from the old keyspace.
+2. Watch `GET /v1/{chain}/status`: `state` is `Backfilling`, `indexedRound` rises, and the pod does not restart (`kubectl -n avm-balance-indexer logs deploy/<release>-<chain>-worker`). The worker log line
+   `Indexing of <chain> stopped after round <R> ...` names the cause if it stops.
+3. When `state` is `Following`, compare with the chain as described above. The Nodely indexer answers `GET /v2/accounts/{address}/assets/{id}` for the current balance of any holding.
+4. Reclaim the space: `DROP KEYSPACE avm_testnet;` through `cqlsh` on the Cassandra pod, after nobody needs the old data.
+
+Which deployments need it after #115: every database that indexed an asset close-out (`aclose`) of protocols v0 to v24. On TestNet that is everything before round 15,000,054 at least. MainNet ran the same early protocols and has to be treated as affected until a comparison says otherwise (take an account that received an early close-out and compare its holding with the Nodely indexer). Voi launched on a recent protocol and is expected to be unaffected; this was not verified.
+
 ## Monitoring and alerts
 
 Set `telemetry.otlpEndpoint` (ADR 0011). The metrics:
