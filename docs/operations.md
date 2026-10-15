@@ -95,7 +95,7 @@ rebuild into a new keyspace:
 3. When `state` is `Following`, compare with the chain as described above. The Nodely indexer answers `GET /v2/accounts/{address}/assets/{id}` for the current balance of any holding.
 4. Reclaim the space: `DROP KEYSPACE avm_testnet;` through `cqlsh` on the Cassandra pod, after nobody needs the old data.
 
-Which deployments need it after #115: every database that indexed an asset close-out (`aclose`) of protocols v0 to v24. On TestNet that is everything before round 15,000,054 at least. MainNet ran the same early protocols and has to be treated as affected until a comparison says otherwise (take an account that received an early close-out and compare its holding with the Nodely indexer). Voi launched on a recent protocol and is expected to be unaffected; this was not verified.
+Which deployments need it after #115: every database that indexed an asset close-out (`aclose`) of protocols v0 to v24. On TestNet the range that was indexed (rounds 0 to 4,982,988) contains such close-outs. MainNet ran the same early protocols and has to be treated as affected until a comparison says otherwise (take an account that received an early close-out and compare its holding with the Nodely indexer). Voi launched on a recent protocol and is expected to be unaffected; this was not verified.
 
 ## Monitoring and alerts
 
