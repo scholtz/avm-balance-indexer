@@ -4,7 +4,7 @@
 #   sdk/scripts/generate.sh            all languages
 #   sdk/scripts/generate.sh go python  only these
 #
-# Needs Docker (openapi-generator for TypeScript and Python, golang for oapi-codegen) and the .NET SDK (NSwag, pinned in sdk/dotnet/dotnet-tools.json).
+# Needs Docker (openapi-generator for TypeScript and Python, jq to strip `format: uuid` for Python, golang for oapi-codegen) and the .NET SDK (NSwag, pinned in sdk/dotnet/dotnet-tools.json).
 # CI runs this and fails when it changes a committed file (workflow "SDKs").
 set -euo pipefail
 
@@ -43,19 +43,17 @@ generate_typescript() {
 }
 
 generate_python() {
-  local out="sdk/python/src/avm_balance_indexer/_generated" tmp="sdk/.generated-python"
+  local out="sdk/python/src/avm_balance_indexer/_generated" tmp="sdk/.generated-python" spec_py="sdk/.spec-python.json"
   rm -rf "${repo_dir:?}/$out" "${repo_dir:?}/$tmp"
-  docker_run -w /repo "$OPENAPI_GENERATOR_IMAGE" generate -i "$spec_rel" -g python -o "/repo/$tmp" \
+  # openapi-generator >= 7.2x types `format: uuid` as uuid.UUID and ignores --type-mappings for it (the type comes from the
+  # format in PythonClientCodegen.getPydanticType; tried with 7.26.0). 1.0.0 exposed these ids as StrictStr and callers compare
+  # and serialize them as strings, so the python generator reads a copy of the document without that format.
+  (cd "$repo_dir" && jq 'walk(if type == "object" and .format == "uuid" then del(.format) else . end)' "$spec_rel" > "$spec_py")
+  docker_run -w /repo "$OPENAPI_GENERATOR_IMAGE" generate -i "$spec_py" -g python -o "/repo/$tmp" \
     --additional-properties=packageName=avm_balance_indexer._generated,projectName=avm-balance-indexer,library=urllib3 \
     --global-property=apiTests=false,modelTests=false,apiDocs=false,modelDocs=false > /dev/null
+  rm -f "$repo_dir/$spec_py"
   mv "$repo_dir/$tmp/avm_balance_indexer/_generated" "$repo_dir/$out"
-  # openapi-generator >= 7.2x types `format: uuid` as uuid.UUID; 1.0.0 exposed these ids as StrictStr and callers compare and
-  # serialize them as strings, so the public type is kept. The python generator derives the pydantic type from the format in
-  # code (PythonClientCodegen.getPydanticType), so `--type-mappings=UUID=str --import-mappings=UUID=` is ignored (tried with
-  # 7.26.0); only the annotation and its import are rewritten, descriptions are left alone.
-  find "$repo_dir/$out/models" -name '*.py' -exec perl -ni -e 'next if /^from uuid import UUID$/; s/^(\s+\w+: )UUID$/$1StrictStr/; s/^(\s+\w+: )Optional\[UUID\]/$1Optional[StrictStr]/; print' {} +
-  if grep -rlw UUID "$repo_dir/$out/models"; then echo "generate.sh: a uuid annotation survived the StrictStr rewrite (see above); extend the rewrite" >&2; exit 1; fi
-  if grep -rlw StrictStr "$repo_dir/$out/models" | xargs -r grep -L '^from pydantic import .*StrictStr' | grep .; then echo "generate.sh: a model uses StrictStr without importing it (see above)" >&2; exit 1; fi
   rm -rf "${repo_dir:?}/$tmp"
   normalize "$repo_dir/$out"
 }
