@@ -77,15 +77,15 @@ public sealed class BalanceTracker(IBalanceReadStore store, int maxCacheEntries)
 
                 applied = delta with { Delta = received };
             }
-            else if (creditLimit is { } limit)
-            {
-                // The credit half of a transfer whose debit was limited moves the same, smaller amount.
-                applied = delta with { Delta = limit };
-                creditLimit = null;
-            }
             else if (delta.CloseOut == CloseOutRole.Debit)
             {
                 // The block does not state the closed amount (early protocols): the closer's whole remaining balance moves.
+                if (creditLimit is not null)
+                {
+                    throw new InvalidOperationException(
+                        $"Round {delta.Id.Round}, transaction {delta.Id.TransactionId}: the close-out debit of {delta.Token} (effect {delta.Id.Ordinal}) follows a limited debit whose credit never came.");
+                }
+
                 if (index + 1 >= deltas.Count || !IsCloseOutCreditOf(delta, deltas[index + 1]))
                 {
                     throw new InvalidOperationException(
@@ -94,6 +94,12 @@ public sealed class BalanceTracker(IBalanceReadStore store, int maxCacheEntries)
 
                 applied = delta with { Delta = -balance.Value };
                 creditLimit = balance.Value;
+            }
+            else if (creditLimit is { } limit)
+            {
+                // The credit half of a transfer whose debit was limited moves the same, smaller amount.
+                applied = delta with { Delta = limit };
+                creditLimit = null;
             }
             else if (delta.Token.Kind == TokenKind.Arc200 && balance.Value + delta.Delta < BigInteger.Zero)
             {
