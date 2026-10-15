@@ -98,19 +98,19 @@ Choose how to switch:
 Steps:
 
 1. Set `storage.cassandra.keyspace` in `deploy/helm/values/<env>-<chain>.yaml` to a new name (`avm_testnet_2`, then `_3`, ...) and merge it. The worker creates the keyspace
-   (`createKeyspace: true`; only the worker applies the schema) and indexes from genesis. An API pod that cannot use the new keyspace yet is not ready and Kubernetes keeps the old pod until the worker has
+   (`createKeyspace: true`; only the worker applies the schema) and indexes from genesis. Storage queries fail while the keyspace does not exist, so the readiness check of a new API pod fails and Kubernetes keeps the old pod until the worker has
    created it. The worker of the old keyspace is replaced by the rollout; when it was still indexing, set `worker.strategy=Recreate` for this release so that two writers never download side by side.
 2. Watch `GET /v1/{chain}/status`: `state` is `Backfilling`, `indexedRound` rises, and the worker pod does not restart (`kubectl -n avm-balance-indexer logs deploy/<release>-<chain>-worker`).
    The worker log line `Indexing of <chain> stopped after round <R> ...` names the cause if it stops.
 3. When `state` is `Following`, compare with the chain: pick accounts that received asset close-outs and compare
-   `GET /v1/{chain}/accounts/{address}/tokens/asa/{id}/balance?round=R` with the holding from the Nodely indexer (`GET https://<chain>-idx.4160.nodely.dev/v2/accounts/{address}/assets/{id}`
+   `GET /v1/{chain}/accounts/{address}/tokens/asa/{id}/balance?round=R` with the holding from the Nodely indexer (`GET https://testnet-idx.4160.nodely.dev/v2/accounts/{address}/assets/{id}`, or `mainnet-idx` for MainNet,
    for the current round), plus the checks of the reindex bullet above.
 4. Reclaim the space with `DROP KEYSPACE <old keyspace>;` through `cqlsh` on the Cassandra pod once nobody needs the old data. The drop cannot be undone and ends the rollback option of step 1
    (the old name would be recreated empty). Both keyspaces share the node's disk (`cassandra.embedded.hostPath`) while they coexist: check the free space before a rebuild of a large chain.
 
 Which deployments need it after #115: every database that indexed an asset close-out (`aclose`) of protocols v0 to v24. On TestNet the range that was indexed (rounds 0 to 4,982,988)
 contains such close-outs. MainNet ran the same early protocols and is affected as soon as its indexed range holds one asset close-out with an amount: list them with the Nodely indexer
-(`GET https://<chain>-idx.4160.nodely.dev/v2/transactions?tx-type=axfer&min-round=A&max-round=B&limit=1000`, keep `asset-transfer-transaction.close-to` set and `close-amount` above 0; a block of a protocol
+(`GET https://mainnet-idx.4160.nodely.dev/v2/transactions?tx-type=axfer&min-round=A&max-round=B&limit=1000`, keep `asset-transfer-transaction.close-to` set and `close-amount` above 0; a block of a protocol
 before v25 has no `aca`). Each such transaction proves the missing credit for its `close-to` account, and that account is the one to compare in step 3. Voi launched on a recent protocol and
 is expected to be unaffected; this was not verified.
 
