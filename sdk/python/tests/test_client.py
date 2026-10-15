@@ -436,3 +436,13 @@ def test_generated_models_accept_python_field_names():
 
     assert ScanRequest(include_zero=True).include_zero is True
     assert ScanRequest(includeZero=True).include_zero is True
+
+
+def test_retry_after_is_found_whatever_the_header_case():
+    from avm_balance_indexer._generated.exceptions import ApiException
+    from avm_balance_indexer.client import _to_api_error
+
+    for name in ("Retry-After", "retry-after", "RETRY-AFTER"):
+        error = ApiException(status=429, reason="Too Many Requests", body='{"error": "slow down"}')
+        error.headers = {name: "7"}  # a plain dict, as a mocked transport or another generator version may hand over
+        assert _to_api_error(error).retry_after_seconds == 7

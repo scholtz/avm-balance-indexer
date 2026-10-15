@@ -58,7 +58,7 @@ The hand-written layer is `client.ts`, `client.py`, `AvmBalanceIndexerClient.cs`
 
 1. Change the API. The test `OpenApiSpecTests` in `tests/AvmBalanceIndexer.Api.Tests` fails because `sdk/openapi/avm-balance-indexer.v1.json` differs from `/openapi/v1.json`.
 2. Rewrite the spec: `AVM_UPDATE_OPENAPI=1 dotnet test tests/AvmBalanceIndexer.Api.Tests --filter OpenApiSpecTests` (PowerShell: `$env:AVM_UPDATE_OPENAPI=1; …; Remove-Item Env:AVM_UPDATE_OPENAPI`).
-3. Regenerate the SDKs: `sdk/scripts/generate.sh` (needs Docker and the .NET SDK; first run downloads the generator images and builds `cargo-progenitor`, a few minutes). Commit the result.
+3. Regenerate the SDKs: `sdk/scripts/generate.sh` (needs Docker, the .NET SDK and `jq`; first run downloads the generator images and builds `cargo-progenitor`, a few minutes). Commit the result.
 4. Adapt the hand-written layer and tests if the change needs it, bump the version (below) and describe the change in the pull request.
 
 The workflow `SDKs` regenerates everything in CI and fails when a committed generated file differs, so a forgotten step cannot be merged.
