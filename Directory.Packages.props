@@ -25,7 +25,7 @@
   <ItemGroup Label="Algorand">
     <PackageVersion Include="Algorand5" Version="5.0.2.2026101113" />
     <!-- Same major/minor as the version Algorand5 depends on; used directly to read block apply data. -->
-    <PackageVersion Include="MessagePack" Version="3.1.11" />
+    <PackageVersion Include="MessagePack" Version="3.1.12" />
   </ItemGroup>
 
   <ItemGroup Label="Storage">
