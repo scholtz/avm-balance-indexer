@@ -29,7 +29,7 @@ class ScanResponse(BaseModel):
     """
     ScanResponse
     """ # noqa: E501
-    id: str
+    id: StrictStr
     state: StrictStr
     token: TokenRef
     round: StrictInt

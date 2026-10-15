@@ -470,7 +470,7 @@ func TestExportHoldersReportsAFailedScan(t *testing.T) {
 	}
 }
 
-func TestStartHolderScanPostsNullDefaults(t *testing.T) {
+func TestStartHolderScanOmitsUnsetFields(t *testing.T) {
 	server, requests := fakeServer(t, func(r *http.Request) (int, any, map[string]string) { return 202, scan("Pending", false, nil), nil })
 	client, _ := avm.New(avm.AlgorandMainnet, &avm.Options{BaseURL: server.URL})
 	round := uint64(5)
@@ -483,5 +483,9 @@ func TestStartHolderScanPostsNullDefaults(t *testing.T) {
 	_ = json.Unmarshal([]byte((*requests)[0].Body), &body)
 	if (*requests)[0].Method != http.MethodPost || body["round"] != float64(5) {
 		t.Errorf("unexpected request %+v", (*requests)[0])
+	}
+	// oapi-codegen >= 2.8 marks optional fields omitempty: an unset field is left out instead of sent as null.
+	if _, present := body["includeZero"]; present || len(body) != 1 {
+		t.Errorf("unexpected body %s", (*requests)[0].Body)
 	}
 }

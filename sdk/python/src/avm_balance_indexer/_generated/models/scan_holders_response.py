@@ -28,7 +28,7 @@ class ScanHoldersResponse(BaseModel):
     """
     ScanHoldersResponse
     """ # noqa: E501
-    id: str
+    id: StrictStr
     state: StrictStr
     complete: StrictBool
     round: StrictInt

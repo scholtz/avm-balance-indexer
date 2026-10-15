@@ -49,9 +49,11 @@ generate_python() {
     --additional-properties=packageName=avm_balance_indexer._generated,projectName=avm-balance-indexer,library=urllib3 \
     --global-property=apiTests=false,modelTests=false,apiDocs=false,modelDocs=false > /dev/null
   mv "$repo_dir/$tmp/avm_balance_indexer/_generated" "$repo_dir/$out"
-  # openapi-generator >= 7.2x types `format: uuid` as uuid.UUID (it ignores --type-mappings for formats). 1.0.0 exposed
-  # these ids as str and callers compare and serialize them as strings, so the public type is kept.
-  find "$repo_dir/$out/models" -name '*.py' -exec perl -ni -e 'next if /^from uuid import UUID$/; s/\bUUID\b/str/g; print' {} +
+  # openapi-generator >= 7.2x types `format: uuid` as uuid.UUID; 1.0.0 exposed these ids as StrictStr and callers compare and
+  # serialize them as strings, so the public type is kept. The python generator derives the pydantic type from the format in
+  # code (PythonClientCodegen.getPydanticType), so `--type-mappings=UUID=str --import-mappings=UUID=` is ignored (tried with
+  # 7.26.0); only the annotation and its import are rewritten, descriptions are left alone.
+  find "$repo_dir/$out/models" -name '*.py' -exec perl -ni -e 'next if /^from uuid import UUID$/; s/^(\s+\w+: )UUID$/$1StrictStr/; s/^(\s+\w+: )Optional\[UUID\]/$1Optional[StrictStr]/; print' {} +
   rm -rf "${repo_dir:?}/$tmp"
   normalize "$repo_dir/$out"
 }
