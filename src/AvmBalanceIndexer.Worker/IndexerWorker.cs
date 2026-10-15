@@ -39,7 +39,9 @@ public sealed partial class IndexerWorker(
         }
         catch (Exception ex)
         {
-            LogFatal(logger, ex);
+            var indexedRound = await TryReadIndexedRoundAsync().ConfigureAwait(false);
+            var reason = ex.Message;
+            LogFatal(logger, ex, chain.Chain, indexedRound, reason);
             Environment.ExitCode = 1;
             lifetime.StopApplication();
         }
@@ -123,6 +125,21 @@ public sealed partial class IndexerWorker(
         }
     }
 
+    /// <summary>The published round for the fatal log; the database may be the very reason indexing stopped, so this never throws.</summary>
+    private async Task<string> TryReadIndexedRoundAsync()
+    {
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            var status = await storage.GetAsync(chain.Chain, timeout.Token).ConfigureAwait(false);
+            return status is null ? "none" : status.IndexedRound.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+        catch (Exception)
+        {
+            return "unknown";
+        }
+    }
+
     private async Task FollowAsync(CancellationToken stoppingToken)
     {
         var settings = options.Value;
@@ -203,6 +220,6 @@ public sealed partial class IndexerWorker(
     [LoggerMessage(EventId = 1301, Level = LogLevel.Warning, Message = "Indexing paused by a transient failure (failure {Failures} without progress); retrying in {Backoff}")]
     private static partial void LogTransientFailure(ILogger logger, Exception exception, TimeSpan backoff, int failures);
 
-    [LoggerMessage(EventId = 1302, Level = LogLevel.Critical, Message = "Indexing stopped by a failure that retrying cannot fix")]
-    private static partial void LogFatal(ILogger logger, Exception exception);
+    [LoggerMessage(EventId = 1302, Level = LogLevel.Critical, Message = "Indexing of {Chain} stopped after round {IndexedRound} by a failure that retrying cannot fix: {Reason}")]
+    private static partial void LogFatal(ILogger logger, Exception exception, string chain, string indexedRound, string reason);
 }

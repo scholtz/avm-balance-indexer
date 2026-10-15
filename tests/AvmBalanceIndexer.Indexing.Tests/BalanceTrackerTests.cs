@@ -1,6 +1,7 @@
 using System.Numerics;
 using AvmBalanceIndexer.Domain.Chains;
 using AvmBalanceIndexer.Domain.Effects;
+using AvmBalanceIndexer.Domain.Storage;
 using AvmBalanceIndexer.Domain.Tokens;
 using AvmBalanceIndexer.Indexing.Ingestion;
 using AvmBalanceIndexer.TestSupport;
@@ -41,7 +42,99 @@ public class BalanceTrackerTests
     {
         var tracker = new BalanceTracker(await SeededAsync(), 1000);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => tracker.ApplyAsync([Delta(0, Alice, -101)], CancellationToken.None));
+        await Assert.ThrowsAsync<BalanceUnderflowException>(() => tracker.ApplyAsync([Delta(0, Alice, -101)], CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task An_Underflow_Names_The_Round_Transaction_Account_Token_And_Amounts()
+    {
+        var tracker = new BalanceTracker(await SeededAsync(), 1000);
+        var delta = new BalanceDelta(new EffectId(4982989, 1, "IXZBNWYO", [], 3), Alice, TokenKey.Asa(127647), EffectType.AssetTransfer, -175, Bob);
+
+        var error = await Assert.ThrowsAsync<BalanceUnderflowException>(() => tracker.ApplyAsync([delta], CancellationToken.None));
+
+        Assert.Equal(delta, error.Delta);
+        Assert.Equal(Amount.Zero, error.Balance);
+        Assert.Contains("round 4982989", error.Message);
+        Assert.Contains("IXZBNWYO", error.Message);
+        Assert.Contains(new Algorand.Address(Alice.ToArray()).EncodeAsString(), error.Message);
+        Assert.Contains(new Algorand.Address(Bob.ToArray()).EncodeAsString(), error.Message);
+        Assert.Contains("127647", error.Message);
+        Assert.Contains("AssetTransfer", error.Message);
+        Assert.Contains("-175", error.Message);
+    }
+
+    private static readonly TokenKey Asset = TokenKey.Asa(7);
+
+    private static BalanceDelta CloseOutDelta(int ordinal, Address account, CloseOutRole role, Address counterparty) =>
+        new(new EffectId(1, 1, "tx", [], ordinal), account, Asset, role == CloseOutRole.Debit ? EffectType.AssetOptOut : EffectType.AssetTransfer, BigInteger.Zero, counterparty, role);
+
+    private static BalanceDelta AssetDelta(int ordinal, Address account, long amount, Address counterparty) =>
+        new(new EffectId(1, 1, "tx", [], ordinal), account, Asset, EffectType.AssetTransfer, new BigInteger(amount), counterparty);
+
+    private static async Task<InMemoryChainStorage> SeededAssetAsync(long alice)
+    {
+        var storage = await SeededAsync();
+        await storage.WriteRoundAsync(
+            new ChainStatus(ChainId.AlgorandTestnet, 1, new byte[32], null, IngestionState.Following, DateTimeOffset.UnixEpoch),
+            [new TokenEffect(new EffectId(1, 1, "seed", [], 0), Alice, Asset, EffectType.AssetTransfer, alice, Amount.From((ulong)alice), null)],
+            CancellationToken.None);
+        return storage;
+    }
+
+    [Fact]
+    public async Task A_Close_Out_Without_A_Stated_Amount_Moves_The_Whole_Remaining_Balance_To_The_Destination()
+    {
+        var carol = TestChain.Account(3);
+        var tracker = new BalanceTracker(await SeededAssetAsync(60), 1000);
+
+        var round = await tracker.ApplyAsync(
+            [
+                AssetDelta(0, Alice, -15, Bob),
+                AssetDelta(1, Bob, 15, Alice),
+                CloseOutDelta(2, Alice, CloseOutRole.Debit, carol),
+                CloseOutDelta(3, carol, CloseOutRole.Credit, Alice),
+            ],
+            CancellationToken.None);
+
+        Assert.Equal(
+            [(Alice, -15L, 45UL), (Bob, 15L, 15UL), (Alice, -45L, 0UL), (carol, 45L, 45UL)],
+            round.Effects.Select(static e => (e.Account, (long)e.Delta, (ulong)e.BalanceAfter.Value)));
+        Assert.Equal(EffectType.AssetOptOut, round.Effects[2].Type);
+        Assert.Equal(0UL, (ulong)round.FinalBalances[new HoldingKey(Alice, Asset)].Value);
+    }
+
+    [Fact]
+    public async Task A_Close_Out_Of_An_Empty_Holding_Records_The_Opt_Out_And_Moves_Nothing()
+    {
+        var carol = TestChain.Account(3);
+        var tracker = new BalanceTracker(await SeededAssetAsync(0), 1000);
+
+        var round = await tracker.ApplyAsync([CloseOutDelta(0, Alice, CloseOutRole.Debit, carol), CloseOutDelta(1, carol, CloseOutRole.Credit, Alice)], CancellationToken.None);
+
+        var effect = Assert.Single(round.Effects);
+        Assert.Equal((Alice, EffectType.AssetOptOut, 0L), (effect.Account, effect.Type, (long)effect.Delta));
+    }
+
+    [Fact]
+    public async Task A_Close_Out_Debit_Followed_By_The_Credit_Of_Another_Account_Is_Rejected()
+    {
+        var tracker = new BalanceTracker(await SeededAssetAsync(60), 1000);
+
+        // The credit names Bob as the closer's counterparty, but the debit's destination is Carol.
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => tracker.ApplyAsync(
+            [CloseOutDelta(0, Alice, CloseOutRole.Debit, TestChain.Account(3)), CloseOutDelta(1, Bob, CloseOutRole.Credit, Alice)],
+            CancellationToken.None));
+
+        Assert.Contains("not directly followed by its credit", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_Close_Out_Credit_Without_Its_Debit_Is_Rejected()
+    {
+        var tracker = new BalanceTracker(await SeededAssetAsync(60), 1000);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => tracker.ApplyAsync([CloseOutDelta(0, TestChain.Account(3), CloseOutRole.Credit, Alice)], CancellationToken.None));
     }
 
     [Fact]

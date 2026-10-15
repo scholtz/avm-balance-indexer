@@ -26,7 +26,7 @@ public sealed class BalanceTracker(IBalanceReadStore store, int maxCacheEntries)
     private Dictionary<HoldingKey, Amount> _old = [];
 
     /// <summary>Applies deltas in order and returns the resulting effects.</summary>
-    /// <exception cref="InvalidOperationException">A native or ASA delta would make a balance negative.</exception>
+    /// <exception cref="BalanceUnderflowException">A native or ASA delta would make a balance negative.</exception>
     public async Task<RoundEffects> ApplyAsync(IReadOnlyList<BalanceDelta> deltas, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(deltas);
@@ -64,7 +64,38 @@ public sealed class BalanceTracker(IBalanceReadStore store, int maxCacheEntries)
             var balance = working[key];
             var applied = delta;
 
-            if (creditLimit is { } limit)
+            if (delta.CloseOut == CloseOutRole.Credit)
+            {
+                // The destination of a close-out receives what the closer's debit removed; a credit alone is a normalizer defect.
+                var received = creditLimit ?? throw new InvalidOperationException(
+                    $"Round {delta.Id.Round}, transaction {delta.Id.TransactionId}: the close-out credit of {delta.Token} (effect {delta.Id.Ordinal}) does not directly follow its debit.");
+                creditLimit = null;
+                if (received.IsZero)
+                {
+                    continue;
+                }
+
+                applied = delta with { Delta = received };
+            }
+            else if (delta.CloseOut == CloseOutRole.Debit)
+            {
+                // The block does not state the closed amount (early protocols): the closer's whole remaining balance moves.
+                if (creditLimit is not null)
+                {
+                    throw new InvalidOperationException(
+                        $"Round {delta.Id.Round}, transaction {delta.Id.TransactionId}: the close-out debit of {delta.Token} (effect {delta.Id.Ordinal}) follows a limited debit whose credit never came.");
+                }
+
+                if (index + 1 >= deltas.Count || !IsCloseOutCreditOf(delta, deltas[index + 1]))
+                {
+                    throw new InvalidOperationException(
+                        $"Round {delta.Id.Round}, transaction {delta.Id.TransactionId}: the close-out debit of {delta.Token} (effect {delta.Id.Ordinal}) is not directly followed by its credit.");
+                }
+
+                applied = delta with { Delta = -balance.Value };
+                creditLimit = balance.Value;
+            }
+            else if (creditLimit is { } limit)
             {
                 // The credit half of a transfer whose debit was limited moves the same, smaller amount.
                 applied = delta with { Delta = limit };
@@ -92,6 +123,11 @@ public sealed class BalanceTracker(IBalanceReadStore store, int maxCacheEntries)
                 continue;
             }
 
+            if (balance.Value + applied.Delta < BigInteger.Zero)
+            {
+                throw new BalanceUnderflowException(applied, balance);
+            }
+
             var after = balance.Apply(applied.Delta);
             working[key] = after;
             effects.Add(TokenEffect.From(applied, after));
@@ -99,6 +135,14 @@ public sealed class BalanceTracker(IBalanceReadStore store, int maxCacheEntries)
 
         return new RoundEffects(effects, working);
     }
+
+    private static bool IsCloseOutCreditOf(BalanceDelta debit, BalanceDelta next) =>
+        next.CloseOut == CloseOutRole.Credit
+        && next.Token == debit.Token
+        && next.Account == debit.Counterparty
+        && next.Id.Round == debit.Id.Round
+        && next.Id.IntraRoundOrder == debit.Id.IntraRoundOrder
+        && next.Id.InnerPath.SequenceEqual(debit.Id.InnerPath);
 
     private static bool IsCreditOf(BalanceDelta debit, BalanceDelta next) =>
         debit.Type == EffectType.Arc200Transfer

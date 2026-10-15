@@ -5,6 +5,7 @@ using AvmBalanceIndexer.Indexing.Ingestion;
 using AvmBalanceIndexer.Indexing.Normalization;
 using AvmBalanceIndexer.TestSupport;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
@@ -101,6 +102,28 @@ public class IndexerWorkerTests : IDisposable
         await worker.StopAsync(CancellationToken.None);
 
         Assert.Equal(2UL, (await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!.IndexedRound);
+        Assert.Equal(1, Environment.ExitCode);
+    }
+
+    [Fact]
+    public async Task A_Balance_Underflow_Stops_The_Application_And_The_Log_Names_The_Chain_The_Last_Round_And_The_Cause()
+    {
+        var storage = NewStorage();
+        var chain = new TestChain();
+        // Bob holds 10,000 in the genesis allocation and pays 20,000: the chain could never do this, the index is wrong (issue #115).
+        var adapter = Scenario.Adapter([chain.Block(1, [new TestPayment(Scenario.Bob, Scenario.Alice, 20_000)], rewards: Scenario.RewardsAt(1))]);
+        var logger = new ListLogger();
+
+        var (worker, lifetime) = Create(storage, adapter, maxFailures: 1000, logger: logger);
+        await worker.StartAsync(CancellationToken.None);
+        await lifetime.WaitForStopAsync();
+        await worker.StopAsync(CancellationToken.None);
+
+        var fatal = Assert.Single(logger.Entries, static e => e.Level == LogLevel.Critical);
+        Assert.IsType<BalanceUnderflowException>(fatal.Exception);
+        Assert.Contains("algorand-testnet", fatal.Message, StringComparison.Ordinal);
+        Assert.Contains("stopped after round 0", fatal.Message, StringComparison.Ordinal);
+        Assert.Contains("Balance underflow in round 1", fatal.Message, StringComparison.Ordinal);
         Assert.Equal(1, Environment.ExitCode);
     }
 
@@ -363,7 +386,7 @@ public class IndexerWorkerTests : IDisposable
 
     private static InMemoryChainStorage NewStorage() => new(new ChainContext(ChainId.AlgorandTestnet));
 
-    private static (IndexerWorker Worker, FakeLifetime Lifetime) Create(InMemoryChainStorage storage, IChainAdapter adapter, int maxFailures, WorkerHealth? health = null)
+    private static (IndexerWorker Worker, FakeLifetime Lifetime) Create(InMemoryChainStorage storage, IChainAdapter adapter, int maxFailures, WorkerHealth? health = null, ILogger<IndexerWorker>? logger = null)
     {
         var options = Options.Create(new IndexerOptions
         {
@@ -376,7 +399,7 @@ public class IndexerWorkerTests : IDisposable
         });
         var indexer = new RoundIndexer(adapter, new AlgoEffectNormalizer(), storage, options, NullLogger<RoundIndexer>.Instance);
         var lifetime = new FakeLifetime();
-        return (new IndexerWorker(indexer, storage, new ChainContext(ChainId.AlgorandTestnet), options, lifetime, storage, storage, health ?? new WorkerHealth(), NullLogger<IndexerWorker>.Instance), lifetime);
+        return (new IndexerWorker(indexer, storage, new ChainContext(ChainId.AlgorandTestnet), options, lifetime, storage, storage, health ?? new WorkerHealth(), logger ?? NullLogger<IndexerWorker>.Instance), lifetime);
     }
 
     private static async Task WaitForRoundAsync(InMemoryChainStorage storage, ulong round)
@@ -446,6 +469,35 @@ public class IndexerWorkerTests : IDisposable
             Interlocked.Increment(ref _attempts) <= failures
                 ? Task.FromException(new IOException("database is starting"))
                 : Task.CompletedTask;
+    }
+
+    private sealed class ListLogger : ILogger<IndexerWorker>
+    {
+        private readonly List<(LogLevel Level, string Message, Exception? Exception)> _entries = [];
+
+        public IReadOnlyList<(LogLevel Level, string Message, Exception? Exception)> Entries
+        {
+            get
+            {
+                lock (_entries)
+                {
+                    return [.. _entries];
+                }
+            }
+        }
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            lock (_entries)
+            {
+                _entries.Add((logLevel, formatter(state, exception), exception));
+            }
+        }
     }
 
     private sealed class FakeLifetime : IHostApplicationLifetime

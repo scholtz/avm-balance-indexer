@@ -28,6 +28,7 @@ public static class ConsensusProtocols
 
     private const int FirstFlatCommitment = 11;
     private const int FirstRequiredGenesisHash = 16;
+    private const int FirstRecordedAssetClosingAmount = 25;
 
     /// <summary>Protocols before v11 (blocks hold plain signed transactions) do not commit to the payset in the header.</summary>
     public static bool HasNoPaysetCommitment(string protocol) => Version(protocol) is { } v && v < FirstFlatCommitment;
@@ -40,6 +41,12 @@ public static class ConsensusProtocols
     /// every transaction id. Before v16 it is restored only when the transaction is flagged.
     /// </summary>
     public static bool RequiresGenesisHash(string protocol) => Version(protocol) is not { } v || v >= FirstRequiredGenesisHash;
+
+    /// <summary>
+    /// From v25 (<c>EnableAssetCloseAmount</c> in go-algorand's consensus parameters) the apply data of an asset close-out
+    /// states the closed amount (<c>aca</c>, absent when zero). Earlier protocols never record it.
+    /// </summary>
+    public static bool RecordsAssetClosingAmount(string protocol) => Version(protocol) is not { } v || v >= FirstRecordedAssetClosingAmount;
 
     private static int? Version(string protocol)
     {
