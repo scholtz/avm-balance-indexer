@@ -29,32 +29,22 @@ import {
 export interface BalanceResponse {
     /**
      * 
-     * @type {string}
-     * @memberof BalanceResponse
      */
     account: string;
     /**
      * 
-     * @type {TokenRef}
-     * @memberof BalanceResponse
      */
     token: TokenRef;
     /**
      * 
-     * @type {number}
-     * @memberof BalanceResponse
      */
     round: number;
     /**
      * 
-     * @type {string}
-     * @memberof BalanceResponse
      */
     amount: string;
     /**
      * 
-     * @type {number}
-     * @memberof BalanceResponse
      */
     indexedRound: number;
 }

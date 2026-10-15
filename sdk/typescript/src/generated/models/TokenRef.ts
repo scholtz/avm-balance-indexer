@@ -21,14 +21,10 @@ import { mapValues } from '../runtime.js';
 export interface TokenRef {
     /**
      * 
-     * @type {string}
-     * @memberof TokenRef
      */
     kind: string;
     /**
      * 
-     * @type {number}
-     * @memberof TokenRef
      */
     tokenId: number;
 }

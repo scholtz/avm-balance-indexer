@@ -12,33 +12,60 @@
  * Do not edit the class manually.
  */
 
-
 import * as runtime from '../runtime.js';
-import type {
-  ChainId,
-  ErrorResponse,
-  HistoryResponse,
-  TokenKind,
-} from '../models/index.js';
 import {
+    type ChainId,
     ChainIdFromJSON,
     ChainIdToJSON,
+} from '../models/ChainId.js';
+import {
+    type ErrorResponse,
     ErrorResponseFromJSON,
     ErrorResponseToJSON,
+} from '../models/ErrorResponse.js';
+import {
+    type HistoryResponse,
     HistoryResponseFromJSON,
     HistoryResponseToJSON,
+} from '../models/HistoryResponse.js';
+import {
+    type TokenKind,
     TokenKindFromJSON,
     TokenKindToJSON,
-} from '../models/index.js';
+} from '../models/TokenKind.js';
 
 export interface GetTokenHistoryRequest {
+    /**
+     * The chain this deployment serves.
+     */
     chain: ChainId;
+    /**
+     * 
+     */
     address: string;
+    /**
+     * Token kind: algo (native), asa (Algorand Standard Asset, also ARC-20) or arc200 (application token).
+     */
     kind: TokenKind;
+    /**
+     * Asset id, application id, or 0 for the native token.
+     */
     tokenId: number;
+    /**
+     * Oldest round to include. Omit for no lower bound.
+     */
     fromRound?: number;
+    /**
+     * Newest round to include. Omit for no upper bound.
+     */
     toRound?: number;
+    /**
+     * Opaque cursor from the previous page's nextCursor.
+     */
     cursor?: string;
+    /**
+     * Page size, 1 to 1000 (default 100).
+     */
     limit?: number;
 }
 
@@ -49,6 +76,21 @@ export interface GetTokenHistoryRequest {
  * @interface HistoryApiInterface
  */
 export interface HistoryApiInterface {
+    /**
+     * Creates request options for getTokenHistory without sending the request
+     * @param {ChainId} chain The chain this deployment serves.
+     * @param {string} address 
+     * @param {TokenKind} kind Token kind: algo (native), asa (Algorand Standard Asset, also ARC-20) or arc200 (application token).
+     * @param {number} tokenId Asset id, application id, or 0 for the native token.
+     * @param {number} [fromRound] Oldest round to include. Omit for no lower bound.
+     * @param {number} [toRound] Newest round to include. Omit for no upper bound.
+     * @param {string} [cursor] Opaque cursor from the previous page\&#39;s nextCursor.
+     * @param {number} [limit] Page size, 1 to 1000 (default 100).
+     * @throws {RequiredError}
+     * @memberof HistoryApiInterface
+     */
+    getTokenHistoryRequestOpts(requestParameters: GetTokenHistoryRequest): Promise<runtime.RequestOpts>;
+
     /**
      * Every change of the balance with its signed delta, the balance after it and the transaction it came from. Limit the range with fromRound and toRound.
      * @summary Balance effects of an account and token, newest first
@@ -80,10 +122,9 @@ export interface HistoryApiInterface {
 export class HistoryApi extends runtime.BaseAPI implements HistoryApiInterface {
 
     /**
-     * Every change of the balance with its signed delta, the balance after it and the transaction it came from. Limit the range with fromRound and toRound.
-     * Balance effects of an account and token, newest first
+     * Creates request options for getTokenHistory without sending the request
      */
-    async getTokenHistoryRaw(requestParameters: GetTokenHistoryRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<HistoryResponse>> {
+    async getTokenHistoryRequestOpts(requestParameters: GetTokenHistoryRequest): Promise<runtime.RequestOpts> {
         if (requestParameters['chain'] == null) {
             throw new runtime.RequiredError(
                 'chain',
@@ -134,17 +175,26 @@ export class HistoryApi extends runtime.BaseAPI implements HistoryApiInterface {
 
 
         let urlPath = `/v1/{chain}/accounts/{address}/tokens/{kind}/{tokenId}/transactions`;
-        urlPath = urlPath.replace(`{${"chain"}}`, encodeURIComponent(String(requestParameters['chain'])));
-        urlPath = urlPath.replace(`{${"address"}}`, encodeURIComponent(String(requestParameters['address'])));
-        urlPath = urlPath.replace(`{${"kind"}}`, encodeURIComponent(String(requestParameters['kind'])));
-        urlPath = urlPath.replace(`{${"tokenId"}}`, encodeURIComponent(String(requestParameters['tokenId'])));
+        urlPath = urlPath.replace('{chain}', encodeURIComponent(String(requestParameters['chain'])));
+        urlPath = urlPath.replace('{address}', encodeURIComponent(String(requestParameters['address'])));
+        urlPath = urlPath.replace('{kind}', encodeURIComponent(String(requestParameters['kind'])));
+        urlPath = urlPath.replace('{tokenId}', encodeURIComponent(String(requestParameters['tokenId'])));
 
-        const response = await this.request({
+        return {
             path: urlPath,
             method: 'GET',
             headers: headerParameters,
             query: queryParameters,
-        }, initOverrides);
+        };
+    }
+
+    /**
+     * Every change of the balance with its signed delta, the balance after it and the transaction it came from. Limit the range with fromRound and toRound.
+     * Balance effects of an account and token, newest first
+     */
+    async getTokenHistoryRaw(requestParameters: GetTokenHistoryRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<HistoryResponse>> {
+        const requestOptions = await this.getTokenHistoryRequestOpts(requestParameters);
+        const response = await this.request(requestOptions, initOverrides);
 
         return new runtime.JSONApiResponse(response, (jsonValue) => HistoryResponseFromJSON(jsonValue));
     }

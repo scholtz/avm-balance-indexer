@@ -29,26 +29,18 @@ import {
 export interface HoldingDto {
     /**
      * 
-     * @type {TokenRef}
-     * @memberof HoldingDto
      */
     token: TokenRef;
     /**
      * 
-     * @type {string}
-     * @memberof HoldingDto
      */
     amount: string;
     /**
      * 
-     * @type {boolean}
-     * @memberof HoldingDto
      */
     optedIn: boolean;
     /**
      * 
-     * @type {number}
-     * @memberof HoldingDto
      */
     lastChangedRound: number;
 }

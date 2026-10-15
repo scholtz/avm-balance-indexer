@@ -12,7 +12,7 @@
  * Do not edit the class manually.
  */
 
-import { mapValues } from '../runtime.js';
+import { mapValues, parseDate, parseDateTime, serializeDate, serializeDateTime } from '../runtime.js';
 /**
  * Indexed round, target round, lag and ingestion state of the chain this deployment serves.
  * @export
@@ -21,44 +21,30 @@ import { mapValues } from '../runtime.js';
 export interface StatusResponse {
     /**
      * 
-     * @type {string}
-     * @memberof StatusResponse
      */
     chain: string;
     /**
      * 
-     * @type {string}
-     * @memberof StatusResponse
      */
     provider: string;
     /**
      * 
-     * @type {string}
-     * @memberof StatusResponse
      */
     state: string;
     /**
      * 
-     * @type {number}
-     * @memberof StatusResponse
      */
     indexedRound: number | null;
     /**
      * 
-     * @type {number}
-     * @memberof StatusResponse
      */
     targetRound: number | null;
     /**
      * 
-     * @type {number}
-     * @memberof StatusResponse
      */
     lag: number | null;
     /**
      * 
-     * @type {Date}
-     * @memberof StatusResponse
      */
     updatedAt: Date | null;
 }
@@ -93,7 +79,7 @@ export function StatusResponseFromJSONTyped(json: any, ignoreDiscriminator: bool
         'indexedRound': json['indexedRound'],
         'targetRound': json['targetRound'],
         'lag': json['lag'],
-        'updatedAt': (json['updatedAt'] == null ? null : new Date(json['updatedAt'])),
+        'updatedAt': (json['updatedAt'] == null ? null : parseDateTime(json['updatedAt'])),
     };
 }
 
@@ -114,7 +100,7 @@ export function StatusResponseToJSONTyped(value?: StatusResponse | null, ignoreD
         'indexedRound': value['indexedRound'],
         'targetRound': value['targetRound'],
         'lag': value['lag'],
-        'updatedAt': ((value['updatedAt'] as any).toISOString()),
+        'updatedAt': value['updatedAt'] == null ? value['updatedAt'] : serializeDateTime(value['updatedAt']),
     };
 }
 

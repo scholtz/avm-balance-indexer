@@ -12,41 +12,76 @@
  * Do not edit the class manually.
  */
 
-
 import * as runtime from '../runtime.js';
-import type {
-  BalanceResponse,
-  ChainId,
-  ErrorResponse,
-  HoldingsResponse,
-  TokenKind,
-} from '../models/index.js';
 import {
+    type BalanceResponse,
     BalanceResponseFromJSON,
     BalanceResponseToJSON,
+} from '../models/BalanceResponse.js';
+import {
+    type ChainId,
     ChainIdFromJSON,
     ChainIdToJSON,
+} from '../models/ChainId.js';
+import {
+    type ErrorResponse,
     ErrorResponseFromJSON,
     ErrorResponseToJSON,
+} from '../models/ErrorResponse.js';
+import {
+    type HoldingsResponse,
     HoldingsResponseFromJSON,
     HoldingsResponseToJSON,
+} from '../models/HoldingsResponse.js';
+import {
+    type TokenKind,
     TokenKindFromJSON,
     TokenKindToJSON,
-} from '../models/index.js';
+} from '../models/TokenKind.js';
 
 export interface GetAccountTokensRequest {
+    /**
+     * The chain this deployment serves.
+     */
     chain: ChainId;
+    /**
+     * 
+     */
     address: string;
+    /**
+     * Also list accounts that are opted in but hold zero.
+     */
     includeZero?: boolean;
+    /**
+     * Opaque cursor from the previous page's nextCursor.
+     */
     cursor?: string;
+    /**
+     * Page size, 1 to 1000 (default 100).
+     */
     limit?: number;
 }
 
 export interface GetTokenBalanceRequest {
+    /**
+     * The chain this deployment serves.
+     */
     chain: ChainId;
+    /**
+     * 
+     */
     address: string;
+    /**
+     * Token kind: algo (native), asa (Algorand Standard Asset, also ARC-20) or arc200 (application token).
+     */
     kind: TokenKind;
+    /**
+     * Asset id, application id, or 0 for the native token.
+     */
     tokenId: number;
+    /**
+     * Chain round (end-of-round state). Omit for the latest published round.
+     */
     round?: number;
 }
 
@@ -57,6 +92,18 @@ export interface GetTokenBalanceRequest {
  * @interface BalancesApiInterface
  */
 export interface BalancesApiInterface {
+    /**
+     * Creates request options for getAccountTokens without sending the request
+     * @param {ChainId} chain The chain this deployment serves.
+     * @param {string} address 
+     * @param {boolean} [includeZero] Also list accounts that are opted in but hold zero.
+     * @param {string} [cursor] Opaque cursor from the previous page\&#39;s nextCursor.
+     * @param {number} [limit] Page size, 1 to 1000 (default 100).
+     * @throws {RequiredError}
+     * @memberof BalancesApiInterface
+     */
+    getAccountTokensRequestOpts(requestParameters: GetAccountTokensRequest): Promise<runtime.RequestOpts>;
+
     /**
      * Holdings ordered by token kind and id. Zero balances (opt-ins) are listed with includeZero=true. Page with nextCursor.
      * @summary Current token holdings of an account
@@ -76,6 +123,18 @@ export interface BalancesApiInterface {
      * Current token holdings of an account
      */
     getAccountTokens(requestParameters: GetAccountTokensRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<HoldingsResponse>;
+
+    /**
+     * Creates request options for getTokenBalance without sending the request
+     * @param {ChainId} chain The chain this deployment serves.
+     * @param {string} address 
+     * @param {TokenKind} kind Token kind: algo (native), asa (Algorand Standard Asset, also ARC-20) or arc200 (application token).
+     * @param {number} tokenId Asset id, application id, or 0 for the native token.
+     * @param {number} [round] Chain round (end-of-round state). Omit for the latest published round.
+     * @throws {RequiredError}
+     * @memberof BalancesApiInterface
+     */
+    getTokenBalanceRequestOpts(requestParameters: GetTokenBalanceRequest): Promise<runtime.RequestOpts>;
 
     /**
      * The balance after the last effect at or before the round (default: the latest published round), including rounds without activity. An explicit published round is cacheable.
@@ -105,10 +164,9 @@ export interface BalancesApiInterface {
 export class BalancesApi extends runtime.BaseAPI implements BalancesApiInterface {
 
     /**
-     * Holdings ordered by token kind and id. Zero balances (opt-ins) are listed with includeZero=true. Page with nextCursor.
-     * Current token holdings of an account
+     * Creates request options for getAccountTokens without sending the request
      */
-    async getAccountTokensRaw(requestParameters: GetAccountTokensRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<HoldingsResponse>> {
+    async getAccountTokensRequestOpts(requestParameters: GetAccountTokensRequest): Promise<runtime.RequestOpts> {
         if (requestParameters['chain'] == null) {
             throw new runtime.RequiredError(
                 'chain',
@@ -141,15 +199,24 @@ export class BalancesApi extends runtime.BaseAPI implements BalancesApiInterface
 
 
         let urlPath = `/v1/{chain}/accounts/{address}/tokens`;
-        urlPath = urlPath.replace(`{${"chain"}}`, encodeURIComponent(String(requestParameters['chain'])));
-        urlPath = urlPath.replace(`{${"address"}}`, encodeURIComponent(String(requestParameters['address'])));
+        urlPath = urlPath.replace('{chain}', encodeURIComponent(String(requestParameters['chain'])));
+        urlPath = urlPath.replace('{address}', encodeURIComponent(String(requestParameters['address'])));
 
-        const response = await this.request({
+        return {
             path: urlPath,
             method: 'GET',
             headers: headerParameters,
             query: queryParameters,
-        }, initOverrides);
+        };
+    }
+
+    /**
+     * Holdings ordered by token kind and id. Zero balances (opt-ins) are listed with includeZero=true. Page with nextCursor.
+     * Current token holdings of an account
+     */
+    async getAccountTokensRaw(requestParameters: GetAccountTokensRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<HoldingsResponse>> {
+        const requestOptions = await this.getAccountTokensRequestOpts(requestParameters);
+        const response = await this.request(requestOptions, initOverrides);
 
         return new runtime.JSONApiResponse(response, (jsonValue) => HoldingsResponseFromJSON(jsonValue));
     }
@@ -164,10 +231,9 @@ export class BalancesApi extends runtime.BaseAPI implements BalancesApiInterface
     }
 
     /**
-     * The balance after the last effect at or before the round (default: the latest published round), including rounds without activity. An explicit published round is cacheable.
-     * End-of-round balance of an account
+     * Creates request options for getTokenBalance without sending the request
      */
-    async getTokenBalanceRaw(requestParameters: GetTokenBalanceRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<BalanceResponse>> {
+    async getTokenBalanceRequestOpts(requestParameters: GetTokenBalanceRequest): Promise<runtime.RequestOpts> {
         if (requestParameters['chain'] == null) {
             throw new runtime.RequiredError(
                 'chain',
@@ -206,17 +272,26 @@ export class BalancesApi extends runtime.BaseAPI implements BalancesApiInterface
 
 
         let urlPath = `/v1/{chain}/accounts/{address}/tokens/{kind}/{tokenId}/balance`;
-        urlPath = urlPath.replace(`{${"chain"}}`, encodeURIComponent(String(requestParameters['chain'])));
-        urlPath = urlPath.replace(`{${"address"}}`, encodeURIComponent(String(requestParameters['address'])));
-        urlPath = urlPath.replace(`{${"kind"}}`, encodeURIComponent(String(requestParameters['kind'])));
-        urlPath = urlPath.replace(`{${"tokenId"}}`, encodeURIComponent(String(requestParameters['tokenId'])));
+        urlPath = urlPath.replace('{chain}', encodeURIComponent(String(requestParameters['chain'])));
+        urlPath = urlPath.replace('{address}', encodeURIComponent(String(requestParameters['address'])));
+        urlPath = urlPath.replace('{kind}', encodeURIComponent(String(requestParameters['kind'])));
+        urlPath = urlPath.replace('{tokenId}', encodeURIComponent(String(requestParameters['tokenId'])));
 
-        const response = await this.request({
+        return {
             path: urlPath,
             method: 'GET',
             headers: headerParameters,
             query: queryParameters,
-        }, initOverrides);
+        };
+    }
+
+    /**
+     * The balance after the last effect at or before the round (default: the latest published round), including rounds without activity. An explicit published round is cacheable.
+     * End-of-round balance of an account
+     */
+    async getTokenBalanceRaw(requestParameters: GetTokenBalanceRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<BalanceResponse>> {
+        const requestOptions = await this.getTokenBalanceRequestOpts(requestParameters);
+        const response = await this.request(requestOptions, initOverrides);
 
         return new runtime.JSONApiResponse(response, (jsonValue) => BalanceResponseFromJSON(jsonValue));
     }

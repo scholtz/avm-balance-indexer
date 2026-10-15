@@ -12,23 +12,27 @@
  * Do not edit the class manually.
  */
 
-
 import * as runtime from '../runtime.js';
-import type {
-  ChainId,
-  ErrorResponse,
-  StatusResponse,
-} from '../models/index.js';
 import {
+    type ChainId,
     ChainIdFromJSON,
     ChainIdToJSON,
+} from '../models/ChainId.js';
+import {
+    type ErrorResponse,
     ErrorResponseFromJSON,
     ErrorResponseToJSON,
+} from '../models/ErrorResponse.js';
+import {
+    type StatusResponse,
     StatusResponseFromJSON,
     StatusResponseToJSON,
-} from '../models/index.js';
+} from '../models/StatusResponse.js';
 
 export interface GetChainStatusRequest {
+    /**
+     * The chain this deployment serves.
+     */
     chain: ChainId;
 }
 
@@ -39,6 +43,14 @@ export interface GetChainStatusRequest {
  * @interface StatusApiInterface
  */
 export interface StatusApiInterface {
+    /**
+     * Creates request options for getChainStatus without sending the request
+     * @param {ChainId} chain The chain this deployment serves.
+     * @throws {RequiredError}
+     * @memberof StatusApiInterface
+     */
+    getChainStatusRequestOpts(requestParameters: GetChainStatusRequest): Promise<runtime.RequestOpts>;
+
     /**
      * 
      * @summary Indexed round, target round, lag and ingestion state
@@ -62,9 +74,9 @@ export interface StatusApiInterface {
 export class StatusApi extends runtime.BaseAPI implements StatusApiInterface {
 
     /**
-     * Indexed round, target round, lag and ingestion state
+     * Creates request options for getChainStatus without sending the request
      */
-    async getChainStatusRaw(requestParameters: GetChainStatusRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<StatusResponse>> {
+    async getChainStatusRequestOpts(requestParameters: GetChainStatusRequest): Promise<runtime.RequestOpts> {
         if (requestParameters['chain'] == null) {
             throw new runtime.RequiredError(
                 'chain',
@@ -78,14 +90,22 @@ export class StatusApi extends runtime.BaseAPI implements StatusApiInterface {
 
 
         let urlPath = `/v1/{chain}/status`;
-        urlPath = urlPath.replace(`{${"chain"}}`, encodeURIComponent(String(requestParameters['chain'])));
+        urlPath = urlPath.replace('{chain}', encodeURIComponent(String(requestParameters['chain'])));
 
-        const response = await this.request({
+        return {
             path: urlPath,
             method: 'GET',
             headers: headerParameters,
             query: queryParameters,
-        }, initOverrides);
+        };
+    }
+
+    /**
+     * Indexed round, target round, lag and ingestion state
+     */
+    async getChainStatusRaw(requestParameters: GetChainStatusRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<StatusResponse>> {
+        const requestOptions = await this.getChainStatusRequestOpts(requestParameters);
+        const response = await this.request(requestOptions, initOverrides);
 
         return new runtime.JSONApiResponse(response, (jsonValue) => StatusResponseFromJSON(jsonValue));
     }

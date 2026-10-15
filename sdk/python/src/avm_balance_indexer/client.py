@@ -433,9 +433,10 @@ def _to_api_error(error: ApiException) -> ApiError:
         except ValueError:
             pass
     retry_after: Optional[float] = None
-    headers: Optional[Dict[str, str]] = error.headers
+    headers: Optional[Mapping[str, str]] = error.headers  # usually a case-insensitive urllib3 HTTPHeaderDict, not guaranteed
     if headers:
-        retry_after = _parse_retry_after(headers.get("Retry-After") or headers.get("retry-after"))
+        by_name = {str(name).lower(): value for name, value in headers.items()}
+        retry_after = _parse_retry_after(by_name.get("retry-after"))
     return ApiError(error.status or 0, message, retry_after, body)
 
 

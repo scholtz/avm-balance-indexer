@@ -4,13 +4,13 @@
 #   sdk/scripts/generate.sh            all languages
 #   sdk/scripts/generate.sh go python  only these
 #
-# Needs Docker (openapi-generator for TypeScript and Python, golang for oapi-codegen) and the .NET SDK (NSwag, pinned in sdk/dotnet/dotnet-tools.json).
+# Needs Docker (openapi-generator for TypeScript and Python, jq to strip `format: uuid` for Python, golang for oapi-codegen) and the .NET SDK (NSwag, pinned in sdk/dotnet/dotnet-tools.json).
 # CI runs this and fails when it changes a committed file (workflow "SDKs").
 set -euo pipefail
 
-OPENAPI_GENERATOR_IMAGE="openapitools/openapi-generator-cli:v7.14.0"
-GO_IMAGE="golang:1.24"
-OAPI_CODEGEN="github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.5.0"
+OPENAPI_GENERATOR_IMAGE="openapitools/openapi-generator-cli:v7.26.0"
+GO_IMAGE="golang:1.25"
+OAPI_CODEGEN="github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.8.0"
 PROGENITOR_VERSION="0.15.1"
 RUST_NIGHTLY="nightly-2026-10-01"
 
@@ -36,17 +36,24 @@ generate_typescript() {
   local out="sdk/typescript/src/generated"
   rm -rf "${repo_dir:?}/$out"
   docker_run -w /repo "$OPENAPI_GENERATOR_IMAGE" generate -i "$spec_rel" -g typescript-fetch -o "/repo/$out" \
-    --additional-properties=importFileExtension=.js,supportsES6=true,typescriptThreePlus=true,withInterfaces=false > /dev/null
+    --additional-properties=importFileExtension=.js,supportsES6=true,typescriptThreePlus=true,withInterfaces=false \
+    --global-property=apiTests=false,modelTests=false,apiDocs=false,modelDocs=false > /dev/null
   rm -rf "${repo_dir:?}/$out/.openapi-generator" "${repo_dir:?}/$out/.openapi-generator-ignore"
   normalize "$repo_dir/$out"
 }
 
 generate_python() {
-  local out="sdk/python/src/avm_balance_indexer/_generated" tmp="sdk/.generated-python"
+  local out="sdk/python/src/avm_balance_indexer/_generated" tmp="sdk/.generated-python" spec_py="sdk/.spec-python.json"
   rm -rf "${repo_dir:?}/$out" "${repo_dir:?}/$tmp"
-  docker_run -w /repo "$OPENAPI_GENERATOR_IMAGE" generate -i "$spec_rel" -g python -o "/repo/$tmp" \
+  command -v jq > /dev/null || { echo "generate.sh: jq is required to generate the Python client (apt install jq, choco install jq)" >&2; exit 1; }
+  # openapi-generator >= 7.2x types `format: uuid` as uuid.UUID and ignores --type-mappings for it (the type comes from the
+  # format in PythonClientCodegen.getPydanticType; tried with 7.26.0). 1.0.0 exposed these ids as StrictStr and callers compare
+  # and serialize them as strings, so the python generator reads a copy of the document without that format.
+  (cd "$repo_dir" && jq 'walk(if type == "object" and .format == "uuid" then del(.format) else . end)' "$spec_rel" > "$spec_py")
+  docker_run -w /repo "$OPENAPI_GENERATOR_IMAGE" generate -i "$spec_py" -g python -o "/repo/$tmp" \
     --additional-properties=packageName=avm_balance_indexer._generated,projectName=avm-balance-indexer,library=urllib3 \
     --global-property=apiTests=false,modelTests=false,apiDocs=false,modelDocs=false > /dev/null
+  rm -f "$repo_dir/$spec_py"
   mv "$repo_dir/$tmp/avm_balance_indexer/_generated" "$repo_dir/$out"
   rm -rf "${repo_dir:?}/$tmp"
   normalize "$repo_dir/$out"

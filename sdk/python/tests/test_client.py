@@ -394,3 +394,55 @@ def test_export_holders_raises_when_the_scan_failed(server):
 
     with pytest.raises(ScanError, match="Failed: boom"):
         list(client.export_holders("asa", 1, poll_interval=0.01))
+
+
+def test_scan_ids_stay_strict_strings():
+    # The generated models keep `format: uuid` ids as StrictStr (generate.sh rewrites the uuid.UUID annotation): callers compare
+    # them to stored strings, and a non-string id is still rejected as in 1.0.0.
+    from pydantic import ValidationError
+
+    from avm_balance_indexer import ScanHoldersResponse, ScanResponse
+
+    for model in (ScanResponse, ScanHoldersResponse):
+        field = model.model_fields["id"]
+        assert field.annotation is str and any(getattr(meta, "strict", False) for meta in field.metadata)
+    scan = ScanResponse.from_dict(scan_body("Running", False))
+    assert scan.id == "11111111-1111-1111-1111-111111111111"
+    assert json.dumps({"scan": scan.id})
+    with pytest.raises(ValidationError):
+        ScanResponse.from_dict({**scan_body("Running", False), "id": 42})
+
+
+def test_proxy_environment_is_honoured_and_no_proxy_bypasses_it(server, monkeypatch):
+    # openapi-generator >= 7.2x reads the proxy variables itself (urllib3 does not); documented in the README.
+    server.handler = lambda request: (200, {"chain": "algorand-mainnet", "provider": "PostgreSql", "state": "Following", "indexedRound": 10, "targetRound": 11, "lag": 1, "updatedAt": "2026-10-14T10:00:00Z"}, {})
+    for name in ("http_proxy", "https_proxy", "all_proxy", "no_proxy"):  # lower-case variants win in getproxies_environment
+        monkeypatch.delenv(name, raising=False)
+        monkeypatch.delenv(name.upper(), raising=False)
+    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:1")  # refuses connections, like test_refused_connection_becomes_connection_error
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1")
+    AvmBalanceIndexer.algorand_mainnet(base_url=server.url).status()
+    assert len(server.requests) == 1
+
+    monkeypatch.delenv("NO_PROXY")
+    with pytest.raises(IndexerConnectionError):
+        AvmBalanceIndexer.algorand_mainnet(base_url=server.url, timeout=2).status()
+    assert len(server.requests) == 1
+
+
+def test_generated_models_accept_python_field_names():
+    # Needs pydantic >= 2.11 (validate_by_name in the generated ConfigDict); the floor in pyproject.toml guarantees it.
+    from avm_balance_indexer._generated.models.scan_request import ScanRequest
+
+    assert ScanRequest(include_zero=True).include_zero is True
+    assert ScanRequest(includeZero=True).include_zero is True
+
+
+def test_retry_after_is_found_whatever_the_header_case():
+    from avm_balance_indexer._generated.exceptions import ApiException
+    from avm_balance_indexer.client import _to_api_error
+
+    for name in ("Retry-After", "retry-after", "RETRY-AFTER"):
+        error = ApiException(status=429, reason="Too Many Requests", body='{"error": "slow down"}')
+        error.headers = {name: "7"}  # a plain dict, as a mocked transport or another generator version may hand over
+        assert _to_api_error(error).retry_after_seconds == 7

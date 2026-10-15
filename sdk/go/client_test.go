@@ -126,7 +126,7 @@ func TestQueryParameters(t *testing.T) {
 		return 200, map[string]any{"token": map[string]any{"kind": "asa", "tokenId": 31566704}, "round": 9, "indexedRound": 9, "items": []any{}, "nextCursor": nil}, nil
 	})
 	client, _ := avm.New(avm.AlgorandMainnet, &avm.Options{BaseURL: server.URL})
-	round, includeZero, limit, cursor := uint64(9), true, int32(50), "abc"
+	round, includeZero, limit, cursor := uint64(9), true, int32(50), "AQID+/w==&x y" // reserved characters must round-trip
 
 	_, err := client.Holders(context.Background(), avm.Asa, 31566704, &avm.GetTokenHoldersParams{Round: &round, IncludeZero: &includeZero, Limit: &limit, Cursor: &cursor})
 
@@ -137,7 +137,7 @@ func TestQueryParameters(t *testing.T) {
 	if got.Path != "/v1/algorand-mainnet/tokens/asa/31566704/holders" {
 		t.Errorf("path %s", got.Path)
 	}
-	want := map[string]string{"round": "9", "includeZero": "true", "limit": "50", "cursor": "abc"}
+	want := map[string]string{"round": "9", "includeZero": "true", "limit": "50", "cursor": "AQID+/w==&x y"}
 	for name, value := range want {
 		if got.Query.Get(name) != value {
 			t.Errorf("query %s = %v, want %s", name, got.Query[name], value)
@@ -470,7 +470,7 @@ func TestExportHoldersReportsAFailedScan(t *testing.T) {
 	}
 }
 
-func TestStartHolderScanPostsNullDefaults(t *testing.T) {
+func TestStartHolderScanOmitsUnsetFields(t *testing.T) {
 	server, requests := fakeServer(t, func(r *http.Request) (int, any, map[string]string) { return 202, scan("Pending", false, nil), nil })
 	client, _ := avm.New(avm.AlgorandMainnet, &avm.Options{BaseURL: server.URL})
 	round := uint64(5)
@@ -483,5 +483,20 @@ func TestStartHolderScanPostsNullDefaults(t *testing.T) {
 	_ = json.Unmarshal([]byte((*requests)[0].Body), &body)
 	if (*requests)[0].Method != http.MethodPost || body["round"] != float64(5) {
 		t.Errorf("unexpected request %+v", (*requests)[0])
+	}
+	// oapi-codegen >= 2.8 marks optional fields omitempty: an unset field is left out instead of sent as null.
+	if _, present := body["includeZero"]; present || len(body) != 1 {
+		t.Errorf("unexpected body %s", (*requests)[0].Body)
+	}
+
+	// A field set to its zero value is a pointer and is still sent.
+	includeZero, zero := false, uint64(0)
+	if _, err := client.StartHolderScan(context.Background(), avm.Asa, 1, &avm.ScanRequest{IncludeZero: &includeZero, Round: &zero}); err != nil {
+		t.Fatal(err)
+	}
+	body = nil
+	_ = json.Unmarshal([]byte((*requests)[1].Body), &body)
+	if body["includeZero"] != false || body["round"] != float64(0) {
+		t.Errorf("unexpected body %s", (*requests)[1].Body)
 	}
 }

@@ -21,26 +21,18 @@ import { mapValues } from '../runtime.js';
 export interface HolderDto {
     /**
      * 
-     * @type {string}
-     * @memberof HolderDto
      */
     account: string;
     /**
      * 
-     * @type {string}
-     * @memberof HolderDto
      */
     amount: string;
     /**
      * 
-     * @type {boolean}
-     * @memberof HolderDto
      */
     optedIn: boolean;
     /**
      * 
-     * @type {number}
-     * @memberof HolderDto
      */
     lastChangedRound: number;
 }

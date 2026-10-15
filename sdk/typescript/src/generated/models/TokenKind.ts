@@ -20,7 +20,7 @@
 export const TokenKind = {
     Algo: 'algo',
     Asa: 'asa',
-    Arc200: 'arc200'
+    Arc200: 'arc200',
 } as const;
 export type TokenKind = typeof TokenKind[keyof typeof TokenKind];
 

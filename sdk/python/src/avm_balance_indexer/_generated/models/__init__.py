@@ -12,7 +12,6 @@
     Do not edit the class manually.
 """  # noqa: E501
 
-
 # import models into model package
 from avm_balance_indexer._generated.models.balance_response import BalanceResponse
 from avm_balance_indexer._generated.models.chain_id import ChainId
@@ -30,3 +29,4 @@ from avm_balance_indexer._generated.models.status_response import StatusResponse
 from avm_balance_indexer._generated.models.token_kind import TokenKind
 from avm_balance_indexer._generated.models.token_ref import TokenRef
 from avm_balance_indexer._generated.models.token_response import TokenResponse
+

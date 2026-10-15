@@ -29,26 +29,18 @@ import {
 export interface HoldingsResponse {
     /**
      * 
-     * @type {string}
-     * @memberof HoldingsResponse
      */
     account: string;
     /**
      * 
-     * @type {number}
-     * @memberof HoldingsResponse
      */
     indexedRound: number;
     /**
      * 
-     * @type {Array<HoldingDto>}
-     * @memberof HoldingsResponse
      */
     items: Array<HoldingDto>;
     /**
      * 
-     * @type {string}
-     * @memberof HoldingsResponse
      */
     nextCursor: string | null;
 }
