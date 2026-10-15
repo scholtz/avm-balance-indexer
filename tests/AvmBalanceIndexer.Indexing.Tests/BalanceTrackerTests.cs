@@ -117,6 +117,19 @@ public class BalanceTrackerTests
     }
 
     [Fact]
+    public async Task A_Close_Out_Debit_Followed_By_The_Credit_Of_Another_Account_Is_Rejected()
+    {
+        var tracker = new BalanceTracker(await SeededAssetAsync(60), 1000);
+
+        // The credit names Bob as the closer's counterparty, but the debit's destination is Carol.
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => tracker.ApplyAsync(
+            [CloseOutDelta(0, Alice, CloseOutRole.Debit, TestChain.Account(3)), CloseOutDelta(1, Bob, CloseOutRole.Credit, Alice)],
+            CancellationToken.None));
+
+        Assert.Contains("not directly followed by its credit", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task A_Close_Out_Credit_Without_Its_Debit_Is_Rejected()
     {
         var tracker = new BalanceTracker(await SeededAssetAsync(60), 1000);

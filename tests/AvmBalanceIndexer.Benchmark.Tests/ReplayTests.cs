@@ -56,6 +56,24 @@ public class ReplayTests
     }
 
     [Fact]
+    public void A_Range_With_A_Close_Out_Of_An_Unstated_Amount_Cannot_Be_Seeded()
+    {
+        // Protocols before v25 do not record the closed amount; the delta is a placeholder only the indexer can resolve.
+        var chain = new TestChain();
+        var set = BlockSet.FromBlocks(
+            chain.Profile,
+            [
+                chain.Block(500),
+                chain.Block(501, [new TestPayment(Alice, Alice, 0, Asset: TestAsset.CloseOut(77, Bob, closingAmount: 0))], protocol: "https://github.com/algorandfoundation/specs/tree/4a9db6a25595c6fd097cf9cc137cc83027787eaa"),
+            ],
+            501);
+
+        var error = Assert.Throws<NotSupportedException>(() => new Seeder().DryRun(set, new LenientNormalizer(new AlgoEffectNormalizer(), set.RewardsBeforeFirstRound)));
+
+        Assert.Contains("Round 1:", error.Message, StringComparison.Ordinal); // replayed rounds are numbered from one
+    }
+
+    [Fact]
     public void Replayed_Rounds_Are_Numbered_From_One_And_Linked_To_Each_Other()
     {
         var set = MidChainRange();

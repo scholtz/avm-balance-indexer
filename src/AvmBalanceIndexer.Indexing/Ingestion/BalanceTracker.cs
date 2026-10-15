@@ -86,7 +86,7 @@ public sealed class BalanceTracker(IBalanceReadStore store, int maxCacheEntries)
             else if (delta.CloseOut == CloseOutRole.Debit)
             {
                 // The block does not state the closed amount (early protocols): the closer's whole remaining balance moves.
-                if (index + 1 >= deltas.Count || deltas[index + 1].CloseOut != CloseOutRole.Credit)
+                if (index + 1 >= deltas.Count || !IsCloseOutCreditOf(delta, deltas[index + 1]))
                 {
                     throw new InvalidOperationException(
                         $"Round {delta.Id.Round}, transaction {delta.Id.TransactionId}: the close-out debit of {delta.Token} (effect {delta.Id.Ordinal}) is not directly followed by its credit.");
@@ -129,6 +129,14 @@ public sealed class BalanceTracker(IBalanceReadStore store, int maxCacheEntries)
 
         return new RoundEffects(effects, working);
     }
+
+    private static bool IsCloseOutCreditOf(BalanceDelta debit, BalanceDelta next) =>
+        next.CloseOut == CloseOutRole.Credit
+        && next.Token == debit.Token
+        && next.Account == debit.Counterparty
+        && next.Id.Round == debit.Id.Round
+        && next.Id.IntraRoundOrder == debit.Id.IntraRoundOrder
+        && next.Id.InnerPath.SequenceEqual(debit.Id.InnerPath);
 
     private static bool IsCreditOf(BalanceDelta debit, BalanceDelta next) =>
         debit.Type == EffectType.Arc200Transfer

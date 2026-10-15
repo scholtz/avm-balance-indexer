@@ -39,6 +39,12 @@ public sealed class Seeder
 
             foreach (var delta in normalized.Deltas)
             {
+                if (delta.CloseOut != CloseOutRole.None)
+                {
+                    throw new NotSupportedException(
+                        $"Round {delta.Id.Round}: an asset close-out of an unstated amount (protocols before v25) is resolved by the indexer from the running balance and cannot be seeded; benchmark ranges are recent rounds.");
+                }
+
                 var key = new HoldingKey(delta.Account, delta.Token);
                 var now = _running.GetValueOrDefault(key) + delta.Delta;
                 _running[key] = now;
