@@ -156,3 +156,6 @@ prove it), size it to one PR, and add `enhancement` plus your team label. Cite s
   every test skipped (`AVM_SKIP_LIVE_TESTS=1`) still starts containers.
 - An upgrade rule is only real if the chart can perform it (per-component image tags, `worker.strategy`) and CI renders those paths; write the
   procedure and check it with `helm template` before documenting it.
+- Generated or cached output (generator caches, build volumes) must be git-ignored before the first run: a `git add -A` after it committed 133 MB once. Check `git status` before the first commit of a new tool.
+- Run `gofmt -l .` and read its (possibly empty) output before pushing Go code; a piped `| tail` hid a formatting failure that CI then reported.
+- Code that polls or pages against a server (scan exports) needs a test for the server race (state changes between two reads), not only the happy path: the review found four real bugs of that kind in five SDKs.
