@@ -33,7 +33,7 @@ Notes that matter for capacity:
   before MainNet and prefer your own archival nodes (`Algorand:GossipHosts`) for backfill.
 - A past round of a very large token is answered account by account. Holders at the **latest** round are one index scan. For exports of a large token at a past round use
   asynchronous scans (`POST /v1/{chain}/tokens/{kind}/{tokenId}/holders/scans`, ADR 0012).
-- Backfill speed depends on the archival source and `Indexer:FetchConcurrency`. The worker keeps `Indexer:BalanceCacheEntries` account balances in memory (default
+- Backfill speed depends on the archival source and `Indexer:FetchConcurrency`. Public archival nodes answer `429` when they are asked too much: the fetcher then slows that node down on its own (per-node concurrency limit, `Retry-After`, see `Algorand:MaxConcurrentRequestsPerHost` in the README), so `429` lines in the log are not an error; a fetch only fails after `Algorand:ThrottleTimeout` of continuous rate limiting, which means the nodes cannot carry the load: lower `Indexer:FetchConcurrency` or use your own nodes. The worker keeps `Indexer:BalanceCacheEntries` account balances in memory (default
   500,000 entries): size the worker memory limit accordingly.
 
 ## Deploy
