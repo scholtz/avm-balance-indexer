@@ -415,6 +415,47 @@ public class GossipBlockFetcherTests
     }
 
     [Fact]
+    public async Task The_Timeout_Counts_The_Time_Spent_Waiting_Not_The_Time_Since_The_First_Rate_Limit()
+    {
+        // A rate limit, slow answers and another rate limit that together take longer than the timeout: the fetch must still succeed.
+        var calls = 0;
+        var fetcher = CreateFetcher(
+            async (_, token) =>
+            {
+                var call = Interlocked.Increment(ref calls);
+                if (call == 1)
+                {
+                    return Throttled();
+                }
+
+                await Task.Delay(150, token);
+                return call switch
+                {
+                    2 => new HttpResponseMessage(HttpStatusCode.InternalServerError),
+                    3 => Throttled(), // 300 ms after the first rate limit: more than the 250 ms timeout, but hardly any of it spent waiting
+                    _ => Ok(Chain.Encode(4, [])),
+                };
+            },
+            maxAttempts: 6,
+            throttleTimeout: TimeSpan.FromMilliseconds(250));
+
+        var block = await fetcher.FetchBlockAsync(4, CancellationToken.None);
+
+        Assert.Equal(4UL, block.Round);
+    }
+
+    [Fact]
+    public async Task The_Failure_After_Throttling_Keeps_The_Last_Rate_Limit_As_Its_Cause()
+    {
+        var fetcher = CreateFetcher((_, _) => Task.FromResult(Throttled()), throttleTimeout: TimeSpan.FromMilliseconds(150));
+
+        var error = await Assert.ThrowsAsync<BlockFetchException>(() => fetcher.FetchBlockAsync(5, CancellationToken.None));
+
+        Assert.NotNull(error.InnerException);
+        Assert.Contains("rate limiting", error.InnerException.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task Retry_After_Pauses_The_Host_Before_It_Is_Asked_Again()
     {
         var calls = 0;

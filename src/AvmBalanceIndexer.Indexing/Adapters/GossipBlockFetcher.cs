@@ -66,16 +66,16 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
         var notFound = 0;
         var errors = 0;
         var badData = 0;
-        var throttling = new ThrottleClock();
+        var throttling = new ThrottleState();
 
         // A rate-limited answer is not an attempt: the node is paused and the request goes to the next one, or waits.
         for (var attempt = 0; attempt < _options.MaxAttempts;)
         {
-            var (host, gate) = await AcquireHostAsync(hosts, attempt, round, throttling, cancellationToken).ConfigureAwait(false);
+            var (host, gate, entered) = await AcquireHostAsync(hosts, attempt, round, throttling, cancellationToken).ConfigureAwait(false);
             try
             {
                 var payload = await DownloadTimedAsync(host, round, cancellationToken).ConfigureAwait(false);
-                gate.OnSuccess(_time.GetUtcNow());
+                gate.OnSuccess(entered);
                 var block = BlockDecoder.Decode(payload, round, _profile, _expectedGenesisHash);
                 _cooldownUntil.TryRemove(host, out _);
                 return block;
@@ -87,20 +87,14 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
             catch (HostThrottledException ex)
             {
                 last = ex;
-                var now = _time.GetUtcNow();
-                var result = gate.OnThrottled(ex.RetryAfter, now);
+                throttling.Last = ex;
+                var result = gate.OnThrottled(ex.RetryAfter, entered, _time.GetUtcNow());
                 if (result.NewPause)
                 {
                     LogHostThrottled(_logger, host, result.Delay, result.Limit);
                 }
 
-                throttling.Started ??= now;
-                if (now - throttling.Started > _options.ThrottleTimeout)
-                {
-                    throw ThrottleTimedOut(round, last);
-                }
-
-                continue;
+                continue; // the next acquire waits when every node is paused, and gives up after ThrottleTimeout of waiting
             }
             catch (BlockNotOnHostException ex)
             {
@@ -144,10 +138,12 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
         throw new BlockFetchException($"Block {round} could not be fetched after {_options.MaxAttempts} attempts.", round, last);
     }
 
-    /// <summary>When one fetch first met a rate limit; the time it may keep waiting for the nodes counts from here.</summary>
-    private sealed class ThrottleClock
+    /// <summary>What one fetch has experienced of rate limits: the time it spent waiting for paused nodes and the last answer.</summary>
+    private sealed class ThrottleState
     {
-        public DateTimeOffset? Started { get; set; }
+        public TimeSpan Waited { get; set; }
+
+        public Exception? Last { get; set; }
     }
 
     private HostGate GateOf(string host) =>
@@ -160,10 +156,10 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
     /// <summary>
     /// Takes a request slot at the first node, in the fetch's order starting at <paramref name="attempt"/>, that is neither paused
     /// nor full, so load spills over to the other nodes instead of queueing behind a busy one. When no node can take it the
-    /// call waits: briefly while nodes are merely full, until the earliest pause ends while every node is paused (bounded by
-    /// <see cref="AlgorandChainOptions.ThrottleTimeout"/> from the fetch's first rate limit).
+    /// call waits: briefly while nodes are merely full, until the earliest pause ends while every node is paused (the time spent
+    /// in the latter is bounded by <see cref="AlgorandChainOptions.ThrottleTimeout"/>).
     /// </summary>
-    private async Task<(string Host, HostGate Gate)> AcquireHostAsync(string[] hosts, int attempt, ulong round, ThrottleClock throttling, CancellationToken cancellationToken)
+    private async Task<(string Host, HostGate Gate, DateTimeOffset Entered)> AcquireHostAsync(string[] hosts, int attempt, ulong round, ThrottleState throttling, CancellationToken cancellationToken)
     {
         while (true)
         {
@@ -176,7 +172,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
                 var gate = GateOf(host);
                 if (gate.TryEnter(now))
                 {
-                    return (host, gate);
+                    return (host, gate, now);
                 }
 
                 var until = gate.BlockedUntil;
@@ -190,14 +186,20 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
                 }
             }
 
-            if (allPaused && throttling.Started is { } started && now - started > _options.ThrottleTimeout)
+            if (allPaused && throttling.Waited > _options.ThrottleTimeout)
             {
-                throw ThrottleTimedOut(round, null);
+                throw ThrottleTimedOut(round, throttling.Last);
             }
 
             // Nodes that are only full free a slot within a request; paused ones come back at the end of their pause.
             var pause = allPaused ? earliest - now : TimeSpan.FromMilliseconds(10);
-            await Task.Delay(pause < TimeSpan.FromMilliseconds(1) ? TimeSpan.FromMilliseconds(1) : pause, _time, cancellationToken).ConfigureAwait(false);
+            pause = pause < TimeSpan.FromMilliseconds(1) ? TimeSpan.FromMilliseconds(1) : pause;
+            if (allPaused)
+            {
+                throttling.Waited += pause;
+            }
+
+            await Task.Delay(pause, _time, cancellationToken).ConfigureAwait(false);
         }
     }
 

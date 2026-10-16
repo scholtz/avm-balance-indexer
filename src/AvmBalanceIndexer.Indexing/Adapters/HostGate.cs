@@ -5,8 +5,9 @@ namespace AvmBalanceIndexer.Indexing.Adapters;
 /// node's own tolerance (additive increase, multiplicative decrease): it halves when the node answers with a rate limit and
 /// grows back by about one request per limit's worth of successes. A rate limit also pauses the node, for the
 /// <c>Retry-After</c> it sent or, without one, for a back-off that doubles with every pause in a row.
-/// Responses that were already in flight when a pause began belong to the same episode: they neither halve the limit again nor
-/// lengthen the back-off, so a burst of simultaneous 429s costs the node one step, not one step per request.
+/// A response belongs to the earlier episode when its request was admitted before the pause ended: it neither halves the limit
+/// again nor lengthens the back-off, so a burst of simultaneous 429s costs the node one step, not one step per request. A node
+/// that keeps answering 429 is given more time with every pause even when it asks for little (<c>Retry-After: 0</c>).
 /// </summary>
 internal sealed class HostGate(int maxConcurrency, TimeSpan maxDelay)
 {
@@ -69,13 +70,14 @@ internal sealed class HostGate(int maxConcurrency, TimeSpan maxDelay)
     }
 
     /// <summary>The node delivered a block (or an ordinary answer): it can take a little more.</summary>
-    public void OnSuccess(DateTimeOffset now)
+    /// <param name="entered">When the request was admitted (<see cref="TryEnter"/>).</param>
+    public void OnSuccess(DateTimeOffset entered)
     {
         lock (_lock)
         {
-            if (now < _blockedUntil)
+            if (entered < _blockedUntil)
             {
-                return; // a late answer from before the pause says nothing about the node's tolerance now
+                return; // admitted before the last pause ended: says nothing about the node's tolerance now
             }
 
             _pausesInARow = 0;
@@ -85,13 +87,14 @@ internal sealed class HostGate(int maxConcurrency, TimeSpan maxDelay)
 
     /// <summary>The node rate-limited a request.</summary>
     /// <param name="retryAfter">The node's <c>Retry-After</c>, when it sent one.</param>
+    /// <param name="entered">When the request that was answered was admitted (<see cref="TryEnter"/>).</param>
     /// <param name="now">The current time.</param>
     /// <returns>Whether this started a new pause, the length of the pause now in force, and the new limit.</returns>
-    public ThrottleResult OnThrottled(TimeSpan? retryAfter, DateTimeOffset now)
+    public ThrottleResult OnThrottled(TimeSpan? retryAfter, DateTimeOffset entered, DateTimeOffset now)
     {
         lock (_lock)
         {
-            var newEpisode = now >= _blockedUntil;
+            var newEpisode = entered >= _blockedUntil;
             if (newEpisode)
             {
                 _pausesInARow++;
@@ -99,7 +102,8 @@ internal sealed class HostGate(int maxConcurrency, TimeSpan maxDelay)
             }
 
             var backoff = TimeSpan.FromTicks(FirstDelay.Ticks << Math.Min(_pausesInARow - 1, 20));
-            var delay = retryAfter is { } given && given > TimeSpan.Zero ? given : retryAfter is null ? backoff : TimeSpan.Zero;
+            var given = retryAfter is { } value && value > TimeSpan.Zero ? value : TimeSpan.Zero;
+            var delay = retryAfter is null || _pausesInARow > 1 ? Max(given, backoff) : given;
             delay = Min(delay, maxDelay);
             delay = delay < MinimumDelay ? MinimumDelay : delay;
 
@@ -113,6 +117,8 @@ internal sealed class HostGate(int maxConcurrency, TimeSpan maxDelay)
     }
 
     private static TimeSpan Min(TimeSpan left, TimeSpan right) => left < right ? left : right;
+
+    private static TimeSpan Max(TimeSpan left, TimeSpan right) => left > right ? left : right;
 }
 
 /// <summary>What a rate limit did to a node.</summary>

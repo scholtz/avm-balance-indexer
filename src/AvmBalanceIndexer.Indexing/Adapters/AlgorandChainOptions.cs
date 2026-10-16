@@ -60,7 +60,7 @@ public sealed class AlgorandChainOptions : IValidatableObject
     /// Longest pause of a gossip node that rate-limits (HTTP 429, or 503 with <c>Retry-After</c>). The node's own
     /// <c>Retry-After</c> is honoured up to this value; without one the pause starts at one second and doubles.
     /// </summary>
-    [Range(typeof(TimeSpan), "00:00:00", "00:10:00")]
+    [Range(typeof(TimeSpan), "00:00:00.100", "00:10:00")]
     public TimeSpan MaxThrottleDelay { get; set; } = TimeSpan.FromSeconds(60);
 
     /// <summary>
