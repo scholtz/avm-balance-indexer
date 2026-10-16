@@ -97,7 +97,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
                 // The time a fetch spends on rate-limited requests and in waiting for paused nodes is the time it has been throttled;
                 // slow or failing attempts do not count, so the limit also holds when the nodes keep taking turns at pausing.
                 throttling.Waited += now - entered;
-                if (throttling.Waited > _options.ThrottleTimeout)
+                if (throttling.Waited >= _options.ThrottleTimeout)
                 {
                     throw ThrottleTimedOut(round, throttling.Last);
                 }
@@ -447,9 +447,9 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
     [LoggerMessage(EventId = 1110, Level = LogLevel.Debug, Message = "Block {Round} not on {Host} (attempt {Attempt})")]
     private static partial void LogNotOnHost(ILogger logger, ulong round, string host, int attempt);
 
-    [LoggerMessage(EventId = 1112, Level = LogLevel.Information, Message = "Archival node {Host} is rate limiting (429); pausing it for {Delay} and allowing {Limit} concurrent requests")]
-    private static partial void LogHostThrottled(ILogger logger, string host, TimeSpan delay, int limit);
-
     [LoggerMessage(EventId = 1111, Level = LogLevel.Warning, Message = "Fetching block {Round} from {Host} failed (attempt {Attempt}/{MaxAttempts})")]
     private static partial void LogAttemptFailed(ILogger logger, Exception exception, ulong round, string host, int attempt, int maxAttempts);
+
+    [LoggerMessage(EventId = 1112, Level = LogLevel.Information, Message = "Archival node {Host} is rate limiting (429); pausing it for {Delay} and allowing {Limit} concurrent requests")]
+    private static partial void LogHostThrottled(ILogger logger, string host, TimeSpan delay, int limit);
 }
