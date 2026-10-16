@@ -82,5 +82,12 @@ public sealed class AlgorandChainOptions : IValidatableObject
                 "Algorand:MaxRetryDelay must not be smaller than Algorand:BaseRetryDelay.",
                 [nameof(MaxRetryDelay)]);
         }
+
+        if (ThrottleTimeout < MaxThrottleDelay)
+        {
+            yield return new ValidationResult(
+                "Algorand:ThrottleTimeout must not be smaller than Algorand:MaxThrottleDelay, otherwise a single pause of a node could never fit into it.",
+                [nameof(ThrottleTimeout)]);
+        }
     }
 }

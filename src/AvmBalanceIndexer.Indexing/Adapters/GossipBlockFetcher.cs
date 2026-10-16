@@ -86,8 +86,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
             }
             catch (HostThrottledException ex)
             {
-                last = ex;
-                throttling.Last = ex;
+                throttling.Last = ex; // not `last`: a rate limit must not hide the real failure of the other attempts
                 var now = _time.GetUtcNow();
                 var result = gate.OnThrottled(ex.RetryAfter, entered, now);
                 if (result.NewPause)
@@ -100,7 +99,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
                 throttling.Waited += now - entered;
                 if (throttling.Waited > _options.ThrottleTimeout)
                 {
-                    throw ThrottleTimedOut(round, last);
+                    throw ThrottleTimedOut(round, throttling.Last);
                 }
 
                 continue;
@@ -205,6 +204,8 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
             var pause = allPaused ? earliest - now : TimeSpan.FromMilliseconds(10);
             if (allPaused)
             {
+                // Fetches that wait for the same pause must not all wake in the same millisecond and meet the next 429 together.
+                pause += TimeSpan.FromMilliseconds(Random.Shared.NextDouble() * Math.Min(Math.Max(pause.TotalMilliseconds, 0) / 4, 250));
                 var budget = _options.ThrottleTimeout - throttling.Waited;
                 pause = pause < budget ? pause : budget;
             }

@@ -266,6 +266,29 @@ public class HostingExtensionsTests
         Assert.Throws<OptionsValidationException>(() => provider.GetRequiredService<IOptions<AlgorandChainOptions>>().Value);
     }
 
+    [Theory]
+    [InlineData("Algorand:ThrottleTimeout", "00:00:10", "Algorand:MaxThrottleDelay", "00:01:00")] // a single pause could never fit the budget
+    [InlineData("Algorand:MaxConcurrentRequestsPerHost", "0", null, null)]
+    [InlineData("Algorand:MaxThrottleDelay", "00:00:00", null, null)]
+    public void Impossible_Throttling_Settings_Are_Rejected(string key, string value, string? otherKey, string? otherValue)
+    {
+        var settings = new List<(string, string?)>
+        {
+            ("Chain", ChainId.AlgorandTestnet),
+            ("Storage:Provider", "PostgreSql"),
+            ("Storage:PostgreSql:ConnectionString", Connection),
+            (key, value),
+        };
+        if (otherKey is not null)
+        {
+            settings.Add((otherKey, otherValue));
+        }
+
+        using var provider = Build(Config([.. settings]), indexing: true);
+
+        Assert.Throws<OptionsValidationException>(() => provider.GetRequiredService<IOptions<AlgorandChainOptions>>().Value);
+    }
+
     [Fact]
     public void Out_Of_Range_Indexer_Settings_Are_Rejected()
     {

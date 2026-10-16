@@ -492,6 +492,21 @@ public class GossipBlockFetcherTests
     }
 
     [Fact]
+    public async Task A_Rate_Limit_Does_Not_Hide_The_Real_Failure_Of_A_Fetch_That_Runs_Out_Of_Attempts()
+    {
+        // Host A is rate limited once; every other answer is a server error. The error, not the 429, explains why the fetch failed.
+        var calls = 0;
+        var fetcher = CreateFetcher(
+            (_, _) => Task.FromResult(Interlocked.Increment(ref calls) == 1 ? Throttled() : new HttpResponseMessage(HttpStatusCode.BadGateway)),
+            maxAttempts: 3);
+
+        var error = await Assert.ThrowsAsync<BlockFetchException>(() => fetcher.FetchBlockAsync(5, CancellationToken.None));
+
+        var cause = Assert.IsType<HttpRequestException>(error.InnerException);
+        Assert.Contains("502", cause.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task The_Failure_After_Throttling_Keeps_The_Last_Rate_Limit_As_Its_Cause()
     {
         var fetcher = CreateFetcher((_, _) => Task.FromResult(Throttled()), throttleTimeout: TimeSpan.FromMilliseconds(150));
