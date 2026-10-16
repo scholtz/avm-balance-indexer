@@ -18,7 +18,9 @@ public class GossipBlockFetcherTests
         int maxAttempts = 4,
         TimeSpan? timeout = null,
         int maxBlockBytes = 1024 * 1024,
-        TimeProvider? time = null)
+        TimeProvider? time = null,
+        int maxConcurrentPerHost = 32,
+        TimeSpan? throttleTimeout = null)
     {
         var options = new AlgorandChainOptions
         {
@@ -29,6 +31,9 @@ public class GossipBlockFetcherTests
             RequestTimeout = timeout ?? TimeSpan.FromSeconds(5),
             MaxBlockBytes = maxBlockBytes,
             HostCooldown = TimeSpan.FromMinutes(1),
+            MaxConcurrentRequestsPerHost = maxConcurrentPerHost,
+            MaxThrottleDelay = TimeSpan.FromMilliseconds(20),
+            ThrottleTimeout = throttleTimeout ?? TimeSpan.FromSeconds(5),
         };
 
         return new GossipBlockFetcher(
@@ -42,6 +47,17 @@ public class GossipBlockFetcherTests
     }
 
     private static HttpResponseMessage Ok(byte[] body) => new(HttpStatusCode.OK) { Content = new ByteArrayContent(body) };
+
+    private static HttpResponseMessage Throttled(TimeSpan? retryAfter = null, HttpStatusCode status = HttpStatusCode.TooManyRequests)
+    {
+        var response = new HttpResponseMessage(status);
+        if (retryAfter is { } delay)
+        {
+            response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(delay);
+        }
+
+        return response;
+    }
 
     [Fact]
     public async Task Fetches_And_Decodes_A_Block_Using_The_Gossip_Url()
@@ -347,6 +363,260 @@ public class GossipBlockFetcherTests
     {
         public Task<IReadOnlyList<string>> GetHostsAsync(CancellationToken cancellationToken) =>
             Task.FromException<IReadOnlyList<string>>(new System.Net.Sockets.SocketException());
+    }
+
+    [Fact]
+    public async Task A_429_Moves_The_Fetch_To_Another_Host_Without_Using_An_Attempt()
+    {
+        var fetcher = CreateFetcher(
+            (request, _) => Task.FromResult(request.RequestUri!.Host == "a.test" ? Throttled(TimeSpan.FromSeconds(1)) : Ok(Chain.Encode(3, []))),
+            maxAttempts: 1);
+
+        for (var i = 0; i < 10; i++)
+        {
+            Assert.Equal(3UL, (await fetcher.FetchBlockAsync(3, CancellationToken.None)).Round);
+        }
+    }
+
+    [Fact]
+    public async Task A_503_With_Retry_After_Is_Throttling_Too()
+    {
+        var fetcher = CreateFetcher(
+            (request, _) => Task.FromResult(request.RequestUri!.Host == "a.test" ? Throttled(TimeSpan.FromSeconds(1), HttpStatusCode.ServiceUnavailable) : Ok(Chain.Encode(3, []))),
+            maxAttempts: 1);
+
+        for (var i = 0; i < 10; i++)
+        {
+            Assert.Equal(3UL, (await fetcher.FetchBlockAsync(3, CancellationToken.None)).Round);
+        }
+    }
+
+    [Fact]
+    public async Task When_Every_Host_Throttles_The_Fetch_Waits_Instead_Of_Failing()
+    {
+        var calls = 0;
+        var fetcher = CreateFetcher((_, _) => Task.FromResult(Interlocked.Increment(ref calls) <= 6 ? Throttled() : Ok(Chain.Encode(4, []))), maxAttempts: 2);
+
+        var block = await fetcher.FetchBlockAsync(4, CancellationToken.None);
+
+        Assert.Equal(4UL, block.Round);
+        Assert.Equal(7, calls);
+    }
+
+    [Fact]
+    public async Task Throttling_For_Longer_Than_The_Timeout_Fails_The_Fetch_With_A_Clear_Message()
+    {
+        var fetcher = CreateFetcher((_, _) => Task.FromResult(Throttled()), throttleTimeout: TimeSpan.FromMilliseconds(250));
+
+        var error = await Assert.ThrowsAsync<BlockFetchException>(() => fetcher.FetchBlockAsync(5, CancellationToken.None));
+
+        Assert.Contains("rate limit", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(5UL, error.Round);
+    }
+
+    [Fact]
+    public async Task The_Timeout_Counts_The_Time_Spent_Waiting_Not_The_Time_Since_The_First_Rate_Limit()
+    {
+        // A rate limit, slow answers and another rate limit that together take longer than the timeout: the fetch must still succeed.
+        var calls = 0;
+        var fetcher = CreateFetcher(
+            async (_, token) =>
+            {
+                var call = Interlocked.Increment(ref calls);
+                if (call == 1)
+                {
+                    return Throttled();
+                }
+
+                await Task.Delay(150, token);
+                return call switch
+                {
+                    2 => new HttpResponseMessage(HttpStatusCode.InternalServerError),
+                    3 => Throttled(), // 300 ms after the first rate limit: more than the 250 ms timeout, but hardly any of it spent waiting
+                    _ => Ok(Chain.Encode(4, [])),
+                };
+            },
+            maxAttempts: 6,
+            throttleTimeout: TimeSpan.FromMilliseconds(250));
+
+        var block = await fetcher.FetchBlockAsync(4, CancellationToken.None);
+
+        Assert.Equal(4UL, block.Round);
+    }
+
+    [Fact]
+    public async Task A_Fetch_That_Bounces_Between_Rate_Limiting_Nodes_Is_Bounded_By_The_Timeout()
+    {
+        // Each node pauses for a few milliseconds only (Retry-After: 0), so one of them is usually free again at the next acquire.
+        var calls = 0;
+        var fetcher = CreateFetcher(
+            async (_, token) =>
+            {
+                Interlocked.Increment(ref calls);
+                await Task.Delay(5, token);
+                return Throttled(TimeSpan.Zero);
+            },
+            throttleTimeout: TimeSpan.FromMilliseconds(300));
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+
+        await Assert.ThrowsAsync<BlockFetchException>(() => fetcher.FetchBlockAsync(5, CancellationToken.None));
+
+        Assert.InRange(System.Diagnostics.Stopwatch.GetElapsedTime(started), TimeSpan.FromMilliseconds(250), TimeSpan.FromSeconds(3));
+        Assert.True(calls > 2);
+    }
+
+    [Fact]
+    public async Task The_Wait_Never_Overshoots_The_Timeout_By_A_Whole_Pause()
+    {
+        var options = new AlgorandChainOptions
+        {
+            Chain = Chain.Profile.Chain,
+            MaxAttempts = 4,
+            BaseRetryDelay = TimeSpan.Zero,
+            MaxRetryDelay = TimeSpan.Zero,
+            MaxThrottleDelay = TimeSpan.FromSeconds(30),
+            ThrottleTimeout = TimeSpan.FromMilliseconds(300),
+        };
+        var fetcher = new GossipBlockFetcher(
+            new HttpClient(new StubHandler((_, _) => Task.FromResult(Throttled(TimeSpan.FromSeconds(30))))),
+            new StaticGossipHostProvider([HostA]),
+            Chain.Profile,
+            options,
+            Chain.GenesisHash,
+            NullLogger<GossipBlockFetcher>.Instance);
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+
+        await Assert.ThrowsAsync<BlockFetchException>(() => fetcher.FetchBlockAsync(5, CancellationToken.None));
+
+        Assert.True(System.Diagnostics.Stopwatch.GetElapsedTime(started) < TimeSpan.FromSeconds(5), "The fetch slept through a whole 30 s pause although its timeout is 300 ms.");
+    }
+
+    [Fact]
+    public async Task A_Rate_Limit_Does_Not_Hide_The_Real_Failure_Of_A_Fetch_That_Runs_Out_Of_Attempts()
+    {
+        // Host A is rate limited once; every other answer is a server error. The error, not the 429, explains why the fetch failed.
+        var calls = 0;
+        var fetcher = CreateFetcher(
+            (_, _) => Task.FromResult(Interlocked.Increment(ref calls) == 1 ? Throttled() : new HttpResponseMessage(HttpStatusCode.BadGateway)),
+            maxAttempts: 3);
+
+        var error = await Assert.ThrowsAsync<BlockFetchException>(() => fetcher.FetchBlockAsync(5, CancellationToken.None));
+
+        var cause = Assert.IsType<HttpRequestException>(error.InnerException);
+        Assert.Contains("502", cause.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task The_Failure_After_Throttling_Keeps_The_Last_Rate_Limit_As_Its_Cause()
+    {
+        var fetcher = CreateFetcher((_, _) => Task.FromResult(Throttled()), throttleTimeout: TimeSpan.FromMilliseconds(150));
+
+        var error = await Assert.ThrowsAsync<BlockFetchException>(() => fetcher.FetchBlockAsync(5, CancellationToken.None));
+
+        Assert.NotNull(error.InnerException);
+        Assert.Contains("rate limiting", error.InnerException.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Retry_After_Pauses_The_Host_Before_It_Is_Asked_Again()
+    {
+        var calls = 0;
+        var fetcher = CreateFetcher(
+            (_, _) => Task.FromResult(Interlocked.Increment(ref calls) == 1 ? Throttled(TimeSpan.FromSeconds(30)) : Ok(Chain.Encode(6, []))),
+            hosts: [HostA]);
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+
+        await fetcher.FetchBlockAsync(6, CancellationToken.None);
+
+        // The 30 s of the header are capped by MaxThrottleDelay (20 ms in these tests), but the host is not asked again at once.
+        Assert.True(System.Diagnostics.Stopwatch.GetElapsedTime(started) >= TimeSpan.FromMilliseconds(15));
+        Assert.Equal(2, calls);
+    }
+
+    [Fact]
+    public async Task A_Retry_After_Date_Is_Understood()
+    {
+        var calls = 0;
+        var fetcher = CreateFetcher(
+            (_, _) =>
+            {
+                if (Interlocked.Increment(ref calls) > 1)
+                {
+                    return Task.FromResult(Ok(Chain.Encode(6, [])));
+                }
+
+                var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
+                response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(DateTimeOffset.UtcNow.AddHours(1));
+                return Task.FromResult(response);
+            },
+            hosts: [HostA]);
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+
+        await fetcher.FetchBlockAsync(6, CancellationToken.None);
+
+        Assert.InRange(System.Diagnostics.Stopwatch.GetElapsedTime(started), TimeSpan.FromMilliseconds(15), TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public async Task The_Number_Of_Simultaneous_Requests_To_A_Host_Is_Capped()
+    {
+        var current = 0;
+        var highest = 0;
+        var fetcher = CreateFetcher(
+            async (_, token) =>
+            {
+                var now = Interlocked.Increment(ref current);
+                int seen;
+                while (now > (seen = Volatile.Read(ref highest)) && Interlocked.CompareExchange(ref highest, now, seen) != seen)
+                {
+                }
+
+                await Task.Delay(20, token);
+                Interlocked.Decrement(ref current);
+                return Ok(Chain.Encode(5, []));
+            },
+            hosts: [HostA],
+            maxConcurrentPerHost: 3);
+
+        await Task.WhenAll(Enumerable.Range(0, 24).Select(_ => fetcher.FetchBlockAsync(5, CancellationToken.None)));
+
+        Assert.InRange(highest, 1, 3);
+    }
+
+    [Fact]
+    public async Task A_Host_That_Rate_Limits_Above_Some_Concurrency_Still_Serves_Every_Fetch()
+    {
+        var current = 0;
+        var rejected = 0;
+        var fetcher = CreateFetcher(
+            async (_, token) =>
+            {
+                var now = Interlocked.Increment(ref current);
+                try
+                {
+                    await Task.Delay(15, token);
+                    if (now > 2)
+                    {
+                        Interlocked.Increment(ref rejected);
+                        return Throttled(TimeSpan.FromSeconds(1));
+                    }
+
+                    return Ok(Chain.Encode(8, []));
+                }
+                finally
+                {
+                    Interlocked.Decrement(ref current);
+                }
+            },
+            hosts: [HostA],
+            maxAttempts: 2,
+            maxConcurrentPerHost: 16);
+
+        // Without throttling every request that finds the node busy burns one of the two attempts and the fetch fails.
+        var blocks = await Task.WhenAll(Enumerable.Range(0, 60).Select(_ => fetcher.FetchBlockAsync(8, CancellationToken.None)));
+
+        Assert.All(blocks, static b => Assert.Equal(8UL, b.Round));
+        Assert.True(rejected > 0, "The test host never rate limited, so it proves nothing.");
     }
 
     private sealed class StubHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> handler) : HttpMessageHandler

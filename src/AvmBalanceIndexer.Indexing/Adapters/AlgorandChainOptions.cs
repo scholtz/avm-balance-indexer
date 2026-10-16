@@ -49,6 +49,27 @@ public sealed class AlgorandChainOptions : IValidatableObject
     [Range(typeof(TimeSpan), "00:00:00", "01:00:00")]
     public TimeSpan HostCooldown { get; set; } = TimeSpan.FromSeconds(30);
 
+    /// <summary>
+    /// Most requests in flight to one gossip node. The limit adapts below this value: it halves whenever the node answers
+    /// 429 and grows back as requests succeed, so it settles at what the node tolerates.
+    /// </summary>
+    [Range(1, 512)]
+    public int MaxConcurrentRequestsPerHost { get; set; } = 32;
+
+    /// <summary>
+    /// Longest pause of a gossip node that rate-limits (HTTP 429, or 503 with <c>Retry-After</c>). The node's own
+    /// <c>Retry-After</c> is honoured up to this value; without one the pause starts at one second and doubles.
+    /// </summary>
+    [Range(typeof(TimeSpan), "00:00:00.100", "00:10:00")]
+    public TimeSpan MaxThrottleDelay { get; set; } = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// How long one block fetch keeps waiting while the nodes rate-limit it before it fails (a transient failure the worker
+    /// retries). Throttled answers do not use up <see cref="MaxAttempts"/>.
+    /// </summary>
+    [Range(typeof(TimeSpan), "00:00:01", "01:00:00")]
+    public TimeSpan ThrottleTimeout { get; set; } = TimeSpan.FromMinutes(5);
+
     /// <summary>Upper bound for one block response, protecting memory from misbehaving nodes.</summary>
     [Range(1024, 512 * 1024 * 1024)]
     public int MaxBlockBytes { get; set; } = 64 * 1024 * 1024;
@@ -60,6 +81,13 @@ public sealed class AlgorandChainOptions : IValidatableObject
             yield return new ValidationResult(
                 "Algorand:MaxRetryDelay must not be smaller than Algorand:BaseRetryDelay.",
                 [nameof(MaxRetryDelay)]);
+        }
+
+        if (ThrottleTimeout < MaxThrottleDelay)
+        {
+            yield return new ValidationResult(
+                "Algorand:ThrottleTimeout must not be smaller than Algorand:MaxThrottleDelay, otherwise a single pause of a node could never fit into it.",
+                [nameof(ThrottleTimeout)]);
         }
     }
 }

@@ -5,6 +5,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="AvmBalanceIndexer.Indexing.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Algorand5" />
     <PackageReference Include="MessagePack" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />

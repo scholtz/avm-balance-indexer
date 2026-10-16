@@ -11,6 +11,7 @@ namespace AvmBalanceIndexer.Indexing.Adapters;
 /// protocol the Algorand5 <see cref="GossipHttpClient"/> speaks. Compared with calling that client directly it adds
 /// status handling, host failover with cooldowns, per-attempt timeouts, bounded reads, exponential backoff with jitter,
 /// and response validation, and it keeps the raw payload so ledger apply data (rewards, closing amounts) is not lost.
+/// A node that rate-limits (429) is slowed down instead of being treated as broken: see <see cref="HostGate"/>.
 /// </summary>
 public sealed partial class GossipBlockFetcher : IBlockFetcher
 {
@@ -23,6 +24,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
     private readonly TimeProvider _time;
     private readonly ConcurrentDictionary<string, DateTimeOffset> _cooldownUntil = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, HostLatency> _latency = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, HostGate> _gates = new(StringComparer.OrdinalIgnoreCase);
 
     public GossipBlockFetcher(
         HttpClient http,
@@ -64,13 +66,16 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
         var notFound = 0;
         var errors = 0;
         var badData = 0;
+        var throttling = new ThrottleState();
 
-        for (var attempt = 0; attempt < _options.MaxAttempts; attempt++)
+        // A rate-limited answer is not an attempt: the node is paused and the request goes to the next one, or waits.
+        for (var attempt = 0; attempt < _options.MaxAttempts;)
         {
-            var host = hosts[attempt % hosts.Length];
+            var (host, gate, entered) = await AcquireHostAsync(hosts, attempt, round, throttling, cancellationToken).ConfigureAwait(false);
             try
             {
                 var payload = await DownloadTimedAsync(host, round, cancellationToken).ConfigureAwait(false);
+                gate.OnSuccess(entered);
                 var block = BlockDecoder.Decode(payload, round, _profile, _expectedGenesisHash);
                 _cooldownUntil.TryRemove(host, out _);
                 return block;
@@ -78,6 +83,26 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 throw;
+            }
+            catch (HostThrottledException ex)
+            {
+                throttling.Last = ex; // not `last`: a rate limit must not hide the real failure of the other attempts
+                var now = _time.GetUtcNow();
+                var result = gate.OnThrottled(ex.RetryAfter, entered, now);
+                if (result.NewPause)
+                {
+                    LogHostThrottled(_logger, host, result.Delay, result.Limit);
+                }
+
+                // The time a fetch spends on rate-limited requests and in waiting for paused nodes is the time it has been throttled;
+                // slow or failing attempts do not count, so the limit also holds when the nodes keep taking turns at pausing.
+                throttling.Waited += now - entered;
+                if (throttling.Waited >= _options.ThrottleTimeout)
+                {
+                    throw ThrottleTimedOut(round, throttling.Last);
+                }
+
+                continue;
             }
             catch (BlockNotOnHostException ex)
             {
@@ -100,10 +125,14 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
                 _cooldownUntil[host] = _time.GetUtcNow() + _options.HostCooldown;
                 LogAttemptFailed(_logger, ex, round, host, attempt + 1, _options.MaxAttempts);
             }
-
-            if (attempt + 1 < _options.MaxAttempts)
+            finally
             {
-                await Task.Delay(BackoffDelay(attempt), _time, cancellationToken).ConfigureAwait(false);
+                gate.Exit();
+            }
+
+            if (++attempt < _options.MaxAttempts)
+            {
+                await Task.Delay(BackoffDelay(attempt - 1), _time, cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -115,6 +144,80 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
         }
 
         throw new BlockFetchException($"Block {round} could not be fetched after {_options.MaxAttempts} attempts.", round, last);
+    }
+
+    /// <summary>What one fetch has experienced of rate limits: the time it was throttled (rate-limited requests and waiting for paused nodes) and the last answer.</summary>
+    private sealed class ThrottleState
+    {
+        public TimeSpan Waited { get; set; }
+
+        public Exception? Last { get; set; }
+    }
+
+    private HostGate GateOf(string host) =>
+        _gates.GetOrAdd(host, _ => new HostGate(_options.MaxConcurrentRequestsPerHost, _options.MaxThrottleDelay));
+
+    private BlockFetchException ThrottleTimedOut(ulong round, Exception? last) =>
+        new($"Block {round}: the archival gossip nodes kept rate limiting (HTTP 429) for more than {_options.ThrottleTimeout}. " +
+            "Lower Indexer:FetchConcurrency or add archival nodes (Algorand:GossipHosts).", round, last);
+
+    /// <summary>
+    /// Takes a request slot at the first node, in the fetch's order starting at <paramref name="attempt"/>, that is neither paused
+    /// nor full, so load spills over to the other nodes instead of queueing behind a busy one. When no node can take it the
+    /// call waits: briefly while nodes are merely full, until the earliest pause ends while every node is paused (the time spent
+    /// in the latter is bounded by <see cref="AlgorandChainOptions.ThrottleTimeout"/>).
+    /// </summary>
+    private async Task<(string Host, HostGate Gate, DateTimeOffset Entered)> AcquireHostAsync(string[] hosts, int attempt, ulong round, ThrottleState throttling, CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            var now = _time.GetUtcNow();
+            var earliest = DateTimeOffset.MaxValue;
+            var allPaused = true;
+            for (var i = 0; i < hosts.Length; i++)
+            {
+                var host = hosts[(attempt + i) % hosts.Length];
+                var gate = GateOf(host);
+                if (gate.TryEnter(now))
+                {
+                    return (host, gate, now);
+                }
+
+                var until = gate.BlockedUntil;
+                if (until > now)
+                {
+                    earliest = until < earliest ? until : earliest;
+                }
+                else
+                {
+                    allPaused = false;
+                }
+            }
+
+            if (allPaused && throttling.Waited >= _options.ThrottleTimeout)
+            {
+                throw ThrottleTimedOut(round, throttling.Last);
+            }
+
+            // Nodes that are only full free a slot within a request; paused ones come back at the end of their pause. A pause is
+            // never slept through beyond the time the fetch may still spend throttled.
+            var pause = allPaused ? earliest - now : TimeSpan.FromMilliseconds(10);
+            if (allPaused)
+            {
+                // Fetches that wait for the same pause must not all wake in the same millisecond and meet the next 429 together.
+                pause += TimeSpan.FromMilliseconds(Random.Shared.NextDouble() * Math.Min(Math.Max(pause.TotalMilliseconds, 0) / 4, 250));
+                var budget = _options.ThrottleTimeout - throttling.Waited;
+                pause = pause < budget ? pause : budget;
+            }
+
+            pause = pause < TimeSpan.FromMilliseconds(1) ? TimeSpan.FromMilliseconds(1) : pause;
+            if (allPaused)
+            {
+                throttling.Waited += pause;
+            }
+
+            await Task.Delay(pause, _time, cancellationToken).ConfigureAwait(false);
+        }
     }
 
     /// <summary>
@@ -130,7 +233,8 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
         var cooling = new List<string>();
         foreach (var host in hosts)
         {
-            if (_cooldownUntil.TryGetValue(host, out var until) && until > now)
+            if ((_cooldownUntil.TryGetValue(host, out var until) && until > now)
+                || (_gates.TryGetValue(host, out var gate) && gate.BlockedUntil > now))
             {
                 cooling.Add(host);
                 continue;
@@ -280,6 +384,12 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
                 throw new BlockNotOnHostException(host, round);
             }
 
+            if (response.StatusCode == HttpStatusCode.TooManyRequests
+                || (response.StatusCode == HttpStatusCode.ServiceUnavailable && response.Headers.RetryAfter is not null))
+            {
+                throw new HostThrottledException(host, round, RetryAfterOf(response));
+            }
+
             response.EnsureSuccessStatusCode();
             if (response.Content.Headers.ContentLength > _options.MaxBlockBytes)
             {
@@ -292,6 +402,18 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
         {
             throw new TimeoutException($"Fetching block {round} from {host} timed out after {_options.RequestTimeout}.");
         }
+    }
+
+    /// <summary>The node's <c>Retry-After</c> (seconds or HTTP date) as a delay from now; null when it sent none.</summary>
+    private TimeSpan? RetryAfterOf(HttpResponseMessage response)
+    {
+        var header = response.Headers.RetryAfter;
+        if (header?.Delta is { } delta)
+        {
+            return delta;
+        }
+
+        return header?.Date is { } date ? date - _time.GetUtcNow() : null;
     }
 
     private async Task<byte[]> ReadBoundedAsync(HttpContent content, string host, ulong round, CancellationToken cancellationToken)
@@ -316,9 +438,18 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
     private sealed class BlockNotOnHostException(string host, ulong round)
         : Exception($"Node {host} does not have block {round}.");
 
+    private sealed class HostThrottledException(string host, ulong round, TimeSpan? retryAfter)
+        : Exception($"Node {host} is rate limiting (fetching block {round}).")
+    {
+        public TimeSpan? RetryAfter { get; } = retryAfter;
+    }
+
     [LoggerMessage(EventId = 1110, Level = LogLevel.Debug, Message = "Block {Round} not on {Host} (attempt {Attempt})")]
     private static partial void LogNotOnHost(ILogger logger, ulong round, string host, int attempt);
 
     [LoggerMessage(EventId = 1111, Level = LogLevel.Warning, Message = "Fetching block {Round} from {Host} failed (attempt {Attempt}/{MaxAttempts})")]
     private static partial void LogAttemptFailed(ILogger logger, Exception exception, ulong round, string host, int attempt, int maxAttempts);
+
+    [LoggerMessage(EventId = 1112, Level = LogLevel.Information, Message = "Archival node {Host} is rate limiting (429); pausing it for {Delay} and allowing {Limit} concurrent requests")]
+    private static partial void LogHostThrottled(ILogger logger, string host, TimeSpan delay, int limit);
 }
