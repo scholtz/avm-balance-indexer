@@ -101,7 +101,7 @@ internal sealed class HostGate(int maxConcurrency, TimeSpan maxDelay)
                 _limit = Math.Max(1, _limit / 2);
             }
 
-            var backoff = TimeSpan.FromTicks(FirstDelay.Ticks << Math.Min(_pausesInARow - 1, 20));
+            var backoff = TimeSpan.FromTicks(FirstDelay.Ticks << Math.Clamp(_pausesInARow - 1, 0, 20));
             var given = retryAfter is { } value && value > TimeSpan.Zero ? value : TimeSpan.Zero;
             var delay = retryAfter is null || _pausesInARow > 1 ? Max(given, backoff) : given;
             delay = Min(delay, maxDelay);
@@ -112,7 +112,8 @@ internal sealed class HostGate(int maxConcurrency, TimeSpan maxDelay)
                 _blockedUntil = now + delay;
             }
 
-            return new ThrottleResult(newEpisode, _blockedUntil - now, (int)Math.Floor(_limit));
+            var remaining = _blockedUntil - now;
+            return new ThrottleResult(newEpisode, remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero, (int)Math.Floor(_limit));
         }
     }
 

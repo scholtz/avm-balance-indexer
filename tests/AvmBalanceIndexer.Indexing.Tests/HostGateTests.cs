@@ -168,4 +168,20 @@ public class HostGateTests
         Assert.Equal(2, gate.Limit);
         Assert.Equal(TimeSpan.FromSeconds(4), gate.OnThrottled(null, after.AddSeconds(2), after.AddSeconds(2)).Delay);
     }
+
+    [Fact]
+    public void A_Late_Rate_Limit_After_A_Fresh_Success_Keeps_Sane_Numbers()
+    {
+        var gate = Gate(max: 8);
+        gate.OnThrottled(null, Start, Start); // paused until Start + 1 s, limit 4
+        gate.OnSuccess(Start.AddSeconds(1)); // a request admitted after the pause delivers: no pause in a row any more
+
+        // A request admitted before the pause is answered with a 429 only now.
+        var late = gate.OnThrottled(TimeSpan.FromSeconds(3), Start, Start.AddSeconds(2));
+
+        Assert.False(late.NewPause);
+        Assert.True(late.Delay >= TimeSpan.Zero);
+        Assert.Equal(Start.AddSeconds(5), gate.BlockedUntil);
+        Assert.True(gate.Limit >= 4);
+    }
 }

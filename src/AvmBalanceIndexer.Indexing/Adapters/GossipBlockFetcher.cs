@@ -88,13 +88,22 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
             {
                 last = ex;
                 throttling.Last = ex;
-                var result = gate.OnThrottled(ex.RetryAfter, entered, _time.GetUtcNow());
+                var now = _time.GetUtcNow();
+                var result = gate.OnThrottled(ex.RetryAfter, entered, now);
                 if (result.NewPause)
                 {
                     LogHostThrottled(_logger, host, result.Delay, result.Limit);
                 }
 
-                continue; // the next acquire waits when every node is paused, and gives up after ThrottleTimeout of waiting
+                // The time a fetch spends on rate-limited requests and in waiting for paused nodes is the time it has been throttled;
+                // slow or failing attempts do not count, so the limit also holds when the nodes keep taking turns at pausing.
+                throttling.Waited += now - entered;
+                if (throttling.Waited > _options.ThrottleTimeout)
+                {
+                    throw ThrottleTimedOut(round, last);
+                }
+
+                continue;
             }
             catch (BlockNotOnHostException ex)
             {
@@ -138,7 +147,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
         throw new BlockFetchException($"Block {round} could not be fetched after {_options.MaxAttempts} attempts.", round, last);
     }
 
-    /// <summary>What one fetch has experienced of rate limits: the time it spent waiting for paused nodes and the last answer.</summary>
+    /// <summary>What one fetch has experienced of rate limits: the time it was throttled (rate-limited requests and waiting for paused nodes) and the last answer.</summary>
     private sealed class ThrottleState
     {
         public TimeSpan Waited { get; set; }
@@ -186,13 +195,20 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
                 }
             }
 
-            if (allPaused && throttling.Waited > _options.ThrottleTimeout)
+            if (allPaused && throttling.Waited >= _options.ThrottleTimeout)
             {
                 throw ThrottleTimedOut(round, throttling.Last);
             }
 
-            // Nodes that are only full free a slot within a request; paused ones come back at the end of their pause.
+            // Nodes that are only full free a slot within a request; paused ones come back at the end of their pause. A pause is
+            // never slept through beyond the time the fetch may still spend throttled.
             var pause = allPaused ? earliest - now : TimeSpan.FromMilliseconds(10);
+            if (allPaused)
+            {
+                var budget = _options.ThrottleTimeout - throttling.Waited;
+                pause = pause < budget ? pause : budget;
+            }
+
             pause = pause < TimeSpan.FromMilliseconds(1) ? TimeSpan.FromMilliseconds(1) : pause;
             if (allPaused)
             {

@@ -445,6 +445,53 @@ public class GossipBlockFetcherTests
     }
 
     [Fact]
+    public async Task A_Fetch_That_Bounces_Between_Rate_Limiting_Nodes_Is_Bounded_By_The_Timeout()
+    {
+        // Each node pauses for a few milliseconds only (Retry-After: 0), so one of them is usually free again at the next acquire.
+        var calls = 0;
+        var fetcher = CreateFetcher(
+            async (_, token) =>
+            {
+                Interlocked.Increment(ref calls);
+                await Task.Delay(5, token);
+                return Throttled(TimeSpan.Zero);
+            },
+            throttleTimeout: TimeSpan.FromMilliseconds(300));
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+
+        await Assert.ThrowsAsync<BlockFetchException>(() => fetcher.FetchBlockAsync(5, CancellationToken.None));
+
+        Assert.InRange(System.Diagnostics.Stopwatch.GetElapsedTime(started), TimeSpan.FromMilliseconds(250), TimeSpan.FromSeconds(3));
+        Assert.True(calls > 2);
+    }
+
+    [Fact]
+    public async Task The_Wait_Never_Overshoots_The_Timeout_By_A_Whole_Pause()
+    {
+        var options = new AlgorandChainOptions
+        {
+            Chain = Chain.Profile.Chain,
+            MaxAttempts = 4,
+            BaseRetryDelay = TimeSpan.Zero,
+            MaxRetryDelay = TimeSpan.Zero,
+            MaxThrottleDelay = TimeSpan.FromSeconds(30),
+            ThrottleTimeout = TimeSpan.FromMilliseconds(300),
+        };
+        var fetcher = new GossipBlockFetcher(
+            new HttpClient(new StubHandler((_, _) => Task.FromResult(Throttled(TimeSpan.FromSeconds(30))))),
+            new StaticGossipHostProvider([HostA]),
+            Chain.Profile,
+            options,
+            Chain.GenesisHash,
+            NullLogger<GossipBlockFetcher>.Instance);
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+
+        await Assert.ThrowsAsync<BlockFetchException>(() => fetcher.FetchBlockAsync(5, CancellationToken.None));
+
+        Assert.True(System.Diagnostics.Stopwatch.GetElapsedTime(started) < TimeSpan.FromSeconds(5), "The fetch slept through a whole 30 s pause although its timeout is 300 ms.");
+    }
+
+    [Fact]
     public async Task The_Failure_After_Throttling_Keeps_The_Last_Rate_Limit_As_Its_Cause()
     {
         var fetcher = CreateFetcher((_, _) => Task.FromResult(Throttled()), throttleTimeout: TimeSpan.FromMilliseconds(150));
