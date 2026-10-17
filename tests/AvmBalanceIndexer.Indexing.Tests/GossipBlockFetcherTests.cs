@@ -82,15 +82,17 @@ public class GossipBlockFetcherTests
     public async Task Fast_Hosts_Get_Most_Of_The_Requests()
     {
         var served = new System.Collections.Concurrent.ConcurrentDictionary<string, int>();
+        var clock = new ManualClock(); // response times come from a manual clock, so machine load cannot skew them
         var fetcher = CreateFetcher(
-            async (request, token) =>
+            (request, token) =>
             {
                 var host = request.RequestUri!.Host;
                 served.AddOrUpdate(host, 1, static (_, n) => n + 1);
-                await Task.Delay(host == "slow.test" ? 200 : 5, token);
-                return Ok(Chain.Encode(7, []));
+                clock.Advance(TimeSpan.FromMilliseconds(host == "slow.test" ? 200 : 5));
+                return Task.FromResult(Ok(Chain.Encode(7, [])));
             },
-            hosts: ["http://slow.test:4160", "http://fast.test:4160"]);
+            hosts: ["http://slow.test:4160", "http://fast.test:4160"],
+            time: clock);
 
         for (var i = 0; i < 80; i++)
         {
@@ -420,6 +422,19 @@ public class GossipBlockFetcherTests
         var info = logger.Entries.Where(e => e.Level == LogLevel.Information).ToList();
         Assert.Equal(2, info.Count); // the first pause at once, the held-back one when the fetch gives up
         Assert.Contains("within", info[1].Message, StringComparison.Ordinal);
+    }
+
+    private sealed class ManualClock : TimeProvider
+    {
+        private long _ticks;
+
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+        public override long GetTimestamp() => Interlocked.Read(ref _ticks);
+
+        public override DateTimeOffset GetUtcNow() => new(new DateTime(2026, 10, 17, 0, 0, 0, DateTimeKind.Utc).Ticks + Interlocked.Read(ref _ticks), TimeSpan.Zero);
+
+        public void Advance(TimeSpan by) => Interlocked.Add(ref _ticks, by.Ticks);
     }
 
     private sealed class CapturingLogger : ILogger<GossipBlockFetcher>

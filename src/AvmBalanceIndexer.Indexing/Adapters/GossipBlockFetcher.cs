@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Diagnostics;
 using System.Net;
 using Algorand.Gossip;
 using Microsoft.Extensions.Logging;
@@ -266,7 +265,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
                 continue;
             }
 
-            var score = _latency.GetOrAdd(host, static _ => new HostLatency()).Score;
+            var score = _latency.GetOrAdd(host, _ => new HostLatency(_time)).Score;
             healthy.Add((host, 1.0 / (score * score)));
         }
 
@@ -313,7 +312,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
     }
 
     /// <summary>Smoothed response time of one host and the number of requests currently waiting for it.</summary>
-    private sealed class HostLatency
+    private sealed class HostLatency(TimeProvider time)
     {
         // Unknown hosts start in the middle of what public archival nodes deliver, so they are tried soon.
         private const double InitialMilliseconds = 250;
@@ -321,7 +320,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
         private const double PenaltyMilliseconds = 2_000;
         private readonly object _gate = new();
         private double _milliseconds = InitialMilliseconds;
-        private long _updated = Stopwatch.GetTimestamp();
+        private long _updated = time.GetTimestamp();
         private int _inFlight;
 
         /// <summary>
@@ -334,7 +333,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
             {
                 lock (_gate)
                 {
-                    var idle = Stopwatch.GetElapsedTime(_updated).TotalSeconds;
+                    var idle = time.GetElapsedTime(_updated).TotalSeconds;
                     var learned = InitialMilliseconds + ((_milliseconds - InitialMilliseconds) * Math.Exp(-idle / 120));
                     return Math.Max(1, learned) * (1 + (0.25 * _inFlight));
                 }
@@ -361,7 +360,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
 
                 var sample = outcome == HostOutcome.Answered ? elapsed.TotalMilliseconds : Math.Max(PenaltyMilliseconds, elapsed.TotalMilliseconds);
                 _milliseconds = ((1 - Smoothing) * _milliseconds) + (Smoothing * sample);
-                _updated = Stopwatch.GetTimestamp();
+                _updated = time.GetTimestamp();
             }
         }
     }
@@ -375,9 +374,9 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
     /// <summary>Downloads a block and records how long the host took (transport only, not decoding); cancellation says nothing about the host.</summary>
     private async Task<byte[]> DownloadTimedAsync(string host, ulong round, CancellationToken cancellationToken)
     {
-        var latency = _latency.GetOrAdd(host, static _ => new HostLatency());
+        var latency = _latency.GetOrAdd(host, _ => new HostLatency(_time));
         latency.Begin();
-        var started = Stopwatch.GetTimestamp();
+        var started = _time.GetTimestamp();
         var outcome = HostOutcome.Failed;
         try
         {
@@ -392,7 +391,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
         }
         finally
         {
-            latency.End(Stopwatch.GetElapsedTime(started), outcome);
+            latency.End(_time.GetElapsedTime(started), outcome);
         }
     }
 
