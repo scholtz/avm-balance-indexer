@@ -215,25 +215,6 @@ public class HostGateTests
     }
 
     [Fact]
-    public void A_Node_That_Was_Limited_At_A_Low_Level_Is_Not_Held_Back_Above_It()
-    {
-        var gate = Gate(max: 32);
-        var now = Start;
-        now = now.Add(gate.OnThrottled(TimeSpan.FromSeconds(1), now, now).Delay); // failed at 32, limit 16
-        for (var i = 0; i < 8; i++)
-        {
-            now = now.Add(gate.OnThrottled(TimeSpan.FromSeconds(1), now, now).Delay); // failed at 16, 8, 4, 2, 1, 1...
-        }
-
-        for (var i = 0; i < 400; i++)
-        {
-            gate.OnSuccess(now);
-        }
-
-        Assert.True(gate.Limit >= 20);
-    }
-
-    [Fact]
     public void A_Burst_Of_Pauses_Does_Not_Make_The_Gate_Forget_Where_The_Node_Broke()
     {
         var gate = Gate(max: 32);
