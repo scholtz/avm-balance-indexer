@@ -24,7 +24,7 @@ internal sealed class ThrottleReport(TimeSpan interval)
 
         lock (_lock)
         {
-            return _hosts.Count > 0 ? TakeSummary(now, first: false) : null;
+            return _hosts.Count > 0 && (force || now.UtcTicks >= _dueTicks) ? TakeSummary(now, first: false) : null;
         }
     }
 

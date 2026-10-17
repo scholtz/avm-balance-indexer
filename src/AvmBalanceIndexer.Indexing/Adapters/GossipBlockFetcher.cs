@@ -140,6 +140,8 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
             }
         }
 
+        ReportThrottling(_throttleReport.Flush(_time.GetUtcNow()));
+
         // Hosts saying "not here" at least as often as they fail to answer, and more often than they answer wrongly, means the
         // block is not out yet. Mostly errors or wrong answers means a broken fleet and must reach the caller as a failure.
         if (notFound > 0 && notFound >= errors && notFound > badData)

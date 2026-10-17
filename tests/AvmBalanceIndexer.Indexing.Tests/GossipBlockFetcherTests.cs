@@ -409,6 +409,19 @@ public class GossipBlockFetcherTests
         Assert.Equal(2, logger.Entries.Count(e => e.Level == LogLevel.Debug && e.Message.Contains("rate limiting", StringComparison.Ordinal)));
     }
 
+    [Fact]
+    public async Task A_Fetch_That_Fails_Because_Of_Rate_Limits_Reports_The_Held_Back_Pauses_First()
+    {
+        var logger = new CapturingLogger();
+        var fetcher = CreateFetcher((_, _) => Task.FromResult(Throttled()), throttleTimeout: TimeSpan.FromMilliseconds(150), logger: logger);
+
+        await Assert.ThrowsAsync<BlockFetchException>(() => fetcher.FetchBlockAsync(4, CancellationToken.None));
+
+        var info = logger.Entries.Where(e => e.Level == LogLevel.Information).ToList();
+        Assert.Equal(2, info.Count); // the first pause at once, the held-back one when the fetch gives up
+        Assert.Contains("within", info[1].Message, StringComparison.Ordinal);
+    }
+
     private sealed class CapturingLogger : ILogger<GossipBlockFetcher>
     {
         public ConcurrentQueue<(LogLevel Level, string Message)> Entries { get; } = new();
