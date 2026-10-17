@@ -32,8 +32,8 @@ public static partial class LoggingExtensions
 
     /// <summary>
     /// Sends all logging through Serilog. Levels, overrides and sinks come from the <c>Serilog</c> configuration section (so also from
-    /// <c>Serilog__MinimumLevel__Default=Debug</c> in the environment); the Microsoft <c>Logging:LogLevel</c> filters are not used,
-    /// Serilog is the only place levels are decided. Without a configured <c>Serilog:WriteTo</c> the log goes to the console, as text or
+    /// <c>Serilog__MinimumLevel__Default=Debug</c> in the environment); the Microsoft <c>Logging:LogLevel</c> filters are not used
+    /// (Serilog replaces the logger factory, so they never apply; a startup warning names such a setting). Without a configured <c>Serilog:WriteTo</c> the log goes to the console, as text or
     /// as compact JSON (<see cref="FormatSetting"/>). Every event carries the <c>Service</c> and, when configured, the <c>Chain</c>.
     /// </summary>
     public static IServiceCollection AddAvmLogging(this IServiceCollection services, IConfiguration configuration, string serviceName)
@@ -48,16 +48,6 @@ public static partial class LoggingExtensions
             throw new InvalidOperationException($"{FormatSetting} must be Text or Json, not '{format}'.");
         }
 
-        var json = string.Equals(format, "Json", StringComparison.OrdinalIgnoreCase);
-        var customSinks = configuration.GetSection("Serilog:WriteTo").Exists();
-        var chain = configuration["Chain"];
-
-        // Serilog decides what is logged; the framework's own filters (Logging:LogLevel) would only hide events from it.
-        services.Configure<LoggerFilterOptions>(options =>
-        {
-            options.Rules.Clear();
-            options.MinLevel = LogLevel.Trace;
-        });
 
         if (configuration.GetSection("Logging:LogLevel").Exists())
         {
@@ -66,6 +56,10 @@ public static partial class LoggingExtensions
 
         services.AddSerilog((provider, logger) =>
         {
+            // Read when the logger is built, from the same configuration that ReadFrom.Configuration sees.
+            var json = string.Equals(configuration[FormatSetting], "Json", StringComparison.OrdinalIgnoreCase);
+            var customSinks = configuration.GetSection("Serilog:WriteTo").Exists();
+            var chain = configuration["Chain"];
             logger
                 .MinimumLevel.Information()
                 .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)

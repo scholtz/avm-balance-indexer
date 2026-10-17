@@ -1,6 +1,12 @@
 {{- if and .Values.api.pathBase (or (not (regexMatch "^(/[A-Za-z0-9._~-]+)+$" .Values.api.pathBase)) (regexMatch "(^|/)[.]+(/|$)" .Values.api.pathBase)) }}
 {{- fail (printf "api.pathBase must be empty or start with a slash, have no trailing slash and contain only URL-safe segments, not %q" .Values.api.pathBase) }}
 {{- end }}
+{{- if not (has .Values.logging.format (list "json" "text")) }}
+{{- fail (printf "logging.format must be json or text, not %q" .Values.logging.format) }}
+{{- end }}
+{{- if not (has .Values.logging.level (list "Verbose" "Debug" "Information" "Warning" "Error" "Fatal")) }}
+{{- fail (printf "logging.level must be one of Verbose, Debug, Information, Warning, Error, Fatal, not %q" .Values.logging.level) }}
+{{- end }}
 apiVersion: v1
 kind: ConfigMap
 metadata:

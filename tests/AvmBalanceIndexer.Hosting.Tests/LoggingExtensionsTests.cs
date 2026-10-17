@@ -35,7 +35,7 @@ public class LoggingExtensionsTests
         var sink = new CollectingSink();
         var services = new ServiceCollection();
         services.AddSingleton<ILogEventSink>(sink);
-        services.AddLogging();
+        services.AddLogging(logging => logging.AddConfiguration(configuration.GetSection("Logging"))); // as the host does: Logging:LogLevel becomes filter rules
         services.AddAvmLogging(configuration, "avm-test");
         return (services.BuildServiceProvider().GetRequiredService<ILoggerFactory>(), sink);
     }
