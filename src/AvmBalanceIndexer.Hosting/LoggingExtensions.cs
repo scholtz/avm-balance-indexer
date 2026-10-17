@@ -1,6 +1,6 @@
-using AvmBalanceIndexer.Domain.Chains;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Serilog;
 using Serilog.Events;
@@ -8,8 +8,23 @@ using Serilog.Formatting.Compact;
 
 namespace AvmBalanceIndexer.Hosting;
 
-public static class LoggingExtensions
+public static partial class LoggingExtensions
 {
+    /// <summary>Warns that <c>Logging:LogLevel</c> settings (an earlier release's way to set levels) have no effect any more.</summary>
+    internal sealed partial class IgnoredLogLevelNotice(ILogger<IgnoredLogLevelNotice> logger) : IHostedService
+    {
+        public Task StartAsync(CancellationToken cancellationToken)
+        {
+            LogIgnored(logger);
+            return Task.CompletedTask;
+        }
+
+        public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        [LoggerMessage(EventId = 1, Level = LogLevel.Warning, Message = "Logging:LogLevel settings are ignored: Serilog decides the levels. Use Serilog:MinimumLevel (Serilog__MinimumLevel__Default) instead.")]
+        private static partial void LogIgnored(ILogger<IgnoredLogLevelNotice> logger);
+    }
+
     /// <summary>The setting that selects the console format: <c>Text</c> (default) or <c>Json</c> (one compact JSON object per line).</summary>
     public const string FormatSetting = "Logging:Format";
 
@@ -38,6 +53,11 @@ public static class LoggingExtensions
             options.MinLevel = LogLevel.Trace;
         });
 
+        if (configuration.GetSection("Logging:LogLevel").Exists())
+        {
+            services.AddHostedService<IgnoredLogLevelNotice>();
+        }
+
         services.AddSerilog((provider, logger) =>
         {
             logger
@@ -48,7 +68,7 @@ public static class LoggingExtensions
                 .ReadFrom.Services(provider)
                 .Enrich.FromLogContext()
                 .Enrich.WithProperty("Service", serviceName);
-            if (!string.IsNullOrWhiteSpace(chain) && ChainId.IsKnown(chain))
+            if (!string.IsNullOrWhiteSpace(chain))
             {
                 logger.Enrich.WithProperty("Chain", chain);
             }

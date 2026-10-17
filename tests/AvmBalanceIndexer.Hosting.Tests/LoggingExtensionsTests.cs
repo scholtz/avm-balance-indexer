@@ -8,6 +8,11 @@ using Serilog.Events;
 
 namespace AvmBalanceIndexer.Hosting.Tests;
 
+[CollectionDefinition("Console", DisableParallelization = true)]
+public sealed class ConsoleSerial;
+
+ // some tests replace Console.Out
+[Collection("Console")] // some tests replace Console.Out
 public class LoggingExtensionsTests
 {
     private sealed class CollectingSink : ILogEventSink
@@ -86,9 +91,9 @@ public class LoggingExtensionsTests
     }
 
     [Fact]
-    public void An_Unknown_Chain_Is_Not_Added_To_The_Events()
+    public void An_Empty_Chain_Is_Not_Added_To_The_Events()
     {
-        var (factory, sink) = Build(("Chain", "not-a-chain"));
+        var (factory, sink) = Build(("Chain", ""));
 
         factory.CreateLogger("Test").LogInformation("hello");
 
@@ -158,5 +163,35 @@ public class LoggingExtensionsTests
         }
 
         Assert.Equal("CUSTOM hello", captured.ToString().Trim()); // the configured console only, not the default one in addition
+    }
+
+    [Fact]
+    public async Task A_Warning_Names_The_Ignored_Logging_LogLevel_Settings()
+    {
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["Logging:LogLevel:Default"] = "Warning" }).Build();
+        var sink = new CollectingSink();
+        var services = new ServiceCollection();
+        services.AddSingleton<ILogEventSink>(sink);
+        services.AddLogging();
+        services.AddAvmLogging(configuration, "avm-test");
+        await using var provider = services.BuildServiceProvider();
+
+        foreach (var hosted in provider.GetServices<Microsoft.Extensions.Hosting.IHostedService>())
+        {
+            await hosted.StartAsync(CancellationToken.None);
+        }
+
+        var warning = Assert.Single(sink.Events, e => e.Level == LogEventLevel.Warning);
+        Assert.Contains("Logging:LogLevel", warning.RenderMessage(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Without_Logging_LogLevel_Settings_There_Is_No_Notice()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddAvmLogging(new ConfigurationBuilder().Build(), "avm-test");
+
+        Assert.Empty(services.BuildServiceProvider().GetServices<Microsoft.Extensions.Hosting.IHostedService>());
     }
 }

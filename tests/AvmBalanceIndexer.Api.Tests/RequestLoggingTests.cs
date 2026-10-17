@@ -23,6 +23,17 @@ public sealed class RequestLoggingTests : IDisposable
         }
     }
 
+    private sealed class UnreachableStorage : InMemoryChainStorage
+    {
+        public UnreachableStorage()
+            : base(new ChainContext(ChainId.AlgorandTestnet))
+        {
+        }
+
+        public override Task<ChainStatus?> GetAsync(string chain, CancellationToken cancellationToken) =>
+            Task.FromException<ChainStatus?>(new InvalidOperationException("database down"));
+    }
+
     private sealed class CollectingSink : ILogEventSink
     {
         public List<LogEvent> Events { get; } = [];
@@ -44,7 +55,9 @@ public sealed class RequestLoggingTests : IDisposable
         }
     }
 
-    private (HttpClient Client, CollectingSink Sink) Create()
+    private (HttpClient Client, CollectingSink Sink) Create(params (string Key, string Value)[] settings) => Create(failingStorage: false, settings);
+
+    private (HttpClient Client, CollectingSink Sink) Create(bool failingStorage, params (string Key, string Value)[] settings)
     {
         var sink = new CollectingSink();
         var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
@@ -53,10 +66,15 @@ public sealed class RequestLoggingTests : IDisposable
             builder.UseSetting("Storage:Provider", "PostgreSql");
             builder.UseSetting("Storage:PostgreSql:ConnectionString", "Host=localhost;Database=unused;Username=u;Password=p");
             builder.UseSetting("Serilog:MinimumLevel:Default", "Debug");
+            foreach (var (key, value) in settings)
+            {
+                builder.UseSetting(key, value);
+            }
+
             builder.ConfigureServices(services =>
             {
                 services.RemoveAll<IChainStorage>();
-                services.AddSingleton<IChainStorage>(new InMemoryChainStorage(new ChainContext(ChainId.AlgorandTestnet)));
+                services.AddSingleton<IChainStorage>(failingStorage ? new UnreachableStorage() : new InMemoryChainStorage(new ChainContext(ChainId.AlgorandTestnet)));
                 services.AddSingleton<ILogEventSink>(sink);
             });
         });
@@ -88,5 +106,41 @@ public sealed class RequestLoggingTests : IDisposable
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(LogEventLevel.Debug, Assert.Single(sink.RequestLines()).Level);
+    }
+
+    [Fact]
+    public async Task A_Failing_Readiness_Probe_Stays_At_Debug()
+    {
+        var (client, sink) = Create(failingStorage: true);
+
+        using var response = await client.GetAsync(new Uri("/healthz/ready", UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.Equal(LogEventLevel.Debug, Assert.Single(sink.RequestLines()).Level);
+    }
+
+    [Fact]
+    public async Task Rate_Limited_Requests_Are_Logged_At_Debug()
+    {
+        var (client, sink) = Create(("Api:RateLimitPerMinute", "1"));
+
+        using var first = await client.GetAsync(new Uri("/v1/algorand-testnet/status", UriKind.Relative));
+        using var second = await client.GetAsync(new Uri("/v1/algorand-testnet/status", UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, second.StatusCode);
+        Assert.Equal([LogEventLevel.Information, LogEventLevel.Debug], sink.RequestLines().Select(e => e.Level));
+    }
+
+    [Fact]
+    public async Task Control_Characters_In_The_Path_Cannot_Forge_A_Log_Line()
+    {
+        var (client, sink) = Create();
+
+        using var response = await client.GetAsync(new Uri("/x%0A[INF]%20forged", UriKind.Relative));
+
+        var line = Assert.Single(sink.RequestLines());
+        var rendered = line.RenderMessage();
+        Assert.DoesNotContain(Environment.NewLine, rendered, StringComparison.Ordinal);
+        Assert.Contains("\\u000a[INF] forged", rendered, StringComparison.Ordinal);
     }
 }

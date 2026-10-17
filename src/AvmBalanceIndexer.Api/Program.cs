@@ -126,11 +126,21 @@ app.Use(async (context, next) =>
 app.UseSerilogRequestLogging(options =>
 {
     options.Logger = app.Services.GetRequiredService<Serilog.ILogger>(); // the host's logger, not the process-wide static one
-    // One line per request; probes would drown the rest, and a failure is always worth an error.
+
+    // The path is client input: control characters must not be able to start a forged line in the text format.
+    options.MessageTemplate = "HTTP {RequestMethod} {SafePath} responded {StatusCode} in {Elapsed:0.0000} ms";
+    options.EnrichDiagnosticContext = static (diagnosticContext, httpContext) =>
+        diagnosticContext.Set("SafePath", LogSanitizer.Escape(httpContext.Request.Path.Value));
+
+    // One line per request. What a client can cause at will (probes, rate-limited requests, requests it abandoned) stays at Debug so it cannot
+    // flood the log or raise error alerts; a server failure is an error.
     options.GetLevel = static (context, _, exception) =>
-        exception is not null || context.Response.StatusCode >= 500 ? Serilog.Events.LogEventLevel.Error
-        : context.Request.Path.StartsWithSegments("/healthz", StringComparison.OrdinalIgnoreCase) ? Serilog.Events.LogEventLevel.Debug
-        : Serilog.Events.LogEventLevel.Information;
+        context.Request.Path.StartsWithSegments("/healthz", StringComparison.OrdinalIgnoreCase)
+            || context.Response.StatusCode == StatusCodes.Status429TooManyRequests
+            || context.RequestAborted.IsCancellationRequested
+                ? exception is null ? Serilog.Events.LogEventLevel.Debug : Serilog.Events.LogEventLevel.Error
+            : exception is not null || context.Response.StatusCode >= 500 ? Serilog.Events.LogEventLevel.Error
+            : Serilog.Events.LogEventLevel.Information;
 });
 app.UseExceptionHandler();
 app.UseStatusCodePages(static async context =>
