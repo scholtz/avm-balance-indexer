@@ -25,6 +25,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
     private readonly ConcurrentDictionary<string, DateTimeOffset> _cooldownUntil = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, HostLatency> _latency = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, HostGate> _gates = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ThrottleReport _throttleReport;
 
     public GossipBlockFetcher(
         HttpClient http,
@@ -42,6 +43,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
         _expectedGenesisHash = expectedGenesisHash;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _time = timeProvider ?? TimeProvider.System;
+        _throttleReport = new ThrottleReport(options.ThrottleLogInterval);
     }
 
     public async Task<BlockData> FetchBlockAsync(ulong round, CancellationToken cancellationToken)
@@ -92,6 +94,10 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
                 if (result.NewPause)
                 {
                     LogHostThrottled(_logger, host, result.Delay, result.Limit);
+                    if (_throttleReport.Record(host, result.Limit, now) is { } summary)
+                    {
+                        LogThrottleSummary(_logger, summary.Pauses, summary.Hosts.Count, summary.Window, summary);
+                    }
                 }
 
                 // The time a fetch spends on rate-limited requests and in waiting for paused nodes is the time it has been throttled;
@@ -450,6 +456,9 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
     [LoggerMessage(EventId = 1111, Level = LogLevel.Warning, Message = "Fetching block {Round} from {Host} failed (attempt {Attempt}/{MaxAttempts})")]
     private static partial void LogAttemptFailed(ILogger logger, Exception exception, ulong round, string host, int attempt, int maxAttempts);
 
-    [LoggerMessage(EventId = 1112, Level = LogLevel.Information, Message = "Archival node {Host} is rate limiting (429); pausing it for {Delay} and allowing {Limit} concurrent requests")]
+    [LoggerMessage(EventId = 1112, Level = LogLevel.Debug, Message = "Archival node {Host} is rate limiting (429); pausing it for {Delay} and allowing {Limit} concurrent requests")]
     private static partial void LogHostThrottled(ILogger logger, string host, TimeSpan delay, int limit);
+
+    [LoggerMessage(EventId = 1113, Level = LogLevel.Information, Message = "Archival nodes are rate limiting (429): {Pauses} pause(s) of {Nodes} node(s) in the last {Window}, slowing them down: {Details}")]
+    private static partial void LogThrottleSummary(ILogger logger, int pauses, int nodes, TimeSpan window, ThrottleSummary details);
 }

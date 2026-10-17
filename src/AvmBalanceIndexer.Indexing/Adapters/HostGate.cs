@@ -3,7 +3,7 @@ namespace AvmBalanceIndexer.Indexing.Adapters;
 /// <summary>
 /// Admission control for one archival gossip node. At most <see cref="Limit"/> requests are in flight; the limit follows the
 /// node's own tolerance (additive increase, multiplicative decrease): it halves when the node answers with a rate limit and
-/// grows back by about one request per limit's worth of successes. A rate limit also pauses the node, for the
+/// grows back by about one request per limit's worth of successes, slowing down near the level that caused the last rate limit. A rate limit also pauses the node, for the
 /// <c>Retry-After</c> it sent or, without one, for a back-off that doubles with every pause in a row.
 /// A response belongs to the earlier episode when its request was admitted before the pause ended: it neither halves the limit
 /// again nor lengthens the back-off, so a burst of simultaneous 429s costs the node one step, not one step per request. A node
@@ -16,8 +16,15 @@ internal sealed class HostGate(int maxConcurrency, TimeSpan maxDelay)
     /// <summary>A pause never lasts less than this, so a <c>Retry-After: 0</c> cannot turn the retry loop into a spin.</summary>
     private static readonly TimeSpan MinimumDelay = TimeSpan.FromMilliseconds(5);
 
+    /// <summary>Growth slows down from this share of the level that last triggered a rate limit.</summary>
+    private const double ProbeFraction = 0.75;
+
+    /// <summary>How much slower the limit grows near the level that last triggered a rate limit.</summary>
+    private const double ProbeSlowdown = 8;
+
     private readonly object _lock = new();
     private double _limit = maxConcurrency;
+    private double _failedLevel; // the limit at which the node last rate-limited (0: never)
     private int _inFlight;
     private int _pausesInARow;
     private DateTimeOffset _blockedUntil = DateTimeOffset.MinValue;
@@ -81,7 +88,9 @@ internal sealed class HostGate(int maxConcurrency, TimeSpan maxDelay)
             }
 
             _pausesInARow = 0;
-            _limit = Math.Min(maxConcurrency, _limit + (1.0 / _limit));
+            // Close to the level that was too much, probe slowly: the node's limit is found, not hit again every few seconds.
+            var step = _limit >= _failedLevel * ProbeFraction ? 1.0 / (_limit * ProbeSlowdown) : 1.0 / _limit;
+            _limit = Math.Min(maxConcurrency, _limit + step);
         }
     }
 
@@ -98,6 +107,7 @@ internal sealed class HostGate(int maxConcurrency, TimeSpan maxDelay)
             if (newEpisode)
             {
                 _pausesInARow++;
+                _failedLevel = _limit;
                 _limit = Math.Max(1, _limit / 2);
             }
 

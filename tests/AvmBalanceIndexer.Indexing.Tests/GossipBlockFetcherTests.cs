@@ -1,6 +1,8 @@
+using System.Collections.Concurrent;
 using System.Net;
 using AvmBalanceIndexer.Indexing.Adapters;
 using AvmBalanceIndexer.TestSupport;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace AvmBalanceIndexer.Indexing.Tests;
@@ -20,7 +22,8 @@ public class GossipBlockFetcherTests
         int maxBlockBytes = 1024 * 1024,
         TimeProvider? time = null,
         int maxConcurrentPerHost = 32,
-        TimeSpan? throttleTimeout = null)
+        TimeSpan? throttleTimeout = null,
+        ILogger<GossipBlockFetcher>? logger = null)
     {
         var options = new AlgorandChainOptions
         {
@@ -42,7 +45,7 @@ public class GossipBlockFetcherTests
             Chain.Profile,
             options,
             Chain.GenesisHash,
-            NullLogger<GossipBlockFetcher>.Instance,
+            logger ?? NullLogger<GossipBlockFetcher>.Instance,
             time);
     }
 
@@ -389,6 +392,31 @@ public class GossipBlockFetcherTests
         {
             Assert.Equal(3UL, (await fetcher.FetchBlockAsync(3, CancellationToken.None)).Round);
         }
+    }
+
+    [Fact]
+    public async Task Many_Rate_Limits_Produce_One_Information_Line_And_Debug_Lines_For_Each_Pause()
+    {
+        var logger = new CapturingLogger();
+        var calls = 0;
+        var fetcher = CreateFetcher((_, _) => Task.FromResult(Interlocked.Increment(ref calls) <= 2 ? Throttled() : Ok(Chain.Encode(4, []))), logger: logger);
+
+        await fetcher.FetchBlockAsync(4, CancellationToken.None);
+
+        Assert.Single(logger.Entries, e => e.Level == LogLevel.Information);
+        Assert.Equal(2, logger.Entries.Count(e => e.Level == LogLevel.Debug && e.Message.Contains("rate limiting", StringComparison.Ordinal)));
+    }
+
+    private sealed class CapturingLogger : ILogger<GossipBlockFetcher>
+    {
+        public ConcurrentQueue<(LogLevel Level, string Message)> Entries { get; } = new();
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Entries.Enqueue((logLevel, formatter(state, exception)));
     }
 
     [Fact]
