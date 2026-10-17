@@ -165,7 +165,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
             return;
         }
 
-        if (summary.Window == TimeSpan.Zero)
+        if (summary.IsFirst)
         {
             LogThrottlingStarted(_logger, summary);
         }
@@ -178,9 +178,12 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
     private HostGate GateOf(string host) =>
         _gates.GetOrAdd(host, _ => new HostGate(_options.MaxConcurrentRequestsPerHost, _options.MaxThrottleDelay));
 
-    private BlockFetchException ThrottleTimedOut(ulong round, Exception? last) =>
-        new($"Block {round}: the archival gossip nodes kept rate limiting (HTTP 429) for more than {_options.ThrottleTimeout}. " +
+    private BlockFetchException ThrottleTimedOut(ulong round, Exception? last)
+    {
+        ReportThrottling(_throttleReport.Flush(_time.GetUtcNow())); // the failure should come with the summary that explains it
+        return new($"Block {round}: the archival gossip nodes kept rate limiting (HTTP 429) for more than {_options.ThrottleTimeout}. " +
             "Lower Indexer:FetchConcurrency or add archival nodes (Algorand:GossipHosts).", round, last);
+    }
 
     /// <summary>
     /// Takes a request slot at the first node, in the fetch's order starting at <paramref name="attempt"/>, that is neither paused
@@ -474,9 +477,9 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
     [LoggerMessage(EventId = 1112, Level = LogLevel.Debug, Message = "Archival node {Host} is rate limiting (429); pausing it for {Delay} and allowing {Limit} concurrent requests")]
     private static partial void LogHostThrottled(ILogger logger, string host, TimeSpan delay, int limit);
 
-    [LoggerMessage(EventId = 1114, Level = LogLevel.Information, Message = "Archival nodes started rate limiting (429); slowing them down, further pauses are summarised: {Details}")]
-    private static partial void LogThrottlingStarted(ILogger logger, ThrottleSummary details);
-
     [LoggerMessage(EventId = 1113, Level = LogLevel.Information, Message = "Archival nodes are rate limiting (429): {Pauses} pause(s) of {Nodes} node(s) within {Window}, slowing them down: {Details}")]
     private static partial void LogThrottleSummary(ILogger logger, int pauses, int nodes, TimeSpan window, ThrottleSummary details);
+
+    [LoggerMessage(EventId = 1114, Level = LogLevel.Information, Message = "Archival nodes started rate limiting (429); slowing them down, further pauses are summarised: {Details}")]
+    private static partial void LogThrottlingStarted(ILogger logger, ThrottleSummary details);
 }

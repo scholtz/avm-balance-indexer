@@ -14,6 +14,7 @@ public class ThrottleReportTests
         var summary = report.Record("http://a", 6, Start);
 
         Assert.NotNull(summary);
+        Assert.True(summary.IsFirst);
         Assert.Equal(1, summary.Pauses);
         Assert.Equal(TimeSpan.Zero, summary.Window);
     }
@@ -30,6 +31,7 @@ public class ThrottleReportTests
         var summary = report.Record("http://a", 3, Start.AddSeconds(60));
 
         Assert.NotNull(summary);
+        Assert.False(summary.IsFirst);
         Assert.Equal(TimeSpan.FromSeconds(59), summary.Window);
         Assert.Equal(4, summary.Pauses);
         Assert.Equal([new HostThrottle("http://a", 3, 3), new HostThrottle("http://b", 1, 8)], summary.Hosts);

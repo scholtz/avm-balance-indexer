@@ -270,6 +270,7 @@ public class HostingExtensionsTests
     [InlineData("Algorand:ThrottleTimeout", "00:00:10", "Algorand:MaxThrottleDelay", "00:01:00")] // a single pause could never fit the budget
     [InlineData("Algorand:MaxConcurrentRequestsPerHost", "0", null, null)]
     [InlineData("Algorand:MaxThrottleDelay", "00:00:00", null, null)]
+    [InlineData("Algorand:ThrottleLogInterval", "00:00:00", null, null)]
     public void Impossible_Throttling_Settings_Are_Rejected(string key, string value, string? otherKey, string? otherValue)
     {
         var settings = new List<(string, string?)>
