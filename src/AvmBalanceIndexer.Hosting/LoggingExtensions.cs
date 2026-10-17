@@ -42,7 +42,13 @@ public static partial class LoggingExtensions
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentException.ThrowIfNullOrWhiteSpace(serviceName);
 
-        var json = string.Equals(configuration[FormatSetting], "Json", StringComparison.OrdinalIgnoreCase);
+        var format = configuration[FormatSetting];
+        if (!string.IsNullOrWhiteSpace(format) && !string.Equals(format, "Json", StringComparison.OrdinalIgnoreCase) && !string.Equals(format, "Text", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"{FormatSetting} must be Text or Json, not '{format}'.");
+        }
+
+        var json = string.Equals(format, "Json", StringComparison.OrdinalIgnoreCase);
         var customSinks = configuration.GetSection("Serilog:WriteTo").Exists();
         var chain = configuration["Chain"];
 

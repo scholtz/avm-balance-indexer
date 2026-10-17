@@ -16,7 +16,7 @@ internal static class LogSanitizer
         StringBuilder? builder = null;
         for (var i = 0; i < value.Length; i++)
         {
-            if (char.IsControl(value[i]))
+            if (char.IsControl(value[i]) || value[i] is '\u2028' or '\u2029')
             {
                 builder ??= new StringBuilder(value.Length + 16).Append(value, 0, i);
                 builder.Append("\\u").Append(((int)value[i]).ToString("x4", CultureInfo.InvariantCulture));

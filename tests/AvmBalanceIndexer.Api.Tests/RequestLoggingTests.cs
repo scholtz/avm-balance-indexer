@@ -143,4 +143,15 @@ public sealed class RequestLoggingTests : IDisposable
         Assert.DoesNotContain(Environment.NewLine, rendered, StringComparison.Ordinal);
         Assert.Contains("\\u000a[INF] forged", rendered, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task Client_Errors_Are_Logged_At_Debug()
+    {
+        var (client, sink) = Create();
+
+        using var response = await client.GetAsync(new Uri("/v1/algorand-testnet/unknown", UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal(LogEventLevel.Debug, Assert.Single(sink.RequestLines()).Level);
+    }
 }

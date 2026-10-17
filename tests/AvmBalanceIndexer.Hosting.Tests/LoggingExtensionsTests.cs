@@ -11,7 +11,6 @@ namespace AvmBalanceIndexer.Hosting.Tests;
 [CollectionDefinition("Console", DisableParallelization = true)]
 public sealed class ConsoleSerial;
 
- // some tests replace Console.Out
 [Collection("Console")] // some tests replace Console.Out
 public class LoggingExtensionsTests
 {
@@ -193,5 +192,17 @@ public class LoggingExtensionsTests
         services.AddAvmLogging(new ConfigurationBuilder().Build(), "avm-test");
 
         Assert.Empty(services.BuildServiceProvider().GetServices<Microsoft.Extensions.Hosting.IHostedService>());
+    }
+
+    [Theory]
+    [InlineData("Jsno")]
+    [InlineData("yaml")]
+    public void An_Unknown_Console_Format_Fails_At_Startup(string format)
+    {
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { [LoggingExtensions.FormatSetting] = format }).Build();
+
+        var failure = Assert.Throws<InvalidOperationException>(() => new ServiceCollection().AddAvmLogging(configuration, "avm-test"));
+
+        Assert.Contains(format, failure.Message, StringComparison.Ordinal);
     }
 }

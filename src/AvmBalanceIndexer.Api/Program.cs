@@ -132,7 +132,7 @@ app.UseSerilogRequestLogging(options =>
     options.EnrichDiagnosticContext = static (diagnosticContext, httpContext) =>
         diagnosticContext.Set("SafePath", LogSanitizer.Escape(httpContext.Request.Path.Value));
 
-    // One line per request. What a client can cause at will (probes, rate-limited requests, requests it abandoned) stays at Debug so it cannot
+    // One line per request. What a client can cause at will (probes, rate-limited requests, requests it abandoned, any other 4xx) stays at Debug so it cannot
     // flood the log or raise error alerts; a server failure is an error.
     options.GetLevel = static (context, _, exception) =>
         context.Request.Path.StartsWithSegments("/healthz", StringComparison.OrdinalIgnoreCase)
@@ -140,6 +140,7 @@ app.UseSerilogRequestLogging(options =>
             || context.RequestAborted.IsCancellationRequested
                 ? exception is null ? Serilog.Events.LogEventLevel.Debug : Serilog.Events.LogEventLevel.Error
             : exception is not null || context.Response.StatusCode >= 500 ? Serilog.Events.LogEventLevel.Error
+            : context.Response.StatusCode >= 400 ? Serilog.Events.LogEventLevel.Debug
             : Serilog.Events.LogEventLevel.Information;
 });
 app.UseExceptionHandler();
