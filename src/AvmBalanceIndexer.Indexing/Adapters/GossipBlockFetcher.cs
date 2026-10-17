@@ -265,7 +265,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
                 continue;
             }
 
-            var score = _latency.GetOrAdd(host, _ => new HostLatency(_time)).Score;
+            var score = _latency.GetOrAdd(host, static (_, time) => new HostLatency(time), _time).Score;
             healthy.Add((host, 1.0 / (score * score)));
         }
 
@@ -374,7 +374,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
     /// <summary>Downloads a block and records how long the host took (transport only, not decoding); cancellation says nothing about the host.</summary>
     private async Task<byte[]> DownloadTimedAsync(string host, ulong round, CancellationToken cancellationToken)
     {
-        var latency = _latency.GetOrAdd(host, _ => new HostLatency(_time));
+        var latency = _latency.GetOrAdd(host, static (_, time) => new HostLatency(time), _time);
         latency.Begin();
         var started = _time.GetTimestamp();
         var outcome = HostOutcome.Failed;
