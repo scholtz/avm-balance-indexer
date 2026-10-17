@@ -8,21 +8,23 @@ internal sealed class ThrottleReport(TimeSpan interval)
 {
     private readonly object _lock = new();
     private readonly Dictionary<string, (int Pauses, int Limit)> _hosts = new(StringComparer.OrdinalIgnoreCase);
-    private volatile bool _pending;
+    private long _dueTicks = long.MaxValue; // when held-back pauses are due; MaxValue while none are held back
     private DateTimeOffset _since = DateTimeOffset.MinValue;
     private DateTimeOffset _lastReport = DateTimeOffset.MinValue;
 
     /// <summary>Hands out the pauses that were held back once the interval has passed, so they do not wait for the next pause to be seen.</summary>
-    public ThrottleSummary? Flush(DateTimeOffset now)
+    /// <param name="now">The current time.</param>
+    /// <param name="force">Hand them out even before the interval has passed (a fetch is failing because of them).</param>
+    public ThrottleSummary? Flush(DateTimeOffset now, bool force = false)
     {
-        if (!_pending)
+        if (!force && now.UtcTicks < Volatile.Read(ref _dueTicks))
         {
-            return null; // the common case on the hot path: no lock, nothing held back
+            return null; // the common case on the hot path: nothing is due, no lock
         }
 
         lock (_lock)
         {
-            return _hosts.Count > 0 && now - _lastReport >= interval ? TakeSummary(now, first: false) : null;
+            return _hosts.Count > 0 ? TakeSummary(now, first: false) : null;
         }
     }
 
@@ -36,10 +38,10 @@ internal sealed class ThrottleReport(TimeSpan interval)
                 _since = now;
             }
 
-            _pending = true;
             _hosts[host] = (_hosts.GetValueOrDefault(host).Pauses + 1, limit);
             if (_lastReport != DateTimeOffset.MinValue && now - _lastReport < interval)
             {
+                Volatile.Write(ref _dueTicks, (_lastReport + interval).UtcTicks);
                 return null;
             }
 
@@ -49,7 +51,7 @@ internal sealed class ThrottleReport(TimeSpan interval)
 
     private ThrottleSummary TakeSummary(DateTimeOffset now, bool first)
     {
-        _pending = false;
+        Volatile.Write(ref _dueTicks, long.MaxValue);
         var summary = new ThrottleSummary(
             now > _since ? now - _since : TimeSpan.Zero,
             [.. _hosts.Select(h => new HostThrottle(h.Key, h.Value.Pauses, h.Value.Limit)).OrderByDescending(h => h.Pauses).ThenBy(h => h.Host, StringComparer.Ordinal)],

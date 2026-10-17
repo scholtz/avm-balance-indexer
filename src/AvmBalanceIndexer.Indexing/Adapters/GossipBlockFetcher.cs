@@ -180,7 +180,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
 
     private BlockFetchException ThrottleTimedOut(ulong round, Exception? last)
     {
-        ReportThrottling(_throttleReport.Flush(_time.GetUtcNow())); // the failure should come with the summary that explains it
+        ReportThrottling(_throttleReport.Flush(_time.GetUtcNow(), force: true)); // the failure should come with the summary that explains it
         return new($"Block {round}: the archival gossip nodes kept rate limiting (HTTP 429) for more than {_options.ThrottleTimeout}. " +
             "Lower Indexer:FetchConcurrency or add archival nodes (Algorand:GossipHosts).", round, last);
     }

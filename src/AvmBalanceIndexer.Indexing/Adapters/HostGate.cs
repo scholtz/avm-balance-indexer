@@ -110,7 +110,8 @@ internal sealed class HostGate(int maxConcurrency, TimeSpan maxDelay)
             if (newEpisode)
             {
                 _pausesInARow++;
-                _failedLevel = _limit;
+                // Within a run of pauses the highest level stays: a burst that halves the limit again and again must not make the gate forget where the node broke.
+                _failedLevel = _pausesInARow > 1 ? Math.Max(_failedLevel, _limit) : _limit;
                 _limit = Math.Max(1, _limit / 2);
             }
 

@@ -64,6 +64,18 @@ public class ThrottleReportTests
         var summary = report.Flush(Start.AddSeconds(61));
 
         Assert.Equal([new HostThrottle("http://a", 2, 4)], summary!.Hosts);
-        Assert.Null(report.Flush(Start.AddSeconds(200))); // nothing left to report
+        Assert.Null(report.Flush(Start.AddSeconds(200), force: true)); // nothing left to report
+    }
+
+    [Fact]
+    public void A_Forced_Flush_Hands_Out_Held_Back_Pauses_Before_The_Interval_Has_Passed()
+    {
+        var report = new ThrottleReport(TimeSpan.FromMinutes(1));
+        report.Record("http://a", 6, Start);
+        report.Record("http://a", 5, Start.AddSeconds(10));
+
+        var summary = report.Flush(Start.AddSeconds(11), force: true);
+
+        Assert.Equal([new HostThrottle("http://a", 1, 5)], summary!.Hosts);
     }
 }

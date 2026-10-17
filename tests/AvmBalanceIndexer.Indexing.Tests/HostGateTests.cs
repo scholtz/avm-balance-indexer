@@ -232,4 +232,24 @@ public class HostGateTests
 
         Assert.True(gate.Limit >= 20);
     }
+
+    [Fact]
+    public void A_Burst_Of_Pauses_Does_Not_Make_The_Gate_Forget_Where_The_Node_Broke()
+    {
+        var gate = Gate(max: 32);
+        var now = Start;
+        for (var i = 0; i < 6; i++)
+        {
+            now = now.Add(gate.OnThrottled(TimeSpan.FromSeconds(1), now, now).Delay); // 32 -> ... -> 1, no success in between
+        }
+
+        gate.OnSuccess(now); // the burst is over
+
+        for (var i = 0; i < 400; i++)
+        {
+            gate.OnSuccess(now);
+        }
+
+        Assert.InRange(gate.Limit, 24, 25); // quick up to 0.75 x the remembered 32, then slow; had it forgotten, it would be near 28
+    }
 }
