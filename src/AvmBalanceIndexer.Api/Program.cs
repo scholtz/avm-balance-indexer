@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.Extensions.Options;
+using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -81,6 +82,7 @@ if (api.TrustForwardedHeaders)
     });
 }
 builder.Services.AddHealthChecks().AddCheck<StorageHealthCheck>("storage", tags: ["ready"]);
+builder.Services.AddAvmLogging(builder.Configuration, "avm-api");
 builder.Services.AddChainStorage(builder.Configuration);
 builder.Services.AddAvmTelemetry(builder.Configuration, "avm-api", TelemetryExtensions.AspNetCoreMeters.ToArray());
 builder.Services.AddOptions<ScanOptions>().Bind(builder.Configuration.GetSection(ScanOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
@@ -120,6 +122,38 @@ app.Use(async (context, next) =>
         return Task.CompletedTask;
     }, context.Response);
     await next();
+});
+app.UseSerilogRequestLogging(options =>
+{
+    options.Logger = app.Services.GetRequiredService<Serilog.ILogger>().ForContext("SourceContext", "Serilog.AspNetCore.RequestLoggingMiddleware"); // the host's logger, not the process-wide static one
+
+    // The path is client input: control characters must not be able to start a forged line in the text format.
+    options.MessageTemplate = "HTTP {RequestMethod} {SafePath} responded {StatusCode} in {Elapsed:0.0000} ms";
+    options.EnrichDiagnosticContext = static (diagnosticContext, httpContext) =>
+        diagnosticContext.Set("SafePath", LogSanitizer.Escape(httpContext.Request.Path.Value));
+
+    // One line per request. What a client can cause at will (probes, rate-limited requests, requests it abandoned, any other 4xx) stays at Debug so it cannot
+    // flood the log or raise error alerts; a server failure is an error.
+    options.GetLevel = static (context, _, exception) =>
+    {
+        var status = context.Response.StatusCode;
+        if (context.Request.Path.StartsWithSegments("/healthz", StringComparison.OrdinalIgnoreCase))
+        {
+            return exception is not null ? Serilog.Events.LogEventLevel.Error
+                : status >= 500 ? Serilog.Events.LogEventLevel.Warning // a failing probe is the operator's clue why pods leave rotation
+                : Serilog.Events.LogEventLevel.Debug;
+        }
+
+        if (exception is not null)
+        {
+            return Serilog.Events.LogEventLevel.Error;
+        }
+
+        return status == StatusCodes.Status504GatewayTimeout ? Serilog.Events.LogEventLevel.Warning // the request timeout: a slow query a client asked for
+            : status >= 500 ? Serilog.Events.LogEventLevel.Error
+            : status >= 400 || context.RequestAborted.IsCancellationRequested ? Serilog.Events.LogEventLevel.Debug
+            : Serilog.Events.LogEventLevel.Information;
+    };
 });
 app.UseExceptionHandler();
 app.UseStatusCodePages(static async context =>
