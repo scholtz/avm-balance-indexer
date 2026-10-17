@@ -7,6 +7,7 @@ public class LogSanitizerTests
     [InlineData("", "")]
     [InlineData("/v1/algorand-testnet/status", "/v1/algorand-testnet/status")]
     [InlineData("/a\nb", "/a\\u000ab")]
+    [InlineData("a\\u000ab", "a\\u005cu000ab")]
     [InlineData("a\u202eb", "a\\u202eb")]
     [InlineData("a\u2028b", "a\\u2028b")]
     [InlineData("\r\n\t", "\\u000d\\u000a\\u0009")]

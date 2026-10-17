@@ -122,7 +122,7 @@ scans:
 logging:
   # Console format: json (one compact JSON object per line, for log collectors) or text.
   format: json
-  # Minimum level (Verbose, Debug, Information, Warning, Error). Finer control per namespace: the Serilog section of the configuration.
+  # Minimum level (Verbose, Debug, Information, Warning, Error, Fatal). Finer control per namespace: the Serilog section of the configuration.
   level: Information
 
 telemetry:

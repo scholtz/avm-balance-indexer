@@ -110,14 +110,14 @@ public sealed class RequestLoggingTests : IDisposable
     }
 
     [Fact]
-    public async Task A_Failing_Readiness_Probe_Stays_At_Debug()
+    public async Task A_Failing_Readiness_Probe_Is_Logged_As_A_Warning()
     {
         var (client, sink) = Create(failingStorage: true);
 
         using var response = await client.GetAsync(new Uri("/healthz/ready", UriKind.Relative));
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
-        Assert.Equal(LogEventLevel.Debug, Assert.Single(sink.RequestLines()).Level);
+        Assert.Equal(LogEventLevel.Warning, Assert.Single(sink.RequestLines()).Level);
     }
 
     [Fact]

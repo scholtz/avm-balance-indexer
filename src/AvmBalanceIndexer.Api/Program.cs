@@ -135,14 +135,25 @@ app.UseSerilogRequestLogging(options =>
     // One line per request. What a client can cause at will (probes, rate-limited requests, requests it abandoned, any other 4xx) stays at Debug so it cannot
     // flood the log or raise error alerts; a server failure is an error.
     options.GetLevel = static (context, _, exception) =>
-        context.Request.Path.StartsWithSegments("/healthz", StringComparison.OrdinalIgnoreCase)
-            || context.Response.StatusCode == StatusCodes.Status429TooManyRequests
-            || context.RequestAborted.IsCancellationRequested
-                ? exception is null ? Serilog.Events.LogEventLevel.Debug : Serilog.Events.LogEventLevel.Error
-            : context.Response.StatusCode == StatusCodes.Status504GatewayTimeout ? Serilog.Events.LogEventLevel.Warning // the request timeout: a slow query a client asked for
-            : exception is not null || context.Response.StatusCode >= 500 ? Serilog.Events.LogEventLevel.Error
-            : context.Response.StatusCode >= 400 ? Serilog.Events.LogEventLevel.Debug
+    {
+        var status = context.Response.StatusCode;
+        if (context.Request.Path.StartsWithSegments("/healthz", StringComparison.OrdinalIgnoreCase))
+        {
+            return exception is not null ? Serilog.Events.LogEventLevel.Error
+                : status >= 500 ? Serilog.Events.LogEventLevel.Warning // a failing probe is the operator's clue why pods leave rotation
+                : Serilog.Events.LogEventLevel.Debug;
+        }
+
+        if (exception is not null)
+        {
+            return Serilog.Events.LogEventLevel.Error;
+        }
+
+        return status == StatusCodes.Status504GatewayTimeout ? Serilog.Events.LogEventLevel.Warning // the request timeout: a slow query a client asked for
+            : status >= 500 ? Serilog.Events.LogEventLevel.Error
+            : status >= 400 || context.RequestAborted.IsCancellationRequested ? Serilog.Events.LogEventLevel.Debug
             : Serilog.Events.LogEventLevel.Information;
+    };
 });
 app.UseExceptionHandler();
 app.UseStatusCodePages(static async context =>
