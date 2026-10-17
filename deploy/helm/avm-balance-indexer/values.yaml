@@ -119,6 +119,12 @@ scans:
   # A running scan whose owner is silent for this long is taken over by another worker replica.
   staleAfter: "00:02:00"
 
+logging:
+  # Console format: json (one compact JSON object per line, for log collectors) or text.
+  format: json
+  # Minimum level (Verbose, Debug, Information, Warning, Error). Finer control per namespace: the Serilog section of the configuration.
+  level: Information
+
 telemetry:
   # OTLP endpoint of an OpenTelemetry collector, for example http://otel-collector:4317. Empty turns metrics export off.
   otlpEndpoint: ""

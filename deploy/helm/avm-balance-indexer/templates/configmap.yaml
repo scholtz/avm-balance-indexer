@@ -17,6 +17,8 @@ data:
   {{- if or .Values.telemetry.otlpEndpoint .Values.telemetry.otlpMetricsEndpoint }}
   OTEL_EXPORTER_OTLP_PROTOCOL: {{ .Values.telemetry.otlpProtocol | quote }}
   {{- end }}
+  Logging__Format: {{ .Values.logging.format | quote }}
+  Serilog__MinimumLevel__Default: {{ .Values.logging.level | quote }}
   Worker__HealthPort: {{ .Values.worker.healthPort | quote }}
   Api__RateLimitPerMinute: {{ .Values.api.rateLimitPerMinute | quote }}
   Api__RequestTimeoutSeconds: {{ .Values.api.requestTimeoutSeconds | quote }}

@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.Extensions.Options;
+using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -81,6 +82,7 @@ if (api.TrustForwardedHeaders)
     });
 }
 builder.Services.AddHealthChecks().AddCheck<StorageHealthCheck>("storage", tags: ["ready"]);
+builder.Services.AddAvmLogging(builder.Configuration, "avm-api");
 builder.Services.AddChainStorage(builder.Configuration);
 builder.Services.AddAvmTelemetry(builder.Configuration, "avm-api", TelemetryExtensions.AspNetCoreMeters.ToArray());
 builder.Services.AddOptions<ScanOptions>().Bind(builder.Configuration.GetSection(ScanOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
@@ -120,6 +122,15 @@ app.Use(async (context, next) =>
         return Task.CompletedTask;
     }, context.Response);
     await next();
+});
+app.UseSerilogRequestLogging(options =>
+{
+    options.Logger = app.Services.GetRequiredService<Serilog.ILogger>(); // the host's logger, not the process-wide static one
+    // One line per request; probes would drown the rest, and a failure is always worth an error.
+    options.GetLevel = static (context, _, exception) =>
+        exception is not null || context.Response.StatusCode >= 500 ? Serilog.Events.LogEventLevel.Error
+        : context.Request.Path.StartsWithSegments("/healthz", StringComparison.OrdinalIgnoreCase) ? Serilog.Events.LogEventLevel.Debug
+        : Serilog.Events.LogEventLevel.Information;
 });
 app.UseExceptionHandler();
 app.UseStatusCodePages(static async context =>
