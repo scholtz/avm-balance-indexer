@@ -91,6 +91,7 @@ public sealed class RequestLoggingTests : IDisposable
 
         var line = Assert.Single(sink.RequestLines());
         Assert.Equal(LogEventLevel.Information, line.Level);
+        Assert.Equal("Serilog.AspNetCore.RequestLoggingMiddleware", ((ScalarValue)line.Properties["SourceContext"]).Value);
         Assert.Equal("GET", ((ScalarValue)line.Properties["RequestMethod"]).Value);
         Assert.Equal("/v1/algorand-testnet/status", ((ScalarValue)line.Properties["RequestPath"]).Value);
         Assert.Equal((int)response.StatusCode, ((ScalarValue)line.Properties["StatusCode"]).Value);

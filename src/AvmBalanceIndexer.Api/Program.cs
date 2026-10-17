@@ -125,7 +125,7 @@ app.Use(async (context, next) =>
 });
 app.UseSerilogRequestLogging(options =>
 {
-    options.Logger = app.Services.GetRequiredService<Serilog.ILogger>(); // the host's logger, not the process-wide static one
+    options.Logger = app.Services.GetRequiredService<Serilog.ILogger>().ForContext("SourceContext", "Serilog.AspNetCore.RequestLoggingMiddleware"); // the host's logger, not the process-wide static one
 
     // The path is client input: control characters must not be able to start a forged line in the text format.
     options.MessageTemplate = "HTTP {RequestMethod} {SafePath} responded {StatusCode} in {Elapsed:0.0000} ms";
@@ -139,6 +139,7 @@ app.UseSerilogRequestLogging(options =>
             || context.Response.StatusCode == StatusCodes.Status429TooManyRequests
             || context.RequestAborted.IsCancellationRequested
                 ? exception is null ? Serilog.Events.LogEventLevel.Debug : Serilog.Events.LogEventLevel.Error
+            : context.Response.StatusCode == StatusCodes.Status504GatewayTimeout ? Serilog.Events.LogEventLevel.Warning // the request timeout: a slow query a client asked for
             : exception is not null || context.Response.StatusCode >= 500 ? Serilog.Events.LogEventLevel.Error
             : context.Response.StatusCode >= 400 ? Serilog.Events.LogEventLevel.Debug
             : Serilog.Events.LogEventLevel.Information;
