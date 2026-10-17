@@ -184,4 +184,53 @@ public class HostGateTests
         Assert.Equal(Start.AddSeconds(5), gate.BlockedUntil);
         Assert.True(gate.Limit >= 4);
     }
+
+    [Fact]
+    public void The_Limit_Grows_Slowly_Near_The_Level_That_Was_Too_Much()
+    {
+        var gate = Gate(max: 32);
+        var now = Start;
+        now = now.Add(gate.OnThrottled(TimeSpan.FromSeconds(1), now, now).Delay); // failed at 32, limit 16
+
+        for (var i = 0; i < 200; i++)
+        {
+            gate.OnSuccess(now); // well below the failed level it grows as usual: 16 -> 24
+        }
+
+        Assert.Equal(24, gate.Limit);
+
+        for (var i = 0; i < 100; i++)
+        {
+            gate.OnSuccess(now); // from three quarters of the failed level on it only probes
+        }
+
+        Assert.InRange(gate.Limit, 24, 25);
+
+        for (var i = 0; i < 3_000; i++)
+        {
+            gate.OnSuccess(now); // beyond a quarter above the failed level it is quick again
+        }
+
+        Assert.Equal(32, gate.Limit);
+    }
+
+    [Fact]
+    public void A_Burst_Of_Pauses_Does_Not_Make_The_Gate_Forget_Where_The_Node_Broke()
+    {
+        var gate = Gate(max: 32);
+        var now = Start;
+        for (var i = 0; i < 6; i++)
+        {
+            now = now.Add(gate.OnThrottled(TimeSpan.FromSeconds(1), now, now).Delay); // 32 -> ... -> 1, no success in between
+        }
+
+        gate.OnSuccess(now); // the burst is over
+
+        for (var i = 0; i < 400; i++)
+        {
+            gate.OnSuccess(now);
+        }
+
+        Assert.InRange(gate.Limit, 24, 25); // quick up to 0.75 x the remembered 32, then slow; had it forgotten, it would be near 28
+    }
 }

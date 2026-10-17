@@ -64,6 +64,12 @@ public sealed class AlgorandChainOptions : IValidatableObject
     public TimeSpan MaxThrottleDelay { get; set; } = TimeSpan.FromSeconds(60);
 
     /// <summary>
+    /// Rate-limited nodes are logged as one summary per this interval (the first pause at once) instead of one line per pause.
+    /// </summary>
+    [Range(typeof(TimeSpan), "00:00:01", "01:00:00")]
+    public TimeSpan ThrottleLogInterval { get; set; } = TimeSpan.FromMinutes(1);
+
+    /// <summary>
     /// How long one block fetch keeps waiting while the nodes rate-limit it before it fails (a transient failure the worker
     /// retries). Throttled answers do not use up <see cref="MaxAttempts"/>.
     /// </summary>

@@ -23,7 +23,8 @@ warning with a stack trace per request, and when several nodes throttled togethe
 - A rate-limited answer **does not use up an attempt**: the request goes to the next node that is neither paused nor full (load spills over instead of queueing behind
   the favourite), or waits for the earliest pause to end. The time a fetch spends on rate-limited requests and waiting is bounded by `Algorand:ThrottleTimeout` (5 min); then it
   fails like any fetch failure, which the worker retries with its back-off and, after `MaxConsecutiveFailures`, escalates to a stop.
-- The log has one information line per pause instead of a warning per request.
+- The log has no warning per request and no line per pause: each pause is a debug line, and `Algorand:ThrottleLogInterval` (1 min) turns the pauses of all nodes into one information summary (the first pause is reported at once; held-back pauses are flushed when the next fetch completes or a fetch fails with a throttle timeout). Issue #122.
+- The gate remembers the level at which a node last rate-limited and grows eight times slower between three quarters and 1.25 times that level (quickly again below and above), so the limit probes the node's tolerance instead of saw-toothing into the next 429.
 
 ## Consequences
 

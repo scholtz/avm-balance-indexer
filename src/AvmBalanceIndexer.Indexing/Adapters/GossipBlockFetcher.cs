@@ -25,6 +25,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
     private readonly ConcurrentDictionary<string, DateTimeOffset> _cooldownUntil = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, HostLatency> _latency = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, HostGate> _gates = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ThrottleReport _throttleReport;
 
     public GossipBlockFetcher(
         HttpClient http,
@@ -42,6 +43,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
         _expectedGenesisHash = expectedGenesisHash;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _time = timeProvider ?? TimeProvider.System;
+        _throttleReport = new ThrottleReport(options.ThrottleLogInterval);
     }
 
     public async Task<BlockData> FetchBlockAsync(ulong round, CancellationToken cancellationToken)
@@ -78,6 +80,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
                 gate.OnSuccess(entered);
                 var block = BlockDecoder.Decode(payload, round, _profile, _expectedGenesisHash);
                 _cooldownUntil.TryRemove(host, out _);
+                ReportThrottling(_throttleReport.Flush(_time.GetUtcNow()));
                 return block;
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -92,6 +95,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
                 if (result.NewPause)
                 {
                     LogHostThrottled(_logger, host, result.Delay, result.Limit);
+                    ReportThrottling(_throttleReport.Record(host, result.Limit, now));
                 }
 
                 // The time a fetch spends on rate-limited requests and in waiting for paused nodes is the time it has been throttled;
@@ -136,6 +140,8 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
             }
         }
 
+        ReportThrottling(_throttleReport.Flush(_time.GetUtcNow()));
+
         // Hosts saying "not here" at least as often as they fail to answer, and more often than they answer wrongly, means the
         // block is not out yet. Mostly errors or wrong answers means a broken fleet and must reach the caller as a failure.
         if (notFound > 0 && notFound >= errors && notFound > badData)
@@ -154,12 +160,32 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
         public Exception? Last { get; set; }
     }
 
+    private void ReportThrottling(ThrottleSummary? summary)
+    {
+        if (summary is null)
+        {
+            return;
+        }
+
+        if (summary.IsFirst)
+        {
+            LogThrottlingStarted(_logger, summary);
+        }
+        else
+        {
+            LogThrottleSummary(_logger, summary.Pauses, summary.Hosts.Count, summary.Window, summary);
+        }
+    }
+
     private HostGate GateOf(string host) =>
         _gates.GetOrAdd(host, _ => new HostGate(_options.MaxConcurrentRequestsPerHost, _options.MaxThrottleDelay));
 
-    private BlockFetchException ThrottleTimedOut(ulong round, Exception? last) =>
-        new($"Block {round}: the archival gossip nodes kept rate limiting (HTTP 429) for more than {_options.ThrottleTimeout}. " +
+    private BlockFetchException ThrottleTimedOut(ulong round, Exception? last)
+    {
+        ReportThrottling(_throttleReport.Flush(_time.GetUtcNow(), force: true)); // the failure should come with the summary that explains it
+        return new($"Block {round}: the archival gossip nodes kept rate limiting (HTTP 429) for more than {_options.ThrottleTimeout}. " +
             "Lower Indexer:FetchConcurrency or add archival nodes (Algorand:GossipHosts).", round, last);
+    }
 
     /// <summary>
     /// Takes a request slot at the first node, in the fetch's order starting at <paramref name="attempt"/>, that is neither paused
@@ -450,6 +476,12 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
     [LoggerMessage(EventId = 1111, Level = LogLevel.Warning, Message = "Fetching block {Round} from {Host} failed (attempt {Attempt}/{MaxAttempts})")]
     private static partial void LogAttemptFailed(ILogger logger, Exception exception, ulong round, string host, int attempt, int maxAttempts);
 
-    [LoggerMessage(EventId = 1112, Level = LogLevel.Information, Message = "Archival node {Host} is rate limiting (429); pausing it for {Delay} and allowing {Limit} concurrent requests")]
+    [LoggerMessage(EventId = 1112, Level = LogLevel.Debug, Message = "Archival node {Host} is rate limiting (429); pausing it for {Delay} and allowing {Limit} concurrent requests")]
     private static partial void LogHostThrottled(ILogger logger, string host, TimeSpan delay, int limit);
+
+    [LoggerMessage(EventId = 1113, Level = LogLevel.Information, Message = "Archival nodes are rate limiting (429): {Pauses} pause(s) of {Nodes} node(s) within {Window}, slowing them down: {Details}")]
+    private static partial void LogThrottleSummary(ILogger logger, int pauses, int nodes, TimeSpan window, ThrottleSummary details);
+
+    [LoggerMessage(EventId = 1114, Level = LogLevel.Information, Message = "Archival nodes started rate limiting (429); slowing them down, further pauses are summarised: {Details}")]
+    private static partial void LogThrottlingStarted(ILogger logger, ThrottleSummary details);
 }
