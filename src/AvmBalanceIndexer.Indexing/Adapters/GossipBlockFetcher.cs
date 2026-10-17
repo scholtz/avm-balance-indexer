@@ -80,6 +80,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
                 gate.OnSuccess(entered);
                 var block = BlockDecoder.Decode(payload, round, _profile, _expectedGenesisHash);
                 _cooldownUntil.TryRemove(host, out _);
+                ReportThrottling(_throttleReport.Flush(_time.GetUtcNow()));
                 return block;
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -94,10 +95,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
                 if (result.NewPause)
                 {
                     LogHostThrottled(_logger, host, result.Delay, result.Limit);
-                    if (_throttleReport.Record(host, result.Limit, now) is { } summary)
-                    {
-                        LogThrottleSummary(_logger, summary.Pauses, summary.Hosts.Count, summary.Window, summary);
-                    }
+                    ReportThrottling(_throttleReport.Record(host, result.Limit, now));
                 }
 
                 // The time a fetch spends on rate-limited requests and in waiting for paused nodes is the time it has been throttled;
@@ -158,6 +156,23 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
         public TimeSpan Waited { get; set; }
 
         public Exception? Last { get; set; }
+    }
+
+    private void ReportThrottling(ThrottleSummary? summary)
+    {
+        if (summary is null)
+        {
+            return;
+        }
+
+        if (summary.Window == TimeSpan.Zero)
+        {
+            LogThrottlingStarted(_logger, summary);
+        }
+        else
+        {
+            LogThrottleSummary(_logger, summary.Pauses, summary.Hosts.Count, summary.Window, summary);
+        }
     }
 
     private HostGate GateOf(string host) =>
@@ -459,6 +474,9 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
     [LoggerMessage(EventId = 1112, Level = LogLevel.Debug, Message = "Archival node {Host} is rate limiting (429); pausing it for {Delay} and allowing {Limit} concurrent requests")]
     private static partial void LogHostThrottled(ILogger logger, string host, TimeSpan delay, int limit);
 
-    [LoggerMessage(EventId = 1113, Level = LogLevel.Information, Message = "Archival nodes are rate limiting (429): {Pauses} pause(s) of {Nodes} node(s) in the last {Window}, slowing them down: {Details}")]
+    [LoggerMessage(EventId = 1114, Level = LogLevel.Information, Message = "Archival nodes started rate limiting (429); slowing them down, further pauses are summarised: {Details}")]
+    private static partial void LogThrottlingStarted(ILogger logger, ThrottleSummary details);
+
+    [LoggerMessage(EventId = 1113, Level = LogLevel.Information, Message = "Archival nodes are rate limiting (429): {Pauses} pause(s) of {Nodes} node(s) within {Window}, slowing them down: {Details}")]
     private static partial void LogThrottleSummary(ILogger logger, int pauses, int nodes, TimeSpan window, ThrottleSummary details);
 }

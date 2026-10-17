@@ -11,6 +11,15 @@ internal sealed class ThrottleReport(TimeSpan interval)
     private DateTimeOffset _since = DateTimeOffset.MinValue;
     private DateTimeOffset _lastReport = DateTimeOffset.MinValue;
 
+    /// <summary>Hands out the pauses that were held back once the interval has passed, so they do not wait for the next pause to be seen.</summary>
+    public ThrottleSummary? Flush(DateTimeOffset now)
+    {
+        lock (_lock)
+        {
+            return _hosts.Count > 0 && now - _lastReport >= interval ? TakeSummary(now) : null;
+        }
+    }
+
     /// <summary>Records a new pause of a node; returns the summary to log when one is due, otherwise null.</summary>
     public ThrottleSummary? Record(string host, int limit, DateTimeOffset now)
     {
@@ -27,13 +36,18 @@ internal sealed class ThrottleReport(TimeSpan interval)
                 return null;
             }
 
-            var summary = new ThrottleSummary(
-                now - _since,
-                [.. _hosts.Select(h => new HostThrottle(h.Key, h.Value.Pauses, h.Value.Limit)).OrderByDescending(h => h.Pauses).ThenBy(h => h.Host, StringComparer.Ordinal)]);
-            _hosts.Clear();
-            _lastReport = now;
-            return summary;
+            return TakeSummary(now);
         }
+    }
+
+    private ThrottleSummary TakeSummary(DateTimeOffset now)
+    {
+        var summary = new ThrottleSummary(
+            now - _since,
+            [.. _hosts.Select(h => new HostThrottle(h.Key, h.Value.Pauses, h.Value.Limit)).OrderByDescending(h => h.Pauses).ThenBy(h => h.Host, StringComparer.Ordinal)]);
+        _hosts.Clear();
+        _lastReport = now;
+        return summary;
     }
 }
 
@@ -44,9 +58,7 @@ internal sealed record ThrottleSummary(TimeSpan Window, IReadOnlyList<HostThrott
     public int Pauses { get; } = Hosts.Sum(h => h.Pauses);
 
     /// <summary>For the log: <c>a-6s (12 pauses, limit 6), a-4y (3 pauses, limit 8)</c>.</summary>
-    public override string ToString() => Describe();
-
-    public string Describe() => string.Join(", ", Hosts.Select(h => $"{h.Host} ({h.Pauses} pause{(h.Pauses == 1 ? "" : "s")}, limit {h.Limit})"));
+    public override string ToString() => string.Join(", ", Hosts.Select(h => $"{h.Host} ({h.Pauses} pause{(h.Pauses == 1 ? "" : "s")}, limit {h.Limit})"));
 }
 
 /// <param name="Host">The node.</param>

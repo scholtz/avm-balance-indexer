@@ -206,11 +206,30 @@ public class HostGateTests
 
         Assert.InRange(gate.Limit, 24, 25);
 
-        for (var i = 0; i < 20_000; i++)
+        for (var i = 0; i < 3_000; i++)
+        {
+            gate.OnSuccess(now); // beyond a quarter above the failed level it is quick again
+        }
+
+        Assert.Equal(32, gate.Limit);
+    }
+
+    [Fact]
+    public void A_Node_That_Was_Limited_At_A_Low_Level_Is_Not_Held_Back_Above_It()
+    {
+        var gate = Gate(max: 32);
+        var now = Start;
+        now = now.Add(gate.OnThrottled(TimeSpan.FromSeconds(1), now, now).Delay); // failed at 32, limit 16
+        for (var i = 0; i < 8; i++)
+        {
+            now = now.Add(gate.OnThrottled(TimeSpan.FromSeconds(1), now, now).Delay); // failed at 16, 8, 4, 2, 1, 1...
+        }
+
+        for (var i = 0; i < 400; i++)
         {
             gate.OnSuccess(now);
         }
 
-        Assert.Equal(32, gate.Limit); // still able to reach the maximum again
+        Assert.True(gate.Limit >= 20);
     }
 }

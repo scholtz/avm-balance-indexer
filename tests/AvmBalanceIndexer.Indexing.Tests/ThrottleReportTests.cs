@@ -33,7 +33,7 @@ public class ThrottleReportTests
         Assert.Equal(TimeSpan.FromSeconds(59), summary.Window);
         Assert.Equal(4, summary.Pauses);
         Assert.Equal([new HostThrottle("http://a", 3, 3), new HostThrottle("http://b", 1, 8)], summary.Hosts);
-        Assert.Equal("http://a (3 pauses, limit 3), http://b (1 pause, limit 8)", summary.Describe());
+        Assert.Equal("http://a (3 pauses, limit 3), http://b (1 pause, limit 8)", summary.ToString());
     }
 
     [Fact]
@@ -48,5 +48,20 @@ public class ThrottleReportTests
 
         Assert.Equal([new HostThrottle("http://b", 2, 2)], summary!.Hosts);
         Assert.Equal(TimeSpan.FromSeconds(30), summary.Window);
+    }
+
+    [Fact]
+    public void Held_Back_Pauses_Are_Flushed_When_The_Interval_Has_Passed_Without_Another_Pause()
+    {
+        var report = new ThrottleReport(TimeSpan.FromMinutes(1));
+        report.Record("http://a", 6, Start);
+        report.Record("http://a", 5, Start.AddSeconds(10));
+        report.Record("http://a", 4, Start.AddSeconds(20));
+
+        Assert.Null(report.Flush(Start.AddSeconds(30)));
+        var summary = report.Flush(Start.AddSeconds(61));
+
+        Assert.Equal([new HostThrottle("http://a", 2, 4)], summary!.Hosts);
+        Assert.Null(report.Flush(Start.AddSeconds(200))); // nothing left to report
     }
 }

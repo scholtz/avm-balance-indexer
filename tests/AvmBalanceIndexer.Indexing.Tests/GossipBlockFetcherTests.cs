@@ -403,7 +403,9 @@ public class GossipBlockFetcherTests
 
         await fetcher.FetchBlockAsync(4, CancellationToken.None);
 
-        Assert.Single(logger.Entries, e => e.Level == LogLevel.Information);
+        var info = Assert.Single(logger.Entries, e => e.Level == LogLevel.Information);
+        Assert.Contains("1 pause", info.Message, StringComparison.Ordinal);
+        Assert.Contains(".test", info.Message, StringComparison.Ordinal);
         Assert.Equal(2, logger.Entries.Count(e => e.Level == LogLevel.Debug && e.Message.Contains("rate limiting", StringComparison.Ordinal)));
     }
 
