@@ -95,7 +95,7 @@ jobs:
           global-json-file: global.json
       # Indexes the first 1000 rounds of Algorand TestNet and MainNet from public archival nodes into PostgreSQL and into
       # Cassandra and compares every balance with the ledger state deltas published by a public algod.
-      - run: dotnet test tests/AvmBalanceIndexer.Live.Tests -c Release --logger "trx;LogFileName=live.trx" --results-directory TestResults --blame-hang-timeout 8m --blame-hang-dump-type mini
+      - run: dotnet test tests/AvmBalanceIndexer.Live.Tests -c Release --logger "trx;LogFileName=live.trx" --results-directory TestResults --blame-hang-timeout 8m --blame-hang-dump-type full
       - uses: actions/upload-artifact@v7
         if: always()
         with:
