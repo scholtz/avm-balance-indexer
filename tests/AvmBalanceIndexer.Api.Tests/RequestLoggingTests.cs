@@ -166,7 +166,7 @@ public sealed class RequestLoggingTests : IDisposable
         var line = Assert.Single(sink.RequestLines());
         Assert.DoesNotContain("SafePath", line.Properties.Keys);
         var path = Assert.IsType<string>(((ScalarValue)line.Properties["RequestPath"]).Value);
-        Assert.DoesNotContain("\n", path, StringComparison.Ordinal);
+        Assert.Equal("/x\\u000a[INF] forged", path); // the escape happened, not just an absence of a newline
         foreach (var property in line.Properties.Values.OfType<ScalarValue>().Select(static v => v.Value).OfType<string>())
         {
             Assert.DoesNotContain("\n", property, StringComparison.Ordinal);
