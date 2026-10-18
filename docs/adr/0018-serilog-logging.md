@@ -18,7 +18,7 @@ log collector could parse. The code already logs with `LoggerMessage` templates,
 - The console sink is the default: text for people, compact JSON (`RenderedCompactJsonFormatter`, `Logging:Format=Json`) for collectors; the Helm chart defaults to JSON. A configured
   `Serilog:WriteTo` replaces the default console, so any Serilog sink package can be added without changing code.
 - Events carry `Service` (`avm-api`, `avm-worker`) and `Chain`.
-- The API logs one line per request with Serilog.AspNetCore: Information; what a client can cause at will (health probes, `429`, abandoned requests) at Debug; 5xx and exceptions at Error. The path is logged with control characters escaped in the message (no forged lines in the default text format; a custom template that prints the raw `RequestPath` property is the operator's choice). The middleware is given the host's logger (not the
+- The API logs one line per request with Serilog.AspNetCore: Information; what a client can cause at will (health probes, `429`, abandoned requests) at Debug; 5xx and exceptions at Error. The path is logged with control characters escaped in the message (no forged lines in the default text format; the `RequestPath` property itself holds the escaped path, there is no raw copy). The middleware is given the host's logger (not the
   process-wide static one), so several hosts in one process (tests) do not write into each other's sinks.
 
 ## Consequences
