@@ -62,7 +62,7 @@ public class Arc200RoundsTests(ITestOutputHelper output)
                     var theirs = (await reference.Arc200TransfersInRoundAsync(round, token)).Where(static t => !t.Amount.IsZero).ToList();
                     return (Round: round, Ours: ours, Theirs: theirs);
                 }
-                catch (Exception ex) when (!token.IsCancellationRequested)
+                catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     Interlocked.CompareExchange(ref failure, ex, null);
                     await deadline.CancelAsync(); // one failed round fails the test: stop the others
