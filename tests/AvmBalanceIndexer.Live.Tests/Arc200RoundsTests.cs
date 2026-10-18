@@ -16,7 +16,13 @@ namespace AvmBalanceIndexer.Live.Tests;
 /// </summary>
 public class Arc200RoundsTests(ITestOutputHelper output)
 {
-    private const int SampleTransfers = 1000;
+    // The ARC indexer lists transfers up to a few thousand rounds behind the tip, but the archival gossip nodes lag further behind (they did not have
+    // a block 4,200 rounds old on 2026-10-18, which made this test wait for blocks that never came). Only rounds this far behind the tip are used.
+    private const int ListedTransfers = 20_000;
+    private const ulong BehindTip = 20_000;
+    private const int SampledRounds = 150;
+
+    private static readonly TimeSpan Budget = TimeSpan.FromMinutes(10);
 
     private static readonly Address Zero = new(new byte[Address.Length]);
 
@@ -28,27 +34,55 @@ public class Arc200RoundsTests(ITestOutputHelper output)
         var options = new AlgorandChainOptions { Chain = ChainId.Voi, MaxAttempts = 40, BaseRetryDelay = TimeSpan.FromMilliseconds(200), MaxRetryDelay = TimeSpan.FromSeconds(3) };
         var adapter = AlgorandChainFactory.Create(options, http, NullLoggerFactory.Instance);
 
-        // The newest transfers the ARC indexer lists give rounds that certainly contain ARC-200 traffic.
-        var sampled = await reference.RecentArc200RoundsAsync(SampleTransfers);
+        // The public nodes decide how long this takes. A deadline and fail-fast keep a slow or unavailable fleet from holding the test run
+        // (and the CI job) for hours: Task.WhenAll alone would wait for every sampled round to exhaust its retries.
+        using var deadline = new CancellationTokenSource(Budget);
+        var token = deadline.Token;
+        Exception? failure = null;
+
+        // The newest transfers the ARC indexer lists that the archival nodes can still serve give rounds that certainly contain ARC-200 traffic.
+        var tip = await adapter.GetLatestRoundAsync(token);
+        Assert.True(tip > BehindTip, $"The Voi tip {tip} is not beyond the {BehindTip} rounds this test stays behind it.");
+        var sampled = (await reference.RecentArc200RoundsAsync(ListedTransfers, token)).Where(round => round <= tip - BehindTip).Take(SampledRounds).ToList();
+        Assert.True(sampled.Count > 0, $"The ARC indexer lists no transfers at least {BehindTip} rounds behind the tip ({tip}).");
         var normalizer = new AlgoEffectNormalizer();
         using var gate = new SemaphoreSlim(8);
 
-        var rounds = await Task.WhenAll(sampled.Select(async round =>
+        (ulong Round, List<(ulong Contract, Address From, Address To, BigInteger Amount)> Ours, List<ReferenceArc200Transfer> Theirs)[] rounds;
+        try
         {
-            await gate.WaitAsync();
-            try
+            rounds = await Task.WhenAll(sampled.Select(async round =>
             {
-                var previous = await adapter.FetchBlockAsync(round - 1, CancellationToken.None);
-                var block = await adapter.FetchBlockAsync(round, CancellationToken.None);
-                var ours = Transfers(normalizer.NormalizeBlock(block, RewardsState.FromHeader(previous.Block), AssetDirectory.Empty).Deltas);
-                var theirs = (await reference.Arc200TransfersInRoundAsync(round)).Where(static t => !t.Amount.IsZero).ToList();
-                return (Round: round, Ours: ours, Theirs: theirs);
-            }
-            finally
+                await gate.WaitAsync(token);
+                try
+                {
+                    var previous = await adapter.FetchBlockAsync(round - 1, token);
+                    var block = await adapter.FetchBlockAsync(round, token);
+                    var ours = Transfers(normalizer.NormalizeBlock(block, RewardsState.FromHeader(previous.Block), AssetDirectory.Empty).Deltas);
+                    var theirs = (await reference.Arc200TransfersInRoundAsync(round, token)).Where(static t => !t.Amount.IsZero).ToList();
+                    return (Round: round, Ours: ours, Theirs: theirs);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    Interlocked.CompareExchange(ref failure, ex, null);
+                    await deadline.CancelAsync(); // one failed round fails the test: stop the others
+                    throw;
+                }
+                finally
+                {
+                    gate.Release();
+                }
+            }));
+        }
+        catch (Exception) when (token.IsCancellationRequested)
+        {
+            if (failure is not null)
             {
-                gate.Release();
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw(); // the cause, not the cancellation it triggered
             }
-        }));
+
+            throw new TimeoutException($"The ARC-200 window of {sampled.Count} Voi rounds could not be fetched within {Budget}: the Voi archival nodes are too slow, rate limiting or missing blocks.");
+        }
 
         var problems = new List<string>();
         var matched = 0;

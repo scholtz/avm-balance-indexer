@@ -215,18 +215,18 @@ public sealed class ReferenceNode : IDisposable
     }
 
     /// <summary>Distinct rounds of the newest ARC-200 transfers the ARC indexer lists, newest first.</summary>
-    public async Task<IReadOnlyList<ulong>> RecentArc200RoundsAsync(int transfers)
+    public async Task<IReadOnlyList<ulong>> RecentArc200RoundsAsync(int transfers, CancellationToken cancellationToken = default)
     {
         var url = _arc200 ?? throw new InvalidOperationException("This reference has no ARC-200 indexer.");
-        using var json = await GetJsonAsync($"{url}/arc200/transfers?limit={transfers}").ConfigureAwait(false);
+        using var json = await GetJsonAsync($"{url}/arc200/transfers?limit={transfers}", cancellationToken).ConfigureAwait(false);
         return [.. json.RootElement.GetProperty("transfers").EnumerateArray().Select(static t => t.GetProperty("round").GetUInt64()).Distinct().OrderDescending()];
     }
 
     /// <summary>The ARC-200 transfers one round contains as reported by the Voi ARC indexer (Mimir).</summary>
-    public async Task<IReadOnlyList<ReferenceArc200Transfer>> Arc200TransfersInRoundAsync(ulong round)
+    public async Task<IReadOnlyList<ReferenceArc200Transfer>> Arc200TransfersInRoundAsync(ulong round, CancellationToken cancellationToken = default)
     {
         var url = _arc200 ?? throw new InvalidOperationException("This reference has no ARC-200 indexer.");
-        using var json = await GetJsonAsync($"{url}/arc200/transfers?round={round}&limit=1000").ConfigureAwait(false);
+        using var json = await GetJsonAsync($"{url}/arc200/transfers?round={round}&limit=1000", cancellationToken).ConfigureAwait(false);
         return
         [
             .. json.RootElement.GetProperty("transfers").EnumerateArray().Select(static t => new ReferenceArc200Transfer(
@@ -277,18 +277,18 @@ public sealed class ReferenceNode : IDisposable
         throw new InvalidDataException("Delta document has no Accts object.");
     }
 
-    private async Task<JsonDocument> GetJsonAsync(string url) => JsonDocument.Parse(await GetTextAsync(url).ConfigureAwait(false));
+    private async Task<JsonDocument> GetJsonAsync(string url, CancellationToken cancellationToken = default) => JsonDocument.Parse(await GetTextAsync(url, cancellationToken).ConfigureAwait(false));
 
-    private async Task<string> GetTextAsync(string url)
+    private async Task<string> GetTextAsync(string url, CancellationToken cancellationToken = default)
     {
         for (var attempt = 0; ; attempt++)
         {
             try
             {
-                using var response = await _http.GetAsync(new Uri(url)).ConfigureAwait(false);
+                using var response = await _http.GetAsync(new Uri(url), cancellationToken).ConfigureAwait(false);
                 if (response.IsSuccessStatusCode)
                 {
-                    return await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                    return await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
                 }
 
                 var retryable = response.StatusCode is HttpStatusCode.TooManyRequests or >= HttpStatusCode.InternalServerError;
@@ -300,11 +300,11 @@ public sealed class ReferenceNode : IDisposable
             catch (HttpRequestException) when (attempt < RetryDelays.Length)
             {
             }
-            catch (TaskCanceledException) when (attempt < RetryDelays.Length)
+            catch (TaskCanceledException) when (attempt < RetryDelays.Length && !cancellationToken.IsCancellationRequested)
             {
             }
 
-            await Task.Delay(RetryDelays[attempt]).ConfigureAwait(false);
+            await Task.Delay(RetryDelays[attempt], cancellationToken).ConfigureAwait(false);
         }
     }
 }
