@@ -128,9 +128,15 @@ app.UseSerilogRequestLogging(options =>
     options.Logger = app.Services.GetRequiredService<Serilog.ILogger>().ForContext("SourceContext", "Serilog.AspNetCore.RequestLoggingMiddleware"); // the host's logger, not the process-wide static one
 
     // The path is client input: control characters must not be able to start a forged line in the text format.
-    options.MessageTemplate = "HTTP {RequestMethod} {SafePath} responded {StatusCode} in {Elapsed:0.0000} ms";
-    options.EnrichDiagnosticContext = static (diagnosticContext, httpContext) =>
-        diagnosticContext.Set("SafePath", LogSanitizer.Escape(httpContext.Request.Path.Value));
+    // The properties are supplied directly (not through the diagnostic context), and RequestPath is the only path property of the event.
+    options.MessageTemplate = "HTTP {RequestMethod} {RequestPath} responded {StatusCode} in {Elapsed:0.0000} ms";
+    options.GetMessageTemplateProperties = static (httpContext, requestPath, elapsedMs, statusCode) =>
+    [
+        new Serilog.Events.LogEventProperty("RequestMethod", new Serilog.Events.ScalarValue(LogSanitizer.Escape(httpContext.Request.Method))),
+        new Serilog.Events.LogEventProperty("RequestPath", new Serilog.Events.ScalarValue(LogSanitizer.Escape(requestPath))),
+        new Serilog.Events.LogEventProperty("StatusCode", new Serilog.Events.ScalarValue(statusCode)),
+        new Serilog.Events.LogEventProperty("Elapsed", new Serilog.Events.ScalarValue(elapsedMs)),
+    ];
 
     // One line per request. What a client can cause at will (probes, rate-limited requests, requests it abandoned, any other 4xx) stays at Debug so it cannot
     // flood the log or raise error alerts; a server failure is an error.

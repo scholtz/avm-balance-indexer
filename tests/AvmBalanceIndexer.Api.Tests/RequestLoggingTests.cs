@@ -155,4 +155,21 @@ public sealed class RequestLoggingTests : IDisposable
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         Assert.Equal(LogEventLevel.Debug, Assert.Single(sink.RequestLines()).Level);
     }
+
+    [Fact]
+    public async Task The_Path_Is_Escaped_In_The_Property_And_No_Other_Property_Carries_It()
+    {
+        var (client, sink) = Create();
+
+        using var response = await client.GetAsync(new Uri("/x%0A[INF]%20forged", UriKind.Relative));
+
+        var line = Assert.Single(sink.RequestLines());
+        Assert.DoesNotContain("SafePath", line.Properties.Keys);
+        var path = Assert.IsType<string>(((ScalarValue)line.Properties["RequestPath"]).Value);
+        Assert.Equal("/x\\u000a[INF] forged", path); // the escape happened, not just an absence of a newline
+        foreach (var property in line.Properties.Values.OfType<ScalarValue>().Select(static v => v.Value).OfType<string>())
+        {
+            Assert.DoesNotContain("\n", property, StringComparison.Ordinal);
+        }
+    }
 }
