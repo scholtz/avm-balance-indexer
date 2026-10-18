@@ -64,6 +64,7 @@ jobs:
   live-network:
     name: Live network (first 1000 rounds)
     runs-on: ubuntu-latest
+    timeout-minutes: 30 # a normal run takes 5-8 minutes; a stuck public node must not hold the runner for hours
     needs: build-test
     services:
       postgres:
@@ -95,7 +96,7 @@ jobs:
           global-json-file: global.json
       # Indexes the first 1000 rounds of Algorand TestNet and MainNet from public archival nodes into PostgreSQL and into
       # Cassandra and compares every balance with the ledger state deltas published by a public algod.
-      - run: dotnet test tests/AvmBalanceIndexer.Live.Tests -c Release --logger "trx;LogFileName=live.trx" --results-directory TestResults
+      - run: dotnet test tests/AvmBalanceIndexer.Live.Tests -c Release --logger "trx;LogFileName=live.trx" --results-directory TestResults --logger "console;verbosity=normal" --blame-hang-timeout 15m --blame-hang-dump-type none
       - uses: actions/upload-artifact@v7
         if: always()
         with:
