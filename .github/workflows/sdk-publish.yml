@@ -134,7 +134,7 @@ jobs:
             404) echo "publish=true" >> "$GITHUB_OUTPUT" ;;
             *) echo "::error title=PyPI::The registry answered HTTP $status when asked for avm-balance-indexer $VERSION; not guessing"; exit 1 ;;
           esac
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         if: steps.need.outputs.publish == 'true'
         with:
           python-version: "3.13"
