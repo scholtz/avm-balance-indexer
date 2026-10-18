@@ -3,7 +3,7 @@
 Typed client for the [AVM Balance Indexer](../../README.md): token balances, holders and history for **Algorand MainNet**, **Algorand TestNet** and **Voi**.
 Native ALGO/VOI, ASAs (including ARC-20 Smart ASAs) and ARC-200 application tokens, at the end of any indexed round.
 
-- Go 1.22+, standard `net/http`, `context` everywhere, one small dependency (`oapi-codegen/runtime`, for the UUID type).
+- Go 1.24+, standard `net/http`, `context` everywhere, one small dependency (`oapi-codegen/runtime`, for the UUID type).
 - Request and response types and the raw HTTP client are **generated from the OpenAPI specification** of the service ([oapi-codegen](https://github.com/oapi-codegen/oapi-codegen)); a small hand-written layer adds defaults, pagination and errors.
 - Works out of the box against the public deployments and against your own.
 
