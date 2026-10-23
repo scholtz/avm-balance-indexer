@@ -76,6 +76,14 @@ public sealed class AlgorandChainOptions : IValidatableObject
     [Range(typeof(TimeSpan), "00:00:01", "01:00:00")]
     public TimeSpan ThrottleTimeout { get; set; } = TimeSpan.FromMinutes(5);
 
+    /// <summary>
+    /// Rounds within this distance of the chain tip are also fetched from relays discovered through DNS (they hold only recent
+    /// blocks), not just from archival nodes. Older rounds always go to archival nodes. 0 turns relays off. Has no effect when
+    /// <see cref="GossipHosts"/> is set.
+    /// </summary>
+    [Range(0, 1_000)]
+    public int RecentRoundsWindow { get; set; } = 100;
+
     /// <summary>Upper bound for one block response, protecting memory from misbehaving nodes.</summary>
     [Range(1024, 512 * 1024 * 1024)]
     public int MaxBlockBytes { get; set; } = 64 * 1024 * 1024;

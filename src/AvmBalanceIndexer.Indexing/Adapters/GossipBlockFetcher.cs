@@ -45,7 +45,16 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
         _throttleReport = new ThrottleReport(options.ThrottleLogInterval);
     }
 
-    public async Task<BlockData> FetchBlockAsync(ulong round, CancellationToken cancellationToken)
+    /// <summary>Relays that fail (not merely lack the block) within one fetch before the rest of them are left out of it.</summary>
+    private const int MaxRelayFailuresPerFetch = 2;
+
+    public Task<BlockData> FetchBlockAsync(ulong round, CancellationToken cancellationToken) =>
+        FetchBlockAsync(round, null, cancellationToken);
+
+    public Task<BlockData> FetchBlockAsync(ulong round, ulong latestRound, CancellationToken cancellationToken) =>
+        FetchBlockAsync(round, (ulong?)latestRound, cancellationToken);
+
+    private async Task<BlockData> FetchBlockAsync(ulong round, ulong? latestRound, CancellationToken cancellationToken)
     {
         IReadOnlyList<string> discovered;
         try
@@ -62,9 +71,14 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
             throw new BlockFetchException("No archival gossip nodes are available: none are configured, or DNS discovery is failing. Retrying.", round);
         }
 
-        var hosts = OrderHosts(discovered);
+        var relays = latestRound is { } tip && IsRecent(round, tip)
+            ? await RelaysAsync(discovered, cancellationToken).ConfigureAwait(false)
+            : [];
+        var hosts = OrderHosts(relays.Count == 0 ? discovered : [.. discovered, .. relays]);
         Exception? last = null;
-        var notFound = 0;
+        var notFound = 0; // archival nodes only: a relay prunes and lags, so its "not here" says nothing about the block
+        var relayFailures = 0;
+        var missedRelays = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var errors = 0;
         var badData = 0;
         var throttling = new ThrottleState();
@@ -72,7 +86,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
         // A rate-limited answer is not an attempt: the node is paused and the request goes to the next one, or waits.
         for (var attempt = 0; attempt < _options.MaxAttempts;)
         {
-            var (host, gate, entered) = await AcquireHostAsync(hosts, attempt, round, throttling, cancellationToken).ConfigureAwait(false);
+            var (host, gate, entered) = await AcquireHostAsync(hosts, missedRelays, attempt, round, throttling, cancellationToken).ConfigureAwait(false);
             try
             {
                 var payload = await DownloadTimedAsync(host, round, cancellationToken).ConfigureAwait(false);
@@ -85,6 +99,21 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 throw;
+            }
+            catch (HostThrottledException ex) when (relays.Contains(host))
+            {
+                // The relay slows down like any node, but its pause is not this fetch's problem: it is left out and neither waited for
+                // nor counted towards the throttle timeout, which is about the archival nodes that must carry the block.
+                var relayNow = _time.GetUtcNow();
+                var relayResult = gate.OnThrottled(ex.RetryAfter, entered, relayNow);
+                if (relayResult.NewPause)
+                {
+                    LogHostThrottled(_logger, host, relayResult.Delay, relayResult.Limit);
+                    ReportThrottling(_throttleReport.Record(host, relayResult.Limit, relayNow));
+                }
+
+                missedRelays.Add(host);
+                continue;
             }
             catch (HostThrottledException ex)
             {
@@ -107,6 +136,14 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
 
                 continue;
             }
+            catch (BlockNotOnHostException) when (relays.Contains(host))
+            {
+                // Asked once and skipped for the rest of this fetch, without using up an attempt or waiting: relays are many and
+                // answer quickly, and the archival nodes must still be reached when several of them have already pruned the block.
+                missedRelays.Add(host);
+                LogNotOnHost(_logger, round, host, attempt + 1);
+                continue;
+            }
             catch (BlockNotOnHostException ex)
             {
                 last = ex;
@@ -115,6 +152,22 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
             }
             catch (Exception ex) when (ex is HttpRequestException or BlockValidationException or TimeoutException or IOException or UriFormatException)
             {
+                if (relays.Contains(host))
+                {
+                    // Relays are optional extra capacity: a failing one is cooled down and left out of this fetch without using up an
+                    // attempt, and says nothing about the archival fleet.
+                    missedRelays.Add(host);
+                    _cooldownUntil[host] = _time.GetUtcNow() + _options.HostCooldown;
+                    LogAttemptFailed(_logger, ex, round, host, attempt + 1, _options.MaxAttempts);
+                    if (++relayFailures >= MaxRelayFailuresPerFetch)
+                    {
+                        // Several dead relays in a row (each may have taken a whole request timeout): the archival nodes go first now.
+                        missedRelays.UnionWith(relays);
+                    }
+
+                    continue;
+                }
+
                 last = ex;
                 if (ex is BlockValidationException)
                 {
@@ -151,6 +204,25 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
         throw new BlockFetchException($"Block {round} could not be fetched after {_options.MaxAttempts} attempts.", round, last);
     }
 
+    /// <summary>Relays only hold the newest blocks, so they are asked only for rounds within the configured window of the tip.</summary>
+    private bool IsRecent(ulong round, ulong latestRound) =>
+        _options.RecentRoundsWindow > 0 && (round >= latestRound || latestRound - round <= (ulong)_options.RecentRoundsWindow);
+
+    /// <summary>The relays that are not archival hosts too; a relay lookup that fails costs nothing but the extra capacity.</summary>
+    private async Task<HashSet<string>> RelaysAsync(IReadOnlyList<string> archival, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var relays = await _hosts.GetRelayHostsAsync(cancellationToken).ConfigureAwait(false);
+            return new HashSet<string>(relays.Except(archival, StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogRelaysSkipped(_logger, ex);
+            return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
     /// <summary>What one fetch has experienced of rate limits: the time it was throttled (rate-limited requests and waiting for paused nodes) and the last answer.</summary>
     private sealed class ThrottleState
     {
@@ -182,7 +254,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
     private BlockFetchException ThrottleTimedOut(ulong round, Exception? last)
     {
         ReportThrottling(_throttleReport.Flush(_time.GetUtcNow(), force: true)); // the failure should come with the summary that explains it
-        return new($"Block {round}: the archival gossip nodes kept rate limiting (HTTP 429) for more than {_options.ThrottleTimeout}. " +
+        return new($"Block {round}: the gossip nodes kept rate limiting (HTTP 429) for more than {_options.ThrottleTimeout}. " +
             "Lower Indexer:FetchConcurrency or add archival nodes (Algorand:GossipHosts).", round, last);
     }
 
@@ -192,10 +264,12 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
     /// call waits: briefly while nodes are merely full, until the earliest pause ends while every node is paused (the time spent
     /// in the latter is bounded by <see cref="AlgorandChainOptions.ThrottleTimeout"/>).
     /// </summary>
-    private async Task<(string Host, HostGate Gate, DateTimeOffset Entered)> AcquireHostAsync(string[] hosts, int attempt, ulong round, ThrottleState throttling, CancellationToken cancellationToken)
+    private async Task<(string Host, HostGate Gate, DateTimeOffset Entered)> AcquireHostAsync(string[] ordered, HashSet<string> skipped, int attempt, ulong round, ThrottleState throttling, CancellationToken cancellationToken)
     {
         while (true)
         {
+            // Relays that dropped out of this fetch leave no gap in the rotation: attempt N starts at the Nth host still in play.
+            var hosts = skipped.Count == 0 ? ordered : [.. ordered.Where(h => !skipped.Contains(h))];
             var now = _time.GetUtcNow();
             var earliest = DateTimeOffset.MaxValue;
             var allPaused = true;
@@ -469,18 +543,21 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
         public TimeSpan? RetryAfter { get; } = retryAfter;
     }
 
+    [LoggerMessage(EventId = 1115, Level = LogLevel.Debug, Message = "Relays could not be looked up; fetching from the archival nodes only")]
+    private static partial void LogRelaysSkipped(ILogger logger, Exception exception);
+
     [LoggerMessage(EventId = 1110, Level = LogLevel.Debug, Message = "Block {Round} not on {Host} (attempt {Attempt})")]
     private static partial void LogNotOnHost(ILogger logger, ulong round, string host, int attempt);
 
     [LoggerMessage(EventId = 1111, Level = LogLevel.Warning, Message = "Fetching block {Round} from {Host} failed (attempt {Attempt}/{MaxAttempts})")]
     private static partial void LogAttemptFailed(ILogger logger, Exception exception, ulong round, string host, int attempt, int maxAttempts);
 
-    [LoggerMessage(EventId = 1112, Level = LogLevel.Debug, Message = "Archival node {Host} is rate limiting (429); pausing it for {Delay} and allowing {Limit} concurrent requests")]
+    [LoggerMessage(EventId = 1112, Level = LogLevel.Debug, Message = "Gossip node {Host} is rate limiting (429); pausing it for {Delay} and allowing {Limit} concurrent requests")]
     private static partial void LogHostThrottled(ILogger logger, string host, TimeSpan delay, int limit);
 
-    [LoggerMessage(EventId = 1113, Level = LogLevel.Information, Message = "Archival nodes are rate limiting (429): {Pauses} pause(s) of {Nodes} node(s) within {Window}, slowing them down: {Details}")]
+    [LoggerMessage(EventId = 1113, Level = LogLevel.Information, Message = "Gossip nodes are rate limiting (429): {Pauses} pause(s) of {Nodes} node(s) within {Window}, slowing them down: {Details}")]
     private static partial void LogThrottleSummary(ILogger logger, int pauses, int nodes, TimeSpan window, ThrottleSummary details);
 
-    [LoggerMessage(EventId = 1114, Level = LogLevel.Information, Message = "Archival nodes started rate limiting (429); slowing them down, further pauses are summarised: {Details}")]
+    [LoggerMessage(EventId = 1114, Level = LogLevel.Information, Message = "Gossip nodes started rate limiting (429); slowing them down, further pauses are summarised: {Details}")]
     private static partial void LogThrottlingStarted(ILogger logger, ThrottleSummary details);
 }

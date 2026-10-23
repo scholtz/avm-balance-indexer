@@ -61,6 +61,9 @@ public sealed class AlgorandChainAdapter : IChainAdapter, IDisposable
     public Task<BlockData> FetchBlockAsync(ulong round, CancellationToken cancellationToken) =>
         _blocks.FetchBlockAsync(round, cancellationToken);
 
+    public Task<BlockData> FetchBlockAsync(ulong round, ulong latestRound, CancellationToken cancellationToken) =>
+        _blocks.FetchBlockAsync(round, latestRound, cancellationToken);
+
     public void Dispose()
     {
         _algodHttp.Dispose();
