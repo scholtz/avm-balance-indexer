@@ -574,6 +574,48 @@ public class GossipBlockFetcherTests
         }
     }
 
+    [Fact]
+    public async Task Several_Dead_Relays_Are_Not_All_Tried_Before_The_Archival_Nodes()
+    {
+        string[] relays = [.. Enumerable.Range(1, 7).Select(i => $"http://relay{i}.test:4160")];
+        var relayCalls = 0;
+        var fetcher = CreateFetcher(
+            (request, _) =>
+            {
+                if (request.RequestUri!.Host == "archive.test")
+                {
+                    return Task.FromResult(Ok(Chain.Encode(920, [])));
+                }
+
+                Interlocked.Increment(ref relayCalls);
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.InternalServerError));
+            },
+            maxAttempts: 1,
+            provider: new TieredHosts(["http://archive.test:4160"], relays));
+
+        for (var i = 0; i < 20; i++)
+        {
+            relayCalls = 0;
+            await fetcher.FetchBlockAsync(920, 1000, CancellationToken.None);
+            Assert.True(relayCalls <= 2, $"{relayCalls} relays were tried in one fetch");
+        }
+    }
+
+    [Fact]
+    public async Task Rate_Limiting_Relays_Neither_Delay_The_Fetch_Nor_Count_Towards_The_Throttle_Timeout()
+    {
+        string[] relays = [.. Enumerable.Range(1, 7).Select(i => $"http://relay{i}.test:4160")];
+        var fetcher = CreateFetcher(
+            (request, _) => Task.FromResult(request.RequestUri!.Host == "archive.test" ? Ok(Chain.Encode(920, [])) : Throttled(TimeSpan.FromSeconds(30))),
+            throttleTimeout: TimeSpan.FromSeconds(1),
+            provider: new TieredHosts(["http://archive.test:4160"], relays));
+
+        for (var i = 0; i < 20; i++)
+        {
+            Assert.Equal(920UL, (await fetcher.FetchBlockAsync(920, 1000, CancellationToken.None)).Round);
+        }
+    }
+
     private sealed class FailingHosts : IGossipHostProvider
     {
         public Task<IReadOnlyList<string>> GetHostsAsync(CancellationToken cancellationToken) =>

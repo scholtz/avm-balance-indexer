@@ -45,6 +45,9 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
         _throttleReport = new ThrottleReport(options.ThrottleLogInterval);
     }
 
+    /// <summary>Relays that fail (not merely lack the block) within one fetch before the rest of them are left out of it.</summary>
+    private const int MaxRelayFailuresPerFetch = 2;
+
     public Task<BlockData> FetchBlockAsync(ulong round, CancellationToken cancellationToken) =>
         FetchBlockAsync(round, null, cancellationToken);
 
@@ -74,6 +77,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
         var hosts = OrderHosts(relays.Count == 0 ? discovered : [.. discovered, .. relays]);
         Exception? last = null;
         var notFound = 0; // archival nodes only: a relay prunes and lags, so its "not here" says nothing about the block
+        var relayFailures = 0;
         var missedRelays = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var errors = 0;
         var badData = 0;
@@ -95,6 +99,14 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 throw;
+            }
+            catch (HostThrottledException ex) when (relays.Contains(host))
+            {
+                // The relay slows down like any node, but its pause is not this fetch's problem: it is left out and neither waited for
+                // nor counted towards the throttle timeout, which is about the archival nodes that must carry the block.
+                gate.OnThrottled(ex.RetryAfter, entered, _time.GetUtcNow());
+                missedRelays.Add(host);
+                continue;
             }
             catch (HostThrottledException ex)
             {
@@ -140,6 +152,12 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
                     missedRelays.Add(host);
                     _cooldownUntil[host] = _time.GetUtcNow() + _options.HostCooldown;
                     LogAttemptFailed(_logger, ex, round, host, attempt + 1, _options.MaxAttempts);
+                    if (++relayFailures >= MaxRelayFailuresPerFetch)
+                    {
+                        // Several dead relays in a row (each may have taken a whole request timeout): the archival nodes go first now.
+                        missedRelays.UnionWith(relays);
+                    }
+
                     continue;
                 }
 
