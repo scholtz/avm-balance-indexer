@@ -508,6 +508,17 @@ public class GossipBlockFetcherTests
         Assert.IsNotType<BlockNotAvailableException>(error);
     }
 
+    [Fact]
+    public async Task Failing_Relays_Do_Not_Turn_A_Block_That_Is_Not_Out_Yet_Into_A_Failure()
+    {
+        var fetcher = CreateFetcher(
+            (request, _) => Task.FromResult(new HttpResponseMessage(request.RequestUri!.Host.StartsWith("relay", StringComparison.Ordinal) ? HttpStatusCode.InternalServerError : HttpStatusCode.NotFound)),
+            maxAttempts: 6,
+            provider: new TieredHosts(["http://archive.test:4160"], ["http://relay1.test:4160", "http://relay2.test:4160", "http://relay3.test:4160"]));
+
+        await Assert.ThrowsAsync<BlockNotAvailableException>(() => fetcher.FetchBlockAsync(1000, 1000, CancellationToken.None));
+    }
+
     private sealed class FailingHosts : IGossipHostProvider
     {
         public Task<IReadOnlyList<string>> GetHostsAsync(CancellationToken cancellationToken) =>
