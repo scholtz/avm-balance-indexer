@@ -86,7 +86,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
         // A rate-limited answer is not an attempt: the node is paused and the request goes to the next one, or waits.
         for (var attempt = 0; attempt < _options.MaxAttempts;)
         {
-            var (host, gate, entered) = await AcquireHostAsync(hosts, missedRelays, attempt + missedRelays.Count, round, throttling, cancellationToken).ConfigureAwait(false);
+            var (host, gate, entered) = await AcquireHostAsync(hosts, missedRelays, attempt, round, throttling, cancellationToken).ConfigureAwait(false);
             try
             {
                 var payload = await DownloadTimedAsync(host, round, cancellationToken).ConfigureAwait(false);
@@ -104,7 +104,14 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
             {
                 // The relay slows down like any node, but its pause is not this fetch's problem: it is left out and neither waited for
                 // nor counted towards the throttle timeout, which is about the archival nodes that must carry the block.
-                gate.OnThrottled(ex.RetryAfter, entered, _time.GetUtcNow());
+                var relayNow = _time.GetUtcNow();
+                var relayResult = gate.OnThrottled(ex.RetryAfter, entered, relayNow);
+                if (relayResult.NewPause)
+                {
+                    LogHostThrottled(_logger, host, relayResult.Delay, relayResult.Limit);
+                    ReportThrottling(_throttleReport.Record(host, relayResult.Limit, relayNow));
+                }
+
                 missedRelays.Add(host);
                 continue;
             }
@@ -257,21 +264,18 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
     /// call waits: briefly while nodes are merely full, until the earliest pause ends while every node is paused (the time spent
     /// in the latter is bounded by <see cref="AlgorandChainOptions.ThrottleTimeout"/>).
     /// </summary>
-    private async Task<(string Host, HostGate Gate, DateTimeOffset Entered)> AcquireHostAsync(string[] hosts, HashSet<string> skipped, int attempt, ulong round, ThrottleState throttling, CancellationToken cancellationToken)
+    private async Task<(string Host, HostGate Gate, DateTimeOffset Entered)> AcquireHostAsync(string[] ordered, HashSet<string> skipped, int attempt, ulong round, ThrottleState throttling, CancellationToken cancellationToken)
     {
         while (true)
         {
+            // Relays that dropped out of this fetch leave no gap in the rotation: attempt N starts at the Nth host still in play.
+            var hosts = skipped.Count == 0 ? ordered : [.. ordered.Where(h => !skipped.Contains(h))];
             var now = _time.GetUtcNow();
             var earliest = DateTimeOffset.MaxValue;
             var allPaused = true;
             for (var i = 0; i < hosts.Length; i++)
             {
                 var host = hosts[(attempt + i) % hosts.Length];
-                if (skipped.Contains(host))
-                {
-                    continue; // a relay that already said "not here" in this fetch
-                }
-
                 var gate = GateOf(host);
                 if (gate.TryEnter(now))
                 {

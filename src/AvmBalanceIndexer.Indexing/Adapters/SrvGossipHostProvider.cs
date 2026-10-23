@@ -20,9 +20,11 @@ public sealed partial class SrvGossipHostProvider(
     private static readonly TimeSpan RetryRelaysAfterFailure = TimeSpan.FromMinutes(5);
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
     private readonly Func<GossipNodePurpose, GossipNetwork, string[]> _resolve = resolver ?? ResolveWithSdk;
-    private readonly HostList _archival = new(GossipNodePurpose.Archival, RetryEmptyAfterFailure);
+    private readonly HostList _archival = new(GossipNodePurpose.Archival, RetryEmptyAfterFailure, RetryStaleAfterFailure);
     // A network may have no relay record at all, so a failed lookup is not repeated every few seconds.
-    private readonly HostList _relays = new(GossipNodePurpose.Relay, refreshInterval < RetryRelaysAfterFailure ? refreshInterval : RetryRelaysAfterFailure);
+    private readonly HostList _relays = new(GossipNodePurpose.Relay, RelayRetry(refreshInterval), RelayRetry(refreshInterval));
+
+    private static TimeSpan RelayRetry(TimeSpan refreshInterval) => refreshInterval < RetryRelaysAfterFailure ? refreshInterval : RetryRelaysAfterFailure;
 
     private static string[] ResolveWithSdk(GossipNodePurpose purpose, GossipNetwork network) =>
         new GossipHttpConfiguration(purpose, network).Hosts;
@@ -85,7 +87,7 @@ public sealed partial class SrvGossipHostProvider(
                 if (directory.Snapshot is { Hosts.Length: > 0 } stale)
                 {
                     // Keep serving the last known hosts and look again soon.
-                    directory.Snapshot = stale with { Expires = _time.GetUtcNow() + RetryStaleAfterFailure };
+                    directory.Snapshot = stale with { Expires = _time.GetUtcNow() + directory.RetryStaleAfter };
                     LogRefreshFailed(logger, ex, directory.Name, network, stale.Hosts.Length);
                 }
                 else
@@ -118,11 +120,13 @@ public sealed partial class SrvGossipHostProvider(
         _relays.Gate.Dispose();
     }
 
-    private sealed class HostList(GossipNodePurpose purpose, TimeSpan retryEmptyAfter)
+    private sealed class HostList(GossipNodePurpose purpose, TimeSpan retryEmptyAfter, TimeSpan retryStaleAfter)
     {
         public GossipNodePurpose Purpose { get; } = purpose;
 
         public TimeSpan RetryEmptyAfter { get; } = retryEmptyAfter;
+
+        public TimeSpan RetryStaleAfter { get; } = retryStaleAfter;
 
         public string Name { get; } = purpose == GossipNodePurpose.Relay ? "relay" : "archival";
 
@@ -139,6 +143,6 @@ public sealed partial class SrvGossipHostProvider(
     [LoggerMessage(EventId = 1101, Level = LogLevel.Warning, Message = "DNS SRV refresh of {Kind} nodes for {Network} failed; keeping {Count} previously discovered nodes")]
     private static partial void LogRefreshFailed(ILogger logger, Exception exception, string kind, GossipNetwork network, int count);
 
-    [LoggerMessage(EventId = 1102, Level = LogLevel.Warning, Message = "No relays could be discovered for {Network}; recent blocks are fetched from archival nodes only")]
+    [LoggerMessage(EventId = 1102, Level = LogLevel.Information, Message = "No relays could be discovered for {Network}; recent blocks are fetched from archival nodes only")]
     private static partial void LogRelaysUnavailable(ILogger logger, Exception exception, GossipNetwork network);
 }

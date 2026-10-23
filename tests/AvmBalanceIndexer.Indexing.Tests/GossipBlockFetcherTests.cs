@@ -546,6 +546,28 @@ public class GossipBlockFetcherTests
     }
 
     [Fact]
+    public async Task Failing_Relays_Between_Archival_Attempts_Do_Not_Make_The_Rotation_Skip_An_Archival_Node()
+    {
+        string[] archival = ["http://a1.test:4160", "http://a2.test:4160", "http://a3.test:4160"];
+        var calls = new ConcurrentDictionary<string, int>();
+        var fetcher = CreateFetcher(
+            (request, _) =>
+            {
+                calls.AddOrUpdate(request.RequestUri!.Host, 1, static (_, n) => n + 1);
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.InternalServerError));
+            },
+            maxAttempts: 3,
+            provider: new TieredHosts(archival, ["http://relay1.test:4160", "http://relay2.test:4160", "http://relay3.test:4160"]));
+
+        for (var i = 0; i < 40; i++)
+        {
+            calls.Clear();
+            await Assert.ThrowsAsync<BlockFetchException>(() => fetcher.FetchBlockAsync(1000, 1000, CancellationToken.None));
+            Assert.Equal(["a1.test", "a2.test", "a3.test"], calls.Keys.Where(h => h.StartsWith('a')).Order());
+        }
+    }
+
+    [Fact]
     public async Task Failing_Relays_Neither_Use_Up_Attempts_Nor_Hide_The_Archival_Failure()
     {
         string[] relays = [.. Enumerable.Range(1, 7).Select(i => $"http://relay{i}.test:4160")];
