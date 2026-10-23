@@ -45,7 +45,13 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
         _throttleReport = new ThrottleReport(options.ThrottleLogInterval);
     }
 
-    public async Task<BlockData> FetchBlockAsync(ulong round, CancellationToken cancellationToken)
+    public Task<BlockData> FetchBlockAsync(ulong round, CancellationToken cancellationToken) =>
+        FetchBlockAsync(round, null, cancellationToken);
+
+    public Task<BlockData> FetchBlockAsync(ulong round, ulong latestRound, CancellationToken cancellationToken) =>
+        FetchBlockAsync(round, (ulong?)latestRound, cancellationToken);
+
+    private async Task<BlockData> FetchBlockAsync(ulong round, ulong? latestRound, CancellationToken cancellationToken)
     {
         IReadOnlyList<string> discovered;
         try
@@ -60,6 +66,11 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
         if (discovered.Count == 0)
         {
             throw new BlockFetchException("No archival gossip nodes are available: none are configured, or DNS discovery is failing. Retrying.", round);
+        }
+
+        if (latestRound is { } tip && IsRecent(round, tip))
+        {
+            discovered = await WithRelaysAsync(discovered, cancellationToken).ConfigureAwait(false);
         }
 
         var hosts = OrderHosts(discovered);
@@ -149,6 +160,26 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
         }
 
         throw new BlockFetchException($"Block {round} could not be fetched after {_options.MaxAttempts} attempts.", round, last);
+    }
+
+    /// <summary>Relays only hold the newest blocks, so they are asked only for rounds within the configured window of the tip.</summary>
+    private bool IsRecent(ulong round, ulong latestRound) =>
+        _options.RecentRoundsWindow > 0 && (round >= latestRound || latestRound - round <= (ulong)_options.RecentRoundsWindow);
+
+    /// <summary>The archival hosts plus the relays; a relay lookup that fails costs nothing but the extra capacity.</summary>
+    private async Task<IReadOnlyList<string>> WithRelaysAsync(IReadOnlyList<string> archival, CancellationToken cancellationToken)
+    {
+        IReadOnlyList<string> relays;
+        try
+        {
+            relays = await _hosts.GetRelayHostsAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return archival;
+        }
+
+        return relays.Count == 0 ? archival : [.. archival.Concat(relays).Distinct(StringComparer.OrdinalIgnoreCase)];
     }
 
     /// <summary>What one fetch has experienced of rate limits: the time it was throttled (rate-limited requests and waiting for paused nodes) and the last answer.</summary>
