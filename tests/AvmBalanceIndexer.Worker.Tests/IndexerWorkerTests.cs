@@ -89,6 +89,23 @@ public class IndexerWorkerTests : IDisposable
     }
 
     [Fact]
+    public async Task A_Gateway_That_Keeps_Answering_403_Is_Retried_Until_The_Failure_Limit_Then_Stops_The_Application()
+    {
+        var storage = NewStorage();
+        var errors = new Queue<Exception>(Enumerable.Range(0, 10).Select(_ =>
+            (Exception)new Algorand.ApiException("Forbidden", 403, "", new Dictionary<string, IEnumerable<string>>(), new HttpRequestException("403"))));
+        var adapter = new FlakyAdapter(Scenario.Adapter(), failuresBeforeSuccess: int.MaxValue, errors: errors);
+
+        var (worker, lifetime) = Create(storage, adapter, maxFailures: 3);
+        await worker.StartAsync(CancellationToken.None);
+        await lifetime.WaitForStopAsync();
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.Equal(3, adapter.Failures);
+        Assert.Equal(1, Environment.ExitCode);
+    }
+
+    [Fact]
     public async Task A_Chain_Divergence_Stops_The_Application_Immediately_Without_Retrying()
     {
         var storage = NewStorage();
@@ -221,6 +238,7 @@ public class IndexerWorkerTests : IDisposable
     [Theory]
     [InlineData(401)]
     [InlineData(400)]
+    [InlineData(404)]
     public async Task Algod_Client_Errors_Are_Not_Retried(int status)
     {
         var storage = NewStorage();
