@@ -8,28 +8,23 @@ namespace AvmBalanceIndexer.Indexing.Adapters;
 /// results. If a refresh fails the last known good list keeps being served. Relays are optional: when none can be found the
 /// archival nodes carry all requests.
 /// </summary>
-public sealed partial class SrvGossipHostProvider : IGossipHostProvider, IDisposable
+public sealed partial class SrvGossipHostProvider(
+    GossipNetwork network,
+    TimeSpan refreshInterval,
+    ILogger<SrvGossipHostProvider> logger,
+    TimeProvider? timeProvider = null,
+    Func<GossipNodePurpose, GossipNetwork, string[]>? resolver = null) : IGossipHostProvider, IDisposable
 {
     private static readonly TimeSpan RetryStaleAfterFailure = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan RetryEmptyAfterFailure = TimeSpan.FromSeconds(5);
-    private readonly GossipNetwork _network;
-    private readonly TimeSpan _refreshInterval;
-    private readonly ILogger<SrvGossipHostProvider> _logger;
-    private readonly TimeProvider _time;
-    private readonly Directory _archival = new(GossipNodePurpose.Archival);
-    private readonly Directory _relays = new(GossipNodePurpose.Relay);
+    private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
+    private readonly Func<GossipNodePurpose, GossipNetwork, string[]> _resolve = resolver ?? ResolveWithSdk;
+    private readonly HostList _archival = new(GossipNodePurpose.Archival, RetryEmptyAfterFailure);
+    // A network may have no relay record at all, so a failed lookup is not repeated every few seconds.
+    private readonly HostList _relays = new(GossipNodePurpose.Relay, refreshInterval);
 
-    public SrvGossipHostProvider(
-        GossipNetwork network,
-        TimeSpan refreshInterval,
-        ILogger<SrvGossipHostProvider> logger,
-        TimeProvider? timeProvider = null)
-    {
-        _network = network;
-        _refreshInterval = refreshInterval;
-        _logger = logger;
-        _time = timeProvider ?? TimeProvider.System;
-    }
+    private static string[] ResolveWithSdk(GossipNodePurpose purpose, GossipNetwork network) =>
+        new GossipHttpConfiguration(purpose, network).Hosts;
 
     public Task<IReadOnlyList<string>> GetHostsAsync(CancellationToken cancellationToken) =>
         GetAsync(_archival, cancellationToken);
@@ -43,12 +38,12 @@ public sealed partial class SrvGossipHostProvider : IGossipHostProvider, IDispos
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             // Relays only add capacity near the tip; the archival nodes still serve every block without them.
-            LogRelaysUnavailable(_logger, ex, _network);
+            LogRelaysUnavailable(logger, ex, network);
             return [];
         }
     }
 
-    private async Task<IReadOnlyList<string>> GetAsync(Directory directory, CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<string>> GetAsync(HostList directory, CancellationToken cancellationToken)
     {
         if (directory.Snapshot is { } fresh && _time.GetUtcNow() < fresh.Expires)
         {
@@ -75,16 +70,14 @@ public sealed partial class SrvGossipHostProvider : IGossipHostProvider, IDispos
             try
             {
                 // The SDK resolver is synchronous (raw UDP), so keep it off the caller thread.
-                var configuration = await Task.Run(
-                    () => new GossipHttpConfiguration(directory.Purpose, _network),
-                    cancellationToken).ConfigureAwait(false);
-                if (configuration.Hosts.Length == 0)
+                var hosts = await Task.Run(() => _resolve(directory.Purpose, network), cancellationToken).ConfigureAwait(false);
+                if (hosts.Length == 0)
                 {
                     throw new InvalidOperationException($"DNS SRV discovery returned no {directory.Name} nodes.");
                 }
 
-                directory.Snapshot = new Snapshot(configuration.Hosts, _time.GetUtcNow() + _refreshInterval);
-                LogDiscovered(_logger, configuration.Hosts.Length, directory.Name, _network);
+                directory.Snapshot = new Snapshot(hosts, _time.GetUtcNow() + refreshInterval);
+                LogDiscovered(logger, hosts.Length, directory.Name, network);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -92,13 +85,13 @@ public sealed partial class SrvGossipHostProvider : IGossipHostProvider, IDispos
                 {
                     // Keep serving the last known hosts and look again soon.
                     directory.Snapshot = stale with { Expires = _time.GetUtcNow() + RetryStaleAfterFailure };
-                    LogRefreshFailed(_logger, ex, directory.Name, _network, stale.Hosts.Length);
+                    LogRefreshFailed(logger, ex, directory.Name, network, stale.Hosts.Length);
                 }
                 else
                 {
                     // Nothing to fall back on. Remember the failure briefly so that concurrent fetches do not each repeat the
                     // blocking lookup; they see no hosts and fail fast, and the next lookup happens once the pause is over.
-                    directory.Snapshot = new Snapshot([], _time.GetUtcNow() + RetryEmptyAfterFailure);
+                    directory.Snapshot = new Snapshot([], _time.GetUtcNow() + directory.RetryEmptyAfter);
                     throw;
                 }
             }
@@ -124,9 +117,11 @@ public sealed partial class SrvGossipHostProvider : IGossipHostProvider, IDispos
         _relays.Gate.Dispose();
     }
 
-    private sealed class Directory(GossipNodePurpose purpose)
+    private sealed class HostList(GossipNodePurpose purpose, TimeSpan retryEmptyAfter)
     {
         public GossipNodePurpose Purpose { get; } = purpose;
+
+        public TimeSpan RetryEmptyAfter { get; } = retryEmptyAfter;
 
         public string Name { get; } = purpose == GossipNodePurpose.Relay ? "relay" : "archival";
 

@@ -104,7 +104,7 @@ public sealed partial class RoundIndexer(
             try
             {
                 await foreach (var block in OrderedPrefetch.StreamAsync(
-                    next, target, _options.FetchConcurrency, FetchFor(stopAfterRound, target), cancellationToken).ConfigureAwait(false))
+                    next, target, _options.FetchConcurrency, FetchFor(stopAfterRound, next, target), cancellationToken).ConfigureAwait(false))
                 {
                     var queued = await QueueBlockAsync(chain, tracker, status, rewards, block, target, cancellationToken).ConfigureAwait(false);
                     status = queued.Status;
@@ -154,11 +154,12 @@ public sealed partial class RoundIndexer(
     }
 
     /// <summary>
-    /// The fetch for one pass. Following the tip, the target is the chain's latest round and tells the fetcher which blocks relays
-    /// may still hold; a bounded run's target can be far behind the tip, so it gives no such hint.
+    /// The fetch for one pass. A pass that starts near the tip is short, its target is still the chain's latest round and tells the
+    /// fetcher which blocks relays may hold. A bounded run's target can be far behind the tip, and a backfill pass lasts so long
+    /// that the tip leaves its target behind, where relays would only answer 404: both give no hint.
     /// </summary>
-    private Func<ulong, CancellationToken, Task<BlockData>> FetchFor(ulong? stopAfterRound, ulong target) =>
-        stopAfterRound is null
+    private Func<ulong, CancellationToken, Task<BlockData>> FetchFor(ulong? stopAfterRound, ulong first, ulong target) =>
+        stopAfterRound is null && target - first <= (ulong)_options.FollowingThresholdRounds
             ? (round, token) => adapter.FetchBlockAsync(round, target, token)
             : adapter.FetchBlockAsync;
 

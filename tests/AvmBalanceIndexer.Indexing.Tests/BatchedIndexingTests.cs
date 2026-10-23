@@ -58,6 +58,27 @@ public class BatchedIndexingTests
     }
 
     [Fact]
+    public async Task A_Backfill_Pass_Gives_The_Fetcher_No_Tip_Because_The_Tip_Moves_On_During_It()
+    {
+        var storage = new RecordingStorage(new ChainContext(ChainId.AlgorandTestnet));
+        var adapter = Adapter();
+        adapter.Latest = LastRound;
+        using var stop = new CancellationTokenSource();
+        var options = new IndexerOptions { FetchConcurrency = 2, FollowingThresholdRounds = 1, FollowPollInterval = TimeSpan.FromMilliseconds(10) };
+
+        var run = Indexer(storage, adapter, options).RunAsync(null, stop.Token); // starts LastRound rounds behind: a backfill pass
+        while ((await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!.IndexedRound < LastRound)
+        {
+            await Task.Delay(10);
+        }
+
+        await stop.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+
+        Assert.Empty(adapter.TipHints);
+    }
+
+    [Fact]
     public async Task A_Bounded_Run_Gives_The_Fetcher_No_Tip_Because_Its_Target_Is_Not_The_Tip()
     {
         var storage = new RecordingStorage(new ChainContext(ChainId.AlgorandTestnet));

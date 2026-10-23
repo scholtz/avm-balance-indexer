@@ -176,6 +176,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            LogRelaysSkipped(_logger, ex);
             return archival;
         }
 
@@ -213,7 +214,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
     private BlockFetchException ThrottleTimedOut(ulong round, Exception? last)
     {
         ReportThrottling(_throttleReport.Flush(_time.GetUtcNow(), force: true)); // the failure should come with the summary that explains it
-        return new($"Block {round}: the archival gossip nodes kept rate limiting (HTTP 429) for more than {_options.ThrottleTimeout}. " +
+        return new($"Block {round}: the gossip nodes kept rate limiting (HTTP 429) for more than {_options.ThrottleTimeout}. " +
             "Lower Indexer:FetchConcurrency or add archival nodes (Algorand:GossipHosts).", round, last);
     }
 
@@ -499,6 +500,9 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
     {
         public TimeSpan? RetryAfter { get; } = retryAfter;
     }
+
+    [LoggerMessage(EventId = 1115, Level = LogLevel.Debug, Message = "Relays could not be looked up; fetching from the archival nodes only")]
+    private static partial void LogRelaysSkipped(ILogger logger, Exception exception);
 
     [LoggerMessage(EventId = 1110, Level = LogLevel.Debug, Message = "Block {Round} not on {Host} (attempt {Attempt})")]
     private static partial void LogNotOnHost(ILogger logger, ulong round, string host, int attempt);
