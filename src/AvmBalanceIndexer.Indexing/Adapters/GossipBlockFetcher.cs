@@ -68,14 +68,13 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
             throw new BlockFetchException("No archival gossip nodes are available: none are configured, or DNS discovery is failing. Retrying.", round);
         }
 
-        if (latestRound is { } tip && IsRecent(round, tip))
-        {
-            discovered = await WithRelaysAsync(discovered, cancellationToken).ConfigureAwait(false);
-        }
-
-        var hosts = OrderHosts(discovered);
+        var relays = latestRound is { } tip && IsRecent(round, tip)
+            ? await RelaysAsync(discovered, cancellationToken).ConfigureAwait(false)
+            : [];
+        var hosts = OrderHosts(relays.Count == 0 ? discovered : [.. discovered, .. relays]);
         Exception? last = null;
-        var notFound = 0;
+        var notFound = 0; // archival nodes only: a relay prunes and lags, so its "not here" says nothing about the block
+        var relayMisses = 0;
         var errors = 0;
         var badData = 0;
         var throttling = new ThrottleState();
@@ -118,6 +117,16 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
 
                 continue;
             }
+            catch (BlockNotOnHostException ex) when (relays.Contains(host))
+            {
+                // Asked once and skipped for the rest of this fetch, without using up an attempt or waiting: relays are many and
+                // answer quickly, and the archival nodes must still be reached when several of them have already pruned the block.
+                last = ex;
+                relayMisses++;
+                hosts = [.. hosts.Where(h => !string.Equals(h, host, StringComparison.OrdinalIgnoreCase))];
+                LogNotOnHost(_logger, round, host, attempt + 1);
+                continue;
+            }
             catch (BlockNotOnHostException ex)
             {
                 last = ex;
@@ -154,7 +163,8 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
 
         // Hosts saying "not here" at least as often as they fail to answer, and more often than they answer wrongly, means the
         // block is not out yet. Mostly errors or wrong answers means a broken fleet and must reach the caller as a failure.
-        if (notFound > 0 && notFound >= errors && notFound > badData)
+        // Relays alone saying so count only when nothing else went wrong.
+        if ((notFound > 0 && notFound >= errors && notFound > badData) || (relayMisses > 0 && errors == 0 && badData == 0))
         {
             throw new BlockNotAvailableException(round);
         }
@@ -166,21 +176,19 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
     private bool IsRecent(ulong round, ulong latestRound) =>
         _options.RecentRoundsWindow > 0 && (round >= latestRound || latestRound - round <= (ulong)_options.RecentRoundsWindow);
 
-    /// <summary>The archival hosts plus the relays; a relay lookup that fails costs nothing but the extra capacity.</summary>
-    private async Task<IReadOnlyList<string>> WithRelaysAsync(IReadOnlyList<string> archival, CancellationToken cancellationToken)
+    /// <summary>The relays that are not archival hosts too; a relay lookup that fails costs nothing but the extra capacity.</summary>
+    private async Task<HashSet<string>> RelaysAsync(IReadOnlyList<string> archival, CancellationToken cancellationToken)
     {
-        IReadOnlyList<string> relays;
         try
         {
-            relays = await _hosts.GetRelayHostsAsync(cancellationToken).ConfigureAwait(false);
+            var relays = await _hosts.GetRelayHostsAsync(cancellationToken).ConfigureAwait(false);
+            return new HashSet<string>(relays.Except(archival, StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             LogRelaysSkipped(_logger, ex);
-            return archival;
+            return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         }
-
-        return relays.Count == 0 ? archival : [.. archival.Concat(relays).Distinct(StringComparer.OrdinalIgnoreCase)];
     }
 
     /// <summary>What one fetch has experienced of rate limits: the time it was throttled (rate-limited requests and waiting for paused nodes) and the last answer.</summary>
@@ -510,12 +518,12 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
     [LoggerMessage(EventId = 1111, Level = LogLevel.Warning, Message = "Fetching block {Round} from {Host} failed (attempt {Attempt}/{MaxAttempts})")]
     private static partial void LogAttemptFailed(ILogger logger, Exception exception, ulong round, string host, int attempt, int maxAttempts);
 
-    [LoggerMessage(EventId = 1112, Level = LogLevel.Debug, Message = "Archival node {Host} is rate limiting (429); pausing it for {Delay} and allowing {Limit} concurrent requests")]
+    [LoggerMessage(EventId = 1112, Level = LogLevel.Debug, Message = "Gossip node {Host} is rate limiting (429); pausing it for {Delay} and allowing {Limit} concurrent requests")]
     private static partial void LogHostThrottled(ILogger logger, string host, TimeSpan delay, int limit);
 
-    [LoggerMessage(EventId = 1113, Level = LogLevel.Information, Message = "Archival nodes are rate limiting (429): {Pauses} pause(s) of {Nodes} node(s) within {Window}, slowing them down: {Details}")]
+    [LoggerMessage(EventId = 1113, Level = LogLevel.Information, Message = "Gossip nodes are rate limiting (429): {Pauses} pause(s) of {Nodes} node(s) within {Window}, slowing them down: {Details}")]
     private static partial void LogThrottleSummary(ILogger logger, int pauses, int nodes, TimeSpan window, ThrottleSummary details);
 
-    [LoggerMessage(EventId = 1114, Level = LogLevel.Information, Message = "Archival nodes started rate limiting (429); slowing them down, further pauses are summarised: {Details}")]
+    [LoggerMessage(EventId = 1114, Level = LogLevel.Information, Message = "Gossip nodes started rate limiting (429); slowing them down, further pauses are summarised: {Details}")]
     private static partial void LogThrottlingStarted(ILogger logger, ThrottleSummary details);
 }
