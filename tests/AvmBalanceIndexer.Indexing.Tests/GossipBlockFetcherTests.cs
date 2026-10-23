@@ -23,7 +23,9 @@ public class GossipBlockFetcherTests
         TimeProvider? time = null,
         int maxConcurrentPerHost = 32,
         TimeSpan? throttleTimeout = null,
-        ILogger<GossipBlockFetcher>? logger = null)
+        ILogger<GossipBlockFetcher>? logger = null,
+        IGossipHostProvider? provider = null,
+        int recentRoundsWindow = 100)
     {
         var options = new AlgorandChainOptions
         {
@@ -37,11 +39,12 @@ public class GossipBlockFetcherTests
             MaxConcurrentRequestsPerHost = maxConcurrentPerHost,
             MaxThrottleDelay = TimeSpan.FromMilliseconds(20),
             ThrottleTimeout = throttleTimeout ?? TimeSpan.FromSeconds(5),
+            RecentRoundsWindow = recentRoundsWindow,
         };
 
         return new GossipBlockFetcher(
             new HttpClient(new StubHandler(handler)),
-            new StaticGossipHostProvider(hosts ?? [HostA, HostB]),
+            provider ?? new StaticGossipHostProvider(hosts ?? [HostA, HostB]),
             Chain.Profile,
             options,
             Chain.GenesisHash,
@@ -362,6 +365,100 @@ public class GossipBlockFetcherTests
         var error = await Assert.ThrowsAsync<BlockFetchException>(() => fetcher.FetchBlockAsync(2, CancellationToken.None));
 
         Assert.IsNotType<BlockNotAvailableException>(error);
+    }
+
+    private sealed class TieredHosts(string[] archival, string[] relays, bool relaysFail = false) : IGossipHostProvider
+    {
+        public Task<IReadOnlyList<string>> GetHostsAsync(CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<string>>(archival);
+
+        public Task<IReadOnlyList<string>> GetRelayHostsAsync(CancellationToken cancellationToken) =>
+            relaysFail ? Task.FromException<IReadOnlyList<string>>(new InvalidOperationException("no relays")) : Task.FromResult<IReadOnlyList<string>>(relays);
+    }
+
+    [Fact]
+    public async Task Blocks_Near_The_Tip_Are_Also_Fetched_From_Relays()
+    {
+        var served = new ConcurrentDictionary<string, int>();
+        var fetcher = CreateFetcher(
+            (request, _) =>
+            {
+                served.AddOrUpdate(request.RequestUri!.Host, 1, static (_, n) => n + 1);
+                return Task.FromResult(Ok(Chain.Encode(950, [])));
+            },
+            provider: new TieredHosts(["http://archive.test:4160"], ["http://relay.test:4160"]));
+
+        for (var i = 0; i < 40; i++)
+        {
+            await fetcher.FetchBlockAsync(950, 1000, CancellationToken.None);
+        }
+
+        Assert.True(served.GetValueOrDefault("relay.test") > 0, "relays were never asked");
+        Assert.True(served.GetValueOrDefault("archive.test") > 0, "archival nodes were never asked");
+    }
+
+    [Fact]
+    public async Task Old_Blocks_Are_Never_Asked_From_Relays()
+    {
+        var served = new ConcurrentDictionary<string, int>();
+        var fetcher = CreateFetcher(
+            (request, _) =>
+            {
+                served.AddOrUpdate(request.RequestUri!.Host, 1, static (_, n) => n + 1);
+                return Task.FromResult(Ok(Chain.Encode(500, [])));
+            },
+            provider: new TieredHosts(["http://archive.test:4160"], ["http://relay.test:4160"]));
+
+        for (var i = 0; i < 20; i++)
+        {
+            await fetcher.FetchBlockAsync(500, 1000, CancellationToken.None); // 500 behind the tip
+            await fetcher.FetchBlockAsync(500, CancellationToken.None); // no tip known
+        }
+
+        Assert.Equal(0, served.GetValueOrDefault("relay.test"));
+    }
+
+    [Fact]
+    public async Task A_Zero_Window_Turns_Relays_Off()
+    {
+        var served = new ConcurrentDictionary<string, int>();
+        var fetcher = CreateFetcher(
+            (request, _) =>
+            {
+                served.AddOrUpdate(request.RequestUri!.Host, 1, static (_, n) => n + 1);
+                return Task.FromResult(Ok(Chain.Encode(1000, [])));
+            },
+            provider: new TieredHosts(["http://archive.test:4160"], ["http://relay.test:4160"]),
+            recentRoundsWindow: 0);
+
+        for (var i = 0; i < 20; i++)
+        {
+            await fetcher.FetchBlockAsync(1000, 1000, CancellationToken.None);
+        }
+
+        Assert.Equal(0, served.GetValueOrDefault("relay.test"));
+    }
+
+    [Fact]
+    public async Task A_Relay_Discovery_Failure_Leaves_The_Archival_Nodes_Working()
+    {
+        var fetcher = CreateFetcher(
+            (_, _) => Task.FromResult(Ok(Chain.Encode(990, []))),
+            provider: new TieredHosts(["http://archive.test:4160"], [], relaysFail: true));
+
+        var block = await fetcher.FetchBlockAsync(990, 1000, CancellationToken.None);
+
+        Assert.Equal(990UL, block.Round);
+    }
+
+    [Fact]
+    public async Task A_Relay_That_Lacks_The_Newest_Block_Still_Means_Not_Available_Yet()
+    {
+        var fetcher = CreateFetcher(
+            (_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound)),
+            maxAttempts: 4,
+            provider: new TieredHosts(["http://archive.test:4160"], ["http://relay.test:4160"]));
+
+        await Assert.ThrowsAsync<BlockNotAvailableException>(() => fetcher.FetchBlockAsync(1000, 1000, CancellationToken.None));
     }
 
     private sealed class FailingHosts : IGossipHostProvider

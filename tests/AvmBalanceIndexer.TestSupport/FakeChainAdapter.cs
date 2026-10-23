@@ -61,6 +61,15 @@ public sealed class FakeChainAdapter(ChainProfile profile, GenesisDocument genes
 
     public Task<GenesisDocument> GetGenesisAsync(CancellationToken cancellationToken) => Task.FromResult(genesis);
 
+    /// <summary>The latest-round hints of the fetches that passed one, in the order they were made.</summary>
+    public System.Collections.Concurrent.ConcurrentQueue<ulong> TipHints { get; } = new();
+
+    public Task<BlockData> FetchBlockAsync(ulong round, ulong latestRound, CancellationToken cancellationToken)
+    {
+        TipHints.Enqueue(latestRound);
+        return FetchBlockAsync(round, cancellationToken);
+    }
+
     public Task<BlockData> FetchBlockAsync(ulong round, CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref _fetchCount);
