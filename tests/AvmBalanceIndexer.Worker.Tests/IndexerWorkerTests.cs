@@ -135,8 +135,9 @@ public class IndexerWorkerTests : IDisposable
         [
             new Algorand.ApiException("Service Unavailable", 503, "unavailable", new Dictionary<string, IEnumerable<string>>(), new HttpRequestException("503")),
             new TaskCanceledException("The request timed out"),
+            new Algorand.ApiException("Forbidden", 403, "", new Dictionary<string, IEnumerable<string>>(), new HttpRequestException("403")), // a public gateway throttling or blocking for a while
         ]);
-        var adapter = new FlakyAdapter(Scenario.Adapter(), failuresBeforeSuccess: 2, errors: errors);
+        var adapter = new FlakyAdapter(Scenario.Adapter(), failuresBeforeSuccess: 3, errors: errors);
 
         var (worker, lifetime) = Create(storage, adapter, maxFailures: 10);
         await worker.StartAsync(CancellationToken.None);
@@ -144,7 +145,7 @@ public class IndexerWorkerTests : IDisposable
         await worker.StopAsync(CancellationToken.None);
 
         Assert.False(lifetime.StopRequested);
-        Assert.Equal(2, adapter.Failures);
+        Assert.Equal(3, adapter.Failures);
     }
 
     [Fact]

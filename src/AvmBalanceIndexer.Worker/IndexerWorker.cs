@@ -194,10 +194,12 @@ public sealed partial class IndexerWorker(
     /// <summary>
     /// Network, node and database trouble that a later attempt can overcome: archival fetch failures, algod errors and
     /// timeouts (a timed-out request throws a cancellation that did not come from shutdown), and transient database errors.
+    /// A public algod behind a gateway answers 403 (often with an empty body) while it throttles or blocks a client, so 403 is
+    /// retried like 429; 400, 401 and 404 mean a wrong URL or token and stay fatal.
     /// </summary>
     private bool IsTransient(Exception exception, CancellationToken stoppingToken) =>
         exception is BlockFetchException or HttpRequestException or TimeoutException or IOException
-        || exception is Algorand.ApiException { StatusCode: >= 500 or 408 or 429 }
+        || exception is Algorand.ApiException { StatusCode: >= 500 or 403 or 408 or 429 }
         || (exception is TaskCanceledException && !stoppingToken.IsCancellationRequested)
         || exception is StorageTimeoutException
         || failures.IsTransient(exception);
