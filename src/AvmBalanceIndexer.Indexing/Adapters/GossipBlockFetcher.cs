@@ -82,7 +82,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
         // A rate-limited answer is not an attempt: the node is paused and the request goes to the next one, or waits.
         for (var attempt = 0; attempt < _options.MaxAttempts;)
         {
-            var (host, gate, entered) = await AcquireHostAsync(hosts, missedRelays, attempt, round, throttling, cancellationToken).ConfigureAwait(false);
+            var (host, gate, entered) = await AcquireHostAsync(hosts, missedRelays, attempt + missedRelays.Count, round, throttling, cancellationToken).ConfigureAwait(false);
             try
             {
                 var payload = await DownloadTimedAsync(host, round, cancellationToken).ConfigureAwait(false);
@@ -117,11 +117,10 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
 
                 continue;
             }
-            catch (BlockNotOnHostException ex) when (relays.Contains(host))
+            catch (BlockNotOnHostException) when (relays.Contains(host))
             {
                 // Asked once and skipped for the rest of this fetch, without using up an attempt or waiting: relays are many and
                 // answer quickly, and the archival nodes must still be reached when several of them have already pruned the block.
-                last = ex;
                 missedRelays.Add(host);
                 LogNotOnHost(_logger, round, host, attempt + 1);
                 continue;
@@ -134,12 +133,18 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
             }
             catch (Exception ex) when (ex is HttpRequestException or BlockValidationException or TimeoutException or IOException or UriFormatException)
             {
-                last = ex;
                 if (relays.Contains(host))
                 {
-                    // Relays are optional extra capacity: their failures use up the attempt but say nothing about the archival fleet.
+                    // Relays are optional extra capacity: a failing one is cooled down and left out of this fetch without using up an
+                    // attempt, and says nothing about the archival fleet.
+                    missedRelays.Add(host);
+                    _cooldownUntil[host] = _time.GetUtcNow() + _options.HostCooldown;
+                    LogAttemptFailed(_logger, ex, round, host, attempt + 1, _options.MaxAttempts);
+                    continue;
                 }
-                else if (ex is BlockValidationException)
+
+                last = ex;
+                if (ex is BlockValidationException)
                 {
                     badData++;
                 }
