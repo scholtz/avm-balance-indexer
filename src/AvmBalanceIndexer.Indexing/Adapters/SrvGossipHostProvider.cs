@@ -17,11 +17,12 @@ public sealed partial class SrvGossipHostProvider(
 {
     private static readonly TimeSpan RetryStaleAfterFailure = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan RetryEmptyAfterFailure = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan RetryRelaysAfterFailure = TimeSpan.FromMinutes(5);
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
     private readonly Func<GossipNodePurpose, GossipNetwork, string[]> _resolve = resolver ?? ResolveWithSdk;
     private readonly HostList _archival = new(GossipNodePurpose.Archival, RetryEmptyAfterFailure);
     // A network may have no relay record at all, so a failed lookup is not repeated every few seconds.
-    private readonly HostList _relays = new(GossipNodePurpose.Relay, refreshInterval);
+    private readonly HostList _relays = new(GossipNodePurpose.Relay, refreshInterval < RetryRelaysAfterFailure ? refreshInterval : RetryRelaysAfterFailure);
 
     private static string[] ResolveWithSdk(GossipNodePurpose purpose, GossipNetwork network) =>
         new GossipHttpConfiguration(purpose, network).Hosts;
