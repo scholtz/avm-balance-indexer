@@ -74,7 +74,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
         var hosts = OrderHosts(relays.Count == 0 ? discovered : [.. discovered, .. relays]);
         Exception? last = null;
         var notFound = 0; // archival nodes only: a relay prunes and lags, so its "not here" says nothing about the block
-        var relayMisses = 0;
+        var missedRelays = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var errors = 0;
         var badData = 0;
         var throttling = new ThrottleState();
@@ -82,7 +82,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
         // A rate-limited answer is not an attempt: the node is paused and the request goes to the next one, or waits.
         for (var attempt = 0; attempt < _options.MaxAttempts;)
         {
-            var (host, gate, entered) = await AcquireHostAsync(hosts, attempt, round, throttling, cancellationToken).ConfigureAwait(false);
+            var (host, gate, entered) = await AcquireHostAsync(hosts, missedRelays, attempt, round, throttling, cancellationToken).ConfigureAwait(false);
             try
             {
                 var payload = await DownloadTimedAsync(host, round, cancellationToken).ConfigureAwait(false);
@@ -122,8 +122,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
                 // Asked once and skipped for the rest of this fetch, without using up an attempt or waiting: relays are many and
                 // answer quickly, and the archival nodes must still be reached when several of them have already pruned the block.
                 last = ex;
-                relayMisses++;
-                hosts = [.. hosts.Where(h => !string.Equals(h, host, StringComparison.OrdinalIgnoreCase))];
+                missedRelays.Add(host);
                 LogNotOnHost(_logger, round, host, attempt + 1);
                 continue;
             }
@@ -136,7 +135,11 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
             catch (Exception ex) when (ex is HttpRequestException or BlockValidationException or TimeoutException or IOException or UriFormatException)
             {
                 last = ex;
-                if (ex is BlockValidationException)
+                if (relays.Contains(host))
+                {
+                    // Relays are optional extra capacity: their failures use up the attempt but say nothing about the archival fleet.
+                }
+                else if (ex is BlockValidationException)
                 {
                     badData++;
                 }
@@ -163,8 +166,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
 
         // Hosts saying "not here" at least as often as they fail to answer, and more often than they answer wrongly, means the
         // block is not out yet. Mostly errors or wrong answers means a broken fleet and must reach the caller as a failure.
-        // Relays alone saying so count only when nothing else went wrong.
-        if ((notFound > 0 && notFound >= errors && notFound > badData) || (relayMisses > 0 && errors == 0 && badData == 0))
+        if (notFound > 0 && notFound >= errors && notFound > badData)
         {
             throw new BlockNotAvailableException(round);
         }
@@ -232,7 +234,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
     /// call waits: briefly while nodes are merely full, until the earliest pause ends while every node is paused (the time spent
     /// in the latter is bounded by <see cref="AlgorandChainOptions.ThrottleTimeout"/>).
     /// </summary>
-    private async Task<(string Host, HostGate Gate, DateTimeOffset Entered)> AcquireHostAsync(string[] hosts, int attempt, ulong round, ThrottleState throttling, CancellationToken cancellationToken)
+    private async Task<(string Host, HostGate Gate, DateTimeOffset Entered)> AcquireHostAsync(string[] hosts, HashSet<string> skipped, int attempt, ulong round, ThrottleState throttling, CancellationToken cancellationToken)
     {
         while (true)
         {
@@ -242,6 +244,11 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
             for (var i = 0; i < hosts.Length; i++)
             {
                 var host = hosts[(attempt + i) % hosts.Length];
+                if (skipped.Contains(host))
+                {
+                    continue; // a relay that already said "not here" in this fetch
+                }
+
                 var gate = GateOf(host);
                 if (gate.TryEnter(now))
                 {
