@@ -18,6 +18,12 @@ old ones and answer 404 for them.
   the real tip, where a relay would only answer 404.
 - Operator-configured `Algorand:GossipHosts` are used as given; relay discovery is skipped for them.
 
+- Relays are optional capacity and never decide the health of a fetch. Within one fetch a relay is asked at most once;
+  a relay that lacks the block, fails or rate limits is left out for the rest of that fetch without using up an attempt
+  (after two failing relays all of them are), is not counted towards the throttle timeout and does not count towards the
+  "block not out yet" decision, which only archival answers make. Failures cool the relay down and a miss lowers its
+  latency score like any host's.
+
 ## Consequences
-Tip following is spread over about 11 nodes instead of 4, and a 404 from a relay for the newest block still means
-"not out yet" (same as for archival nodes). Relays keep a bounded history, so the window must stay well below it.
+Tip following is spread over about 11 nodes instead of 4. Relays keep a bounded history, so the window must stay well below
+it.
