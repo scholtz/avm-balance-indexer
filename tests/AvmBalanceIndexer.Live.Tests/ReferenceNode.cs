@@ -182,15 +182,31 @@ public sealed class ReferenceNode : IDisposable
     public async Task<ulong?> AnyPaymentRoundAsync(ulong minRound, ulong maxRound)
     {
         // Zero-amount payments (opt-in style funding calls) would leave the window without a payment to compare.
-        using var json = await GetJsonAsync($"{_indexer}/v2/transactions?tx-type=pay&currency-greater-than=0&min-round={minRound}&max-round={maxRound}&limit=50").ConfigureAwait(false);
-        var transactions = json.RootElement.GetProperty("transactions");
-        // The indexer also returns an application call whose inner transaction is the payment: only a top-level payment will do.
-        foreach (var transaction in transactions.EnumerateArray())
+        // Fee-0 payments are skipped: on Voi the indexer lists every proposer payout (paid by the fee sink, no fee) as a payment
+        // and they can fill whole pages, so follow next-token for a while to reach the payment of a user.
+        string? next = null;
+        for (var page = 0; page < 20; page++)
         {
-            if (transaction.TryGetProperty("tx-type", out var type) && type.GetString() == "pay")
+            var url = $"{_indexer}/v2/transactions?tx-type=pay&currency-greater-than=0&min-round={minRound}&max-round={maxRound}&limit=1000"
+                + (next is null ? string.Empty : $"&next={Uri.EscapeDataString(next)}");
+            using var json = await GetJsonAsync(url).ConfigureAwait(false);
+            var transactions = json.RootElement.GetProperty("transactions");
+            // The indexer also returns an application call whose inner transaction is the payment: only a top-level payment will do.
+            foreach (var transaction in transactions.EnumerateArray())
             {
-                return transaction.GetProperty("confirmed-round").GetUInt64();
+                if (transaction.TryGetProperty("tx-type", out var type) && type.GetString() == "pay"
+                    && transaction.TryGetProperty("fee", out var fee) && fee.GetUInt64() > 0)
+                {
+                    return transaction.GetProperty("confirmed-round").GetUInt64();
+                }
             }
+
+            if (transactions.GetArrayLength() == 0 || !json.RootElement.TryGetProperty("next-token", out var token) || token.GetString() is not { Length: > 0 } nextToken)
+            {
+                break;
+            }
+
+            next = nextToken;
         }
 
         return null;

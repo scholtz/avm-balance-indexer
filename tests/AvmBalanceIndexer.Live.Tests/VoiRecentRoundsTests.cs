@@ -87,6 +87,7 @@ public class VoiRecentRoundsTests(ITestOutputHelper output)
                 static b => (ulong)b.Block.Round!.Value,
                 static b => (Proposer: new Address((b.Block.Proposer ?? throw new InvalidOperationException($"Round {b.Block.Round} pays a proposer payout but names no proposer.")).Bytes), Amount: b.Block.ProposerPayout!.Value));
         var listedPayouts = 0;
+        var userPayments = 0;
         foreach (var t in transactions)
         {
             var isPayout = t.Type == "pay" && t.Fee == 0 && t.Sender == feeSink && t.Receiver is { } to
@@ -94,6 +95,10 @@ public class VoiRecentRoundsTests(ITestOutputHelper output)
             if (isPayout)
             {
                 listedPayouts++;
+            }
+            else if (t.Id.Length > 0 && t.Amount > 0)
+            {
+                userPayments++;
             }
 
             if (!isPayout && t.Id.Length > 0 && (t.Fee > 0 || t.Amount > 0 || t.ClosingAmount > 0 || t.SenderRewards > 0 || t.ReceiverRewards > 0 || t.CloseRewards > 0))
@@ -120,7 +125,7 @@ public class VoiRecentRoundsTests(ITestOutputHelper output)
         var payments = transactions.Count(static t => t.Amount > 0);
         var innerPayments = transactions.Count(static t => t.Id.Length == 0 && t.Amount > 0);
         output.WriteLine($"voi rounds {first}-{last}: {transactions.Count} indexer transactions, {payments} payments ({innerPayments} inner), {payouts} proposer payouts, {ours.Count} accounts with effects");
-        Assert.True(transactions.Any(static t => t.Id.Length > 0 && t.Amount > 0), "The window has no top-level payment, so it proves nothing.");
+        Assert.True(userPayments > 0, "The window has no top-level payment besides proposer payouts, so it proves nothing.");
         Assert.True(payouts > 0, "No block in the window pays a proposer, so the payout comparison proves nothing; widen the window.");
         Assert.True(listedPayouts == payouts, $"{payouts} blocks pay a proposer but the public indexer lists {listedPayouts} matching fee-sink payments; it may now list payouts differently, so revisit how they are compared.");
 

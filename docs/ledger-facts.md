@@ -13,8 +13,9 @@ hashing or the live tests.
 - Block hash = SHA-512/256("BH" + canonical block map without `txns`) and equals the certificate digest.
 - Public oracle: `GET {nodely algod}/v2/deltas/{round}` gives exact post-round balances for TestNet and MainNet (not
   Voi, which prunes). Indexer `round=` rewind is disabled on free endpoints.
-- MainNet's first 1000 rounds have no transactions (only pool movement); TestNet has 28; Voi only zero-impact ones.
-- Voi pays proposer payouts too (unlike what the line above implies for its first rounds; see `VoiRecentRoundsTests`, the source of truth). Voi has no ledger oracle like Algorand's `/v2/deltas`: the public Voi
+- MainNet's first 1000 rounds have no transactions (only pool movement); TestNet has 28; Voi only zero-impact ones
+  (its recent rounds do carry proposer payouts, see below).
+- Voi pays proposer payouts in recent rounds. It has no ledger oracle like Algorand's `/v2/deltas`; the public Voi
   indexer lists each as a fee-0 payment from the fee sink to the proposer with a transaction id. `VoiRecentRoundsTests` therefore compares
   balances against that list (a relative check against the indexer, not ledger deltas), skips those ids in the id check (our payout effects
   have no id) and asserts every payout in the window was matched to such a payment.
