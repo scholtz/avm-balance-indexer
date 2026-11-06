@@ -14,8 +14,10 @@ hashing or the live tests.
 - Public oracle: `GET {nodely algod}/v2/deltas/{round}` gives exact post-round balances for TestNet and MainNet (not
   Voi, which prunes). Indexer `round=` rewind is disabled on free endpoints.
 - MainNet's first 1000 rounds have no transactions (only pool movement); TestNet has 28; Voi only zero-impact ones.
-- Voi pays proposer payouts too (since late Oct 2026). The public Voi indexer lists each as a fee-sink payment with a transaction id, so
-  `VoiRecentRoundsTests` compares payout balances as they are and skips those ids in the id check (our payout effects have no id).
+- Voi pays proposer payouts too (observed 2026-11-06, rounds ~24.18M). Unlike Algorand's `/v2/deltas`, there is no ledger oracle: the public Voi
+  indexer lists each as a fee-0 payment from the fee sink to the proposer with a transaction id. `VoiRecentRoundsTests` therefore compares
+  balances against that list (a relative check against the indexer, not ledger deltas), skips those ids in the id check (our payout effects
+  have no id) and asserts every payout in the window was matched to such a payment.
 - Proposer payout realizes pending rewards invisibly (Move with nil pointers). `PayoutEraRoundsTests` compares recent
   MainNet and TestNet rounds with `/v2/deltas` (relative check between two touches of an account, so a proposer's first
   appearance in the window is not checked): no discrepancy found. Suspension, bonus and the old-proposer-with-unrealized-rewards

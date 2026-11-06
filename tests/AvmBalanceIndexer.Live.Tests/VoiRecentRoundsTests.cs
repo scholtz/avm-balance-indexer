@@ -73,15 +73,28 @@ public class VoiRecentRoundsTests(ITestOutputHelper output)
         var theirs = new Dictionary<Address, BigInteger>();
         var topLevelIds = new HashSet<string>(StringComparer.Ordinal);
 
-        // The public indexer lists each proposer payout as a payment (with an id) from the fee sink; here it is a block-header
-        // movement without a transaction id. The balance comparison below covers it, the id comparison must skip it.
+        var feeSinks = blocks.Skip(1).Select(static b => new Address(b.Block.FeeSink!.Bytes)).Distinct().ToArray();
+        Assert.Single(feeSinks);
+        var feeSink = feeSinks[0];
+
+        // The public indexer lists each proposer payout as a fee-sink payment (with an id, fee 0) to the proposer named in the
+        // block header; here it is a header movement without a transaction id. The balance comparison covers it (our
+        // ProposerPayout effects must equal those payments), the id comparison must skip it. If the indexer ever lists payouts
+        // in another shape, the payout count assertion below fails with that explanation instead of a wall of account diffs.
         var payoutsByRound = blocks.Skip(1)
             .Where(static b => b.Block.ProposerPayout is > 0 && b.Block.Proposer is not null)
-            .ToDictionary(static b => (ulong)b.Block.Round!.Value,static b => (Proposer: new Address(b.Block.Proposer!.Bytes), Amount: b.Block.ProposerPayout!.Value));
+            .ToDictionary(static b => (ulong)b.Block.Round!.Value, static b => (Proposer: new Address(b.Block.Proposer!.Bytes), Amount: b.Block.ProposerPayout!.Value));
+        var listedPayouts = 0;
         foreach (var t in transactions)
         {
-            var isPayout = t.Fee == 0 && t.Receiver is { } to && payoutsByRound.TryGetValue(t.Round, out var p) && p.Proposer == to && p.Amount == t.Amount;
-            if (!isPayout && t.Id.Length > 0 &&(t.Fee > 0 || t.Amount > 0 || t.ClosingAmount > 0 || t.SenderRewards > 0 || t.ReceiverRewards > 0 || t.CloseRewards > 0))
+            var isPayout = t.Type == "pay" && t.Fee == 0 && t.Sender == feeSink && t.Receiver is { } to
+                && payoutsByRound.TryGetValue(t.Round, out var p) && p.Proposer == to && p.Amount == t.Amount;
+            if (isPayout)
+            {
+                listedPayouts++;
+            }
+
+            if (!isPayout && t.Id.Length > 0 && (t.Fee > 0|| t.Amount > 0 || t.ClosingAmount > 0 || t.SenderRewards > 0 || t.ReceiverRewards > 0 || t.CloseRewards > 0))
             {
                 topLevelIds.Add(t.Id);
             }
@@ -99,16 +112,14 @@ public class VoiRecentRoundsTests(ITestOutputHelper output)
         }
 
         // The indexer does not list the fee sink credit, so add it from the fees to compare like with like.
-        var feeSinks = blocks.Skip(1).Select(static b => new Address(b.Block.FeeSink!.Bytes)).Distinct().ToArray();
-        Assert.Single(feeSinks);
-        var feeSink = feeSinks[0];
         Add(theirs, feeSink, transactions.Aggregate(BigInteger.Zero, static (sum, t) => sum + t.Fee));
 
-        var payouts = blocks.Skip(1).Count(static b => b.Block.ProposerPayout is > 0);
+        var payouts = payoutsByRound.Count;
         var payments = transactions.Count(static t => t.Amount > 0);
         var innerPayments = transactions.Count(static t => t.Id.Length == 0 && t.Amount > 0);
         output.WriteLine($"voi rounds {first}-{last}: {transactions.Count} indexer transactions, {payments} payments ({innerPayments} inner), {payouts} proposer payouts, {ours.Count} accounts with effects");
         Assert.True(transactions.Any(static t => t.Id.Length > 0 && t.Amount > 0), "The window has no top-level payment, so it proves nothing.");
+        Assert.True(listedPayouts == payouts, $"{payouts} blocks pay a proposer but the public indexer lists {listedPayouts} matching fee-sink payments; it may now list payouts differently, so revisit how they are compared.");
 
         var problems = new List<string>();
         foreach (var account in ours.Keys.Union(theirs.Keys))
