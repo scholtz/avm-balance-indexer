@@ -20,7 +20,7 @@ public class VoiRecentRoundsTests(ITestOutputHelper output)
     private const ulong BehindTip = 5000;
 
     private static readonly EffectType[] TransactionEffects =
-        [EffectType.Fee, EffectType.FeeCollected, EffectType.Payment, EffectType.CloseOut, EffectType.Reward];
+        [EffectType.Fee, EffectType.FeeCollected, EffectType.Payment, EffectType.CloseOut, EffectType.Reward, EffectType.ProposerPayout];
 
     [LiveFact]
     public async Task Recent_Rounds_Match_The_Public_Indexer()
@@ -72,9 +72,16 @@ public class VoiRecentRoundsTests(ITestOutputHelper output)
         var transactions = await reference.TransactionsInRangeAsync(first, last);
         var theirs = new Dictionary<Address, BigInteger>();
         var topLevelIds = new HashSet<string>(StringComparer.Ordinal);
+
+        // The public indexer lists each proposer payout as a payment (with an id) from the fee sink; here it is a block-header
+        // movement without a transaction id. The balance comparison below covers it, the id comparison must skip it.
+        var payoutsByRound = blocks.Skip(1)
+            .Where(static b => b.Block.ProposerPayout is > 0 && b.Block.Proposer is not null)
+            .ToDictionary(static b => (ulong)b.Block.Round!.Value,static b => (Proposer: new Address(b.Block.Proposer!.Bytes), Amount: b.Block.ProposerPayout!.Value));
         foreach (var t in transactions)
         {
-            if (t.Id.Length > 0 && (t.Fee > 0 || t.Amount > 0 || t.ClosingAmount > 0 || t.SenderRewards > 0 || t.ReceiverRewards > 0 || t.CloseRewards > 0))
+            var isPayout = t.Fee == 0 && t.Receiver is { } to && payoutsByRound.TryGetValue(t.Round, out var p) && p.Proposer == to && p.Amount == t.Amount;
+            if (!isPayout && t.Id.Length > 0 &&(t.Fee > 0 || t.Amount > 0 || t.ClosingAmount > 0 || t.SenderRewards > 0 || t.ReceiverRewards > 0 || t.CloseRewards > 0))
             {
                 topLevelIds.Add(t.Id);
             }
@@ -97,12 +104,11 @@ public class VoiRecentRoundsTests(ITestOutputHelper output)
         var feeSink = feeSinks[0];
         Add(theirs, feeSink, transactions.Aggregate(BigInteger.Zero, static (sum, t) => sum + t.Fee));
 
+        var payouts = blocks.Skip(1).Count(static b => b.Block.ProposerPayout is > 0);
         var payments = transactions.Count(static t => t.Amount > 0);
         var innerPayments = transactions.Count(static t => t.Id.Length == 0 && t.Amount > 0);
-        var payouts = blocks.Skip(1).Count(static b => b.Block.ProposerPayout is > 0);
         output.WriteLine($"voi rounds {first}-{last}: {transactions.Count} indexer transactions, {payments} payments ({innerPayments} inner), {payouts} proposer payouts, {ours.Count} accounts with effects");
         Assert.True(transactions.Any(static t => t.Id.Length > 0 && t.Amount > 0), "The window has no top-level payment, so it proves nothing.");
-        Assert.True(payouts == 0, "Voi now pays proposer payouts; add them to the expected side of this comparison.");
 
         var problems = new List<string>();
         foreach (var account in ours.Keys.Union(theirs.Keys))
