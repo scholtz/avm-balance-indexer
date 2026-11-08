@@ -93,12 +93,19 @@ jobs:
 
   python:
     name: Python ${{ matrix.python }}
-    # Pinned: ubuntu-latest is Ubuntu 26.04 now and setup-python has no Python 3.9 there, but the SDK still supports it.
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.os }}
     strategy:
+      # Independent legs: a failing 3.9 must not hide the 3.13 result.
       fail-fast: false
       matrix:
-        python: ["3.9", "3.13"]
+        include:
+          # Only this leg is pinned: setup-python ("version 3.9 was not found for Ubuntu 26.04", the ubuntu-latest image
+          # since Nov 2026) has no Python 3.9 on the newest image. Drop the pin when `requires-python` in
+          # sdk/python/pyproject.toml moves past 3.9, or when 3.9 is available on ubuntu-latest again.
+          - python: "3.9"
+            os: ubuntu-24.04
+          - python: "3.13"
+            os: ubuntu-latest
     defaults:
       run:
         working-directory: sdk/python
