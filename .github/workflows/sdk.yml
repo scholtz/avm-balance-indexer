@@ -93,8 +93,10 @@ jobs:
 
   python:
     name: Python ${{ matrix.python }}
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest is Ubuntu 26.04 now and setup-python has no Python 3.9 there, but the SDK still supports it.
+    runs-on: ubuntu-24.04
     strategy:
+      fail-fast: false
       matrix:
         python: ["3.9", "3.13"]
     defaults:
