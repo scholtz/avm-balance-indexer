@@ -23,7 +23,9 @@ public class GossipBlockFetcherTests
         TimeProvider? time = null,
         int maxConcurrentPerHost = 32,
         TimeSpan? throttleTimeout = null,
-        ILogger<GossipBlockFetcher>? logger = null)
+        ILogger<GossipBlockFetcher>? logger = null,
+        IGossipHostProvider? provider = null,
+        int recentRoundsWindow = 100)
     {
         var options = new AlgorandChainOptions
         {
@@ -37,11 +39,12 @@ public class GossipBlockFetcherTests
             MaxConcurrentRequestsPerHost = maxConcurrentPerHost,
             MaxThrottleDelay = TimeSpan.FromMilliseconds(20),
             ThrottleTimeout = throttleTimeout ?? TimeSpan.FromSeconds(5),
+            RecentRoundsWindow = recentRoundsWindow,
         };
 
         return new GossipBlockFetcher(
             new HttpClient(new StubHandler(handler)),
-            new StaticGossipHostProvider(hosts ?? [HostA, HostB]),
+            provider ?? new StaticGossipHostProvider(hosts ?? [HostA, HostB]),
             Chain.Profile,
             options,
             Chain.GenesisHash,
@@ -362,6 +365,277 @@ public class GossipBlockFetcherTests
         var error = await Assert.ThrowsAsync<BlockFetchException>(() => fetcher.FetchBlockAsync(2, CancellationToken.None));
 
         Assert.IsNotType<BlockNotAvailableException>(error);
+    }
+
+    private sealed class TieredHosts(string[] archival, string[] relays, bool relaysFail = false) : IGossipHostProvider
+    {
+        public Task<IReadOnlyList<string>> GetHostsAsync(CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<string>>(archival);
+
+        public Task<IReadOnlyList<string>> GetRelayHostsAsync(CancellationToken cancellationToken) =>
+            relaysFail ? Task.FromException<IReadOnlyList<string>>(new InvalidOperationException("no relays")) : Task.FromResult<IReadOnlyList<string>>(relays);
+    }
+
+    [Fact]
+    public async Task Blocks_Near_The_Tip_Are_Also_Fetched_From_Relays()
+    {
+        var served = new ConcurrentDictionary<string, int>();
+        var clock = new ManualClock();
+        var fetcher = CreateFetcher(
+            (request, _) =>
+            {
+                served.AddOrUpdate(request.RequestUri!.Host, 1, static (_, n) => n + 1);
+                clock.Advance(TimeSpan.FromMilliseconds(250)); // as fast as an unknown host is assumed to be: neither learns to win every pick
+                return Task.FromResult(Ok(Chain.Encode(950, [])));
+            },
+            provider: new TieredHosts(["http://archive.test:4160"], ["http://relay.test:4160"]),
+            time: clock);
+
+        for (var i = 0; i < 40; i++)
+        {
+            await fetcher.FetchBlockAsync(950, 1000, CancellationToken.None);
+        }
+
+        Assert.True(served.GetValueOrDefault("relay.test") > 0, "relays were never asked");
+        Assert.True(served.GetValueOrDefault("archive.test") > 0, "archival nodes were never asked");
+    }
+
+    [Fact]
+    public async Task Old_Blocks_Are_Never_Asked_From_Relays()
+    {
+        var served = new ConcurrentDictionary<string, int>();
+        var fetcher = CreateFetcher(
+            (request, _) =>
+            {
+                served.AddOrUpdate(request.RequestUri!.Host, 1, static (_, n) => n + 1);
+                return Task.FromResult(Ok(Chain.Encode(500, [])));
+            },
+            provider: new TieredHosts(["http://archive.test:4160"], ["http://relay.test:4160"]));
+
+        for (var i = 0; i < 20; i++)
+        {
+            await fetcher.FetchBlockAsync(500, 1000, CancellationToken.None); // 500 behind the tip
+            await fetcher.FetchBlockAsync(500, CancellationToken.None); // no tip known
+        }
+
+        Assert.Equal(0, served.GetValueOrDefault("relay.test"));
+    }
+
+    [Fact]
+    public async Task A_Zero_Window_Turns_Relays_Off()
+    {
+        var served = new ConcurrentDictionary<string, int>();
+        var fetcher = CreateFetcher(
+            (request, _) =>
+            {
+                served.AddOrUpdate(request.RequestUri!.Host, 1, static (_, n) => n + 1);
+                return Task.FromResult(Ok(Chain.Encode(1000, [])));
+            },
+            provider: new TieredHosts(["http://archive.test:4160"], ["http://relay.test:4160"]),
+            recentRoundsWindow: 0);
+
+        for (var i = 0; i < 20; i++)
+        {
+            await fetcher.FetchBlockAsync(1000, 1000, CancellationToken.None);
+        }
+
+        Assert.Equal(0, served.GetValueOrDefault("relay.test"));
+    }
+
+    [Fact]
+    public async Task A_Relay_Discovery_Failure_Leaves_The_Archival_Nodes_Working()
+    {
+        var fetcher = CreateFetcher(
+            (_, _) => Task.FromResult(Ok(Chain.Encode(990, []))),
+            provider: new TieredHosts(["http://archive.test:4160"], [], relaysFail: true));
+
+        var block = await fetcher.FetchBlockAsync(990, 1000, CancellationToken.None);
+
+        Assert.Equal(990UL, block.Round);
+    }
+
+    [Fact]
+    public async Task A_Relay_That_Lacks_The_Newest_Block_Still_Means_Not_Available_Yet()
+    {
+        var fetcher = CreateFetcher(
+            (_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound)),
+            maxAttempts: 4,
+            provider: new TieredHosts(["http://archive.test:4160"], ["http://relay.test:4160"]));
+
+        await Assert.ThrowsAsync<BlockNotAvailableException>(() => fetcher.FetchBlockAsync(1000, 1000, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Relays_That_Pruned_The_Block_Do_Not_Use_Up_The_Attempts_Before_An_Archival_Node_Is_Asked()
+    {
+        string[] relays = [.. Enumerable.Range(1, 7).Select(i => $"http://relay{i}.test:4160")];
+        var fetcher = CreateFetcher(
+            (request, _) => Task.FromResult(request.RequestUri!.Host == "archive.test" ? Ok(Chain.Encode(920, [])) : new HttpResponseMessage(HttpStatusCode.NotFound)),
+            maxAttempts: 2,
+            provider: new TieredHosts(["http://archive.test:4160"], relays));
+
+        for (var i = 0; i < 30; i++)
+        {
+            var block = await fetcher.FetchBlockAsync(920, 1000, CancellationToken.None);
+            Assert.Equal(920UL, block.Round);
+        }
+    }
+
+    [Fact]
+    public async Task A_Relay_Is_Asked_At_Most_Once_Per_Fetch()
+    {
+        var calls = new ConcurrentDictionary<string, int>();
+        var fetcher = CreateFetcher(
+            (request, _) =>
+            {
+                calls.AddOrUpdate(request.RequestUri!.Host, 1, static (_, n) => n + 1);
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+            },
+            maxAttempts: 4,
+            provider: new TieredHosts(["http://archive.test:4160"], ["http://relay1.test:4160", "http://relay2.test:4160"]));
+
+        await Assert.ThrowsAsync<BlockNotAvailableException>(() => fetcher.FetchBlockAsync(1000, 1000, CancellationToken.None));
+
+        Assert.All(calls, c => Assert.True(c.Key == "archive.test" || c.Value == 1, $"{c.Key} was asked {c.Value} times"));
+    }
+
+    [Fact]
+    public async Task Relays_Missing_A_Block_Do_Not_Hide_A_Broken_Archival_Fleet()
+    {
+        var fetcher = CreateFetcher(
+            (request, _) => Task.FromResult(new HttpResponseMessage(request.RequestUri!.Host.StartsWith("relay", StringComparison.Ordinal) ? HttpStatusCode.NotFound : HttpStatusCode.InternalServerError)),
+            maxAttempts: 4,
+            provider: new TieredHosts(["http://archive.test:4160"], ["http://relay1.test:4160", "http://relay2.test:4160", "http://relay3.test:4160"]));
+
+        var error = await Assert.ThrowsAsync<BlockFetchException>(() => fetcher.FetchBlockAsync(1000, 1000, CancellationToken.None));
+
+        Assert.IsNotType<BlockNotAvailableException>(error);
+    }
+
+    [Fact]
+    public async Task Failing_Relays_Do_Not_Turn_A_Block_That_Is_Not_Out_Yet_Into_A_Failure()
+    {
+        var fetcher = CreateFetcher(
+            (request, _) => Task.FromResult(new HttpResponseMessage(request.RequestUri!.Host.StartsWith("relay", StringComparison.Ordinal) ? HttpStatusCode.InternalServerError : HttpStatusCode.NotFound)),
+            maxAttempts: 6,
+            provider: new TieredHosts(["http://archive.test:4160"], ["http://relay1.test:4160", "http://relay2.test:4160", "http://relay3.test:4160"]));
+
+        await Assert.ThrowsAsync<BlockNotAvailableException>(() => fetcher.FetchBlockAsync(1000, 1000, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task A_Relay_Miss_Does_Not_Make_The_Fetch_Repeat_An_Archival_Node_Before_The_Others_Were_Tried()
+    {
+        string[] archival = ["http://a1.test:4160", "http://a2.test:4160", "http://a3.test:4160"];
+        var calls = new ConcurrentDictionary<string, int>();
+        var fetcher = CreateFetcher(
+            (request, _) =>
+            {
+                calls.AddOrUpdate(request.RequestUri!.Host, 1, static (_, n) => n + 1);
+                return Task.FromResult(new HttpResponseMessage(request.RequestUri.Host.StartsWith("relay", StringComparison.Ordinal) ? HttpStatusCode.NotFound : HttpStatusCode.InternalServerError));
+            },
+            maxAttempts: 3,
+            provider: new TieredHosts(archival, ["http://relay1.test:4160"]));
+
+        for (var i = 0; i < 20; i++)
+        {
+            calls.Clear();
+            await Assert.ThrowsAsync<BlockFetchException>(() => fetcher.FetchBlockAsync(1000, 1000, CancellationToken.None));
+            Assert.Equal(["a1.test", "a2.test", "a3.test"], calls.Keys.Where(h => h.StartsWith('a')).Order());
+            Assert.All(calls.Where(c => c.Key.StartsWith('a')), c => Assert.Equal(1, c.Value));
+        }
+    }
+
+    [Fact]
+    public async Task Failing_Relays_Between_Archival_Attempts_Do_Not_Make_The_Rotation_Skip_An_Archival_Node()
+    {
+        string[] archival = ["http://a1.test:4160", "http://a2.test:4160", "http://a3.test:4160"];
+        var calls = new ConcurrentDictionary<string, int>();
+        var fetcher = CreateFetcher(
+            (request, _) =>
+            {
+                calls.AddOrUpdate(request.RequestUri!.Host, 1, static (_, n) => n + 1);
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.InternalServerError));
+            },
+            maxAttempts: 3,
+            provider: new TieredHosts(archival, ["http://relay1.test:4160", "http://relay2.test:4160", "http://relay3.test:4160"]));
+
+        for (var i = 0; i < 40; i++)
+        {
+            calls.Clear();
+            await Assert.ThrowsAsync<BlockFetchException>(() => fetcher.FetchBlockAsync(1000, 1000, CancellationToken.None));
+            Assert.Equal(["a1.test", "a2.test", "a3.test"], calls.Keys.Where(h => h.StartsWith('a')).Order());
+        }
+    }
+
+    [Fact]
+    public async Task Failing_Relays_Neither_Use_Up_Attempts_Nor_Hide_The_Archival_Failure()
+    {
+        string[] relays = [.. Enumerable.Range(1, 7).Select(i => $"http://relay{i}.test:4160")];
+        var fetcher = CreateFetcher(
+            (request, _) => Task.FromResult(new HttpResponseMessage(request.RequestUri!.Host.StartsWith("relay", StringComparison.Ordinal) ? HttpStatusCode.NotFound : HttpStatusCode.ServiceUnavailable)),
+            maxAttempts: 2,
+            provider: new TieredHosts(["http://archive.test:4160"], relays));
+
+        var error = await Assert.ThrowsAsync<BlockFetchException>(() => fetcher.FetchBlockAsync(1000, 1000, CancellationToken.None));
+
+        Assert.IsType<HttpRequestException>(error.InnerException);
+    }
+
+    [Fact]
+    public async Task A_Relay_That_Errors_Is_Left_Out_Of_The_Fetch_Instead_Of_Costing_An_Attempt()
+    {
+        string[] relays = [.. Enumerable.Range(1, 7).Select(i => $"http://relay{i}.test:4160")];
+        var fetcher = CreateFetcher(
+            (request, _) => Task.FromResult(request.RequestUri!.Host == "archive.test" ? Ok(Chain.Encode(920, [])) : new HttpResponseMessage(HttpStatusCode.InternalServerError)),
+            maxAttempts: 1,
+            provider: new TieredHosts(["http://archive.test:4160"], relays));
+
+        for (var i = 0; i < 20; i++)
+        {
+            Assert.Equal(920UL, (await fetcher.FetchBlockAsync(920, 1000, CancellationToken.None)).Round);
+        }
+    }
+
+    [Fact]
+    public async Task Several_Dead_Relays_Are_Not_All_Tried_Before_The_Archival_Nodes()
+    {
+        string[] relays = [.. Enumerable.Range(1, 7).Select(i => $"http://relay{i}.test:4160")];
+        var relayCalls = 0;
+        var fetcher = CreateFetcher(
+            (request, _) =>
+            {
+                if (request.RequestUri!.Host == "archive.test")
+                {
+                    return Task.FromResult(Ok(Chain.Encode(920, [])));
+                }
+
+                Interlocked.Increment(ref relayCalls);
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.InternalServerError));
+            },
+            maxAttempts: 1,
+            provider: new TieredHosts(["http://archive.test:4160"], relays));
+
+        for (var i = 0; i < 20; i++)
+        {
+            relayCalls = 0;
+            await fetcher.FetchBlockAsync(920, 1000, CancellationToken.None);
+            Assert.True(relayCalls <= 2, $"{relayCalls} relays were tried in one fetch");
+        }
+    }
+
+    [Fact]
+    public async Task Rate_Limiting_Relays_Neither_Delay_The_Fetch_Nor_Count_Towards_The_Throttle_Timeout()
+    {
+        string[] relays = [.. Enumerable.Range(1, 7).Select(i => $"http://relay{i}.test:4160")];
+        var fetcher = CreateFetcher(
+            (request, _) => Task.FromResult(request.RequestUri!.Host == "archive.test" ? Ok(Chain.Encode(920, [])) : Throttled(TimeSpan.FromSeconds(30))),
+            throttleTimeout: TimeSpan.FromSeconds(1),
+            provider: new TieredHosts(["http://archive.test:4160"], relays));
+
+        for (var i = 0; i < 20; i++)
+        {
+            Assert.Equal(920UL, (await fetcher.FetchBlockAsync(920, 1000, CancellationToken.None)).Round);
+        }
     }
 
     private sealed class FailingHosts : IGossipHostProvider
