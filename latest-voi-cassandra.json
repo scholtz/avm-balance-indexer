@@ -2,58 +2,58 @@
   "provider": "cassandra",
   "providerVersion": "Cassandra 5.0.9",
   "chain": "voi",
-  "date": "2026-11-10",
+  "date": "2026-11-11",
   "commit": "e3803b2e69913f883b89df48d5bf71b20170ddcb",
   "machine": "Ubuntu 26.04.1 LTS, 4 cores, 16 GiB",
   "rounds": 100000,
-  "firstChainRound": 24299067,
-  "lastChainRound": 24399066,
+  "firstChainRound": 24329970,
+  "lastChainRound": 24429969,
   "download": {
-    "seconds": 1577.0247352,
-    "roundsPerSecond": 63.41054630783448,
-    "transactions": 6617
+    "seconds": 1635.2160889,
+    "roundsPerSecond": 61.15399712540096,
+    "transactions": 6780
   },
   "indexing": {
-    "seconds": 21.8173339,
-    "roundsPerSecond": 4583.51146195732,
-    "effects": 24388,
-    "effectsPerSecond": 1117.8267753421512,
-    "seededAccounts": 138
+    "seconds": 19.9231008,
+    "roundsPerSecond": 5019.299003898028,
+    "effects": 32893,
+    "effectsPerSecond": 1650.9980213521783,
+    "seededAccounts": 145
   },
   "storage": {
-    "totalBytes": 2568298,
-    "effects": 24526,
-    "bytesPerEffect": 104.71736116774036,
-    "kilobytesPerRound": 0.02508103515625,
+    "totalBytes": 2932312,
+    "effects": 33038,
+    "bytesPerEffect": 88.75573581935953,
+    "kilobytesPerRound": 0.028635859375,
     "includesUnflushedData": false,
     "tables": [
       {
         "name": "effects_by_account_token_bucket",
-        "bytes": 1455426
+        "bytes": 1681766
       },
       {
         "name": "effects_by_token_bucket",
-        "bytes": 985178
+        "bytes": 1119539
       },
       {
         "name": "effect_buckets_by_account_token",
-        "bytes": 40228
+        "bytes": 41356
       },
       {
         "name": "holdings_by_token",
-        "bytes": 26813
+        "bytes": 27550
       },
       {
         "name": "accounts_touched_by_token",
-        "bytes": 24774
+        "bytes": 25459
       },
       {
         "name": "holdings_by_account",
-        "bytes": 23464
+        "bytes": 24188
       },
       {
         "name": "token_by_id",
-        "bytes": 7050
+        "bytes": 7089
       },
       {
         "name": "chain_status",
@@ -85,132 +85,132 @@
     {
       "name": "status",
       "path": "/v1/voi/status",
-      "p50Ms": 0.9628,
-      "p95Ms": 1.385,
-      "p99Ms": 2.6037,
+      "p50Ms": 0.7252,
+      "p95Ms": 0.8649,
+      "p99Ms": 1.3875,
       "concurrency": 16,
-      "requestsPerSecond": 3371.3122900515273,
-      "concurrentP95Ms": 8.5081,
+      "requestsPerSecond": 4284.060638307898,
+      "concurrentP95Ms": 6.6858,
       "requests": 2300,
       "errors": 0
     },
     {
       "name": "account holdings",
       "path": "/accounts/{a}/tokens",
-      "p50Ms": 1.6736,
-      "p95Ms": 2.5405,
-      "p99Ms": 3.875,
+      "p50Ms": 1.2473,
+      "p95Ms": 1.686,
+      "p99Ms": 6.9852,
       "concurrency": 16,
-      "requestsPerSecond": 1848.329415183028,
-      "concurrentP95Ms": 14.2642,
+      "requestsPerSecond": 2494.178587177528,
+      "concurrentP95Ms": 11.0257,
       "requests": 2300,
       "errors": 0
     },
     {
       "name": "balance, latest",
       "path": "/accounts/{a}/tokens/algo/0/balance",
-      "p50Ms": 2.6905,
-      "p95Ms": 3.2879,
-      "p99Ms": 4.3978,
+      "p50Ms": 2.0301,
+      "p95Ms": 2.6012,
+      "p99Ms": 2.9095,
       "concurrency": 16,
-      "requestsPerSecond": 1510.4949567216763,
-      "concurrentP95Ms": 16.0559,
+      "requestsPerSecond": 2071.882728122576,
+      "concurrentP95Ms": 12.7797,
       "requests": 2300,
       "errors": 0
     },
     {
       "name": "balance, past round",
       "path": "/accounts/{a}/tokens/algo/0/balance?round=N",
-      "p50Ms": 2.4999,
-      "p95Ms": 2.952,
-      "p99Ms": 3.5856,
+      "p50Ms": 2.025,
+      "p95Ms": 2.8687,
+      "p99Ms": 5.3738,
       "concurrency": 16,
-      "requestsPerSecond": 1390.6836433908873,
-      "concurrentP95Ms": 17.7352,
+      "requestsPerSecond": 2208.9413306287056,
+      "concurrentP95Ms": 10.7997,
       "requests": 2300,
       "errors": 0
     },
     {
       "name": "history, busiest account",
       "path": "/accounts/{a}/tokens/algo/0/transactions?limit=100",
-      "p50Ms": 5.6064,
-      "p95Ms": 9.9098,
-      "p99Ms": 14.2732,
+      "p50Ms": 5.3011,
+      "p95Ms": 8.2358,
+      "p99Ms": 11.2674,
       "concurrency": 16,
-      "requestsPerSecond": 747.9533658555922,
-      "concurrentP95Ms": 38.4719,
+      "requestsPerSecond": 649.7372007943947,
+      "concurrentP95Ms": 48.4966,
       "requests": 2300,
       "errors": 0
     },
     {
       "name": "history, typical account",
       "path": "/accounts/{a}/tokens/algo/0/transactions?limit=100",
-      "p50Ms": 1.7698,
-      "p95Ms": 3.2526,
-      "p99Ms": 3.7694,
+      "p50Ms": 1.3577,
+      "p95Ms": 2.5502,
+      "p99Ms": 3.3838,
       "concurrency": 16,
-      "requestsPerSecond": 1907.2000329564166,
-      "concurrentP95Ms": 14.3943,
+      "requestsPerSecond": 2480.5463155205302,
+      "concurrentP95Ms": 11.4676,
       "requests": 2300,
       "errors": 0
     },
     {
       "name": "holders, native, latest",
       "path": "/tokens/algo/0/holders?limit=100",
-      "p50Ms": 3.2893,
-      "p95Ms": 4.7445,
-      "p99Ms": 5.8572,
+      "p50Ms": 2.4029,
+      "p95Ms": 3.9127,
+      "p99Ms": 6.7591,
       "concurrency": 16,
-      "requestsPerSecond": 797.9350717040414,
-      "concurrentP95Ms": 33.3438,
+      "requestsPerSecond": 938.4879345175675,
+      "concurrentP95Ms": 30.2928,
       "requests": 2300,
       "errors": 0
     },
     {
       "name": "holders, native, past round",
       "path": "/tokens/algo/0/holders?round=N\u0026limit=100",
-      "p50Ms": 9.2786,
-      "p95Ms": 12.3316,
-      "p99Ms": 16.5454,
+      "p50Ms": 7.6474,
+      "p95Ms": 10.6734,
+      "p99Ms": 14.1369,
       "concurrency": 16,
-      "requestsPerSecond": 183.02085511662804,
-      "concurrentP95Ms": 112.6741,
+      "requestsPerSecond": 210.06446363731092,
+      "concurrentP95Ms": 98.7449,
       "requests": 2300,
       "errors": 0
     },
     {
       "name": "holders, busiest ASA, latest",
       "path": "/tokens/asa/{id}/holders?limit=100",
-      "p50Ms": 2.021,
-      "p95Ms": 2.4647,
-      "p99Ms": 2.8097,
+      "p50Ms": 1.3462,
+      "p95Ms": 1.6512,
+      "p99Ms": 1.9541,
       "concurrency": 16,
-      "requestsPerSecond": 1637.3558144469798,
-      "concurrentP95Ms": 16.3813,
+      "requestsPerSecond": 2434.1276378641214,
+      "concurrentP95Ms": 10.9383,
       "requests": 2300,
       "errors": 0
     },
     {
       "name": "holders, busiest ARC-200, latest",
       "path": "/tokens/arc200/{id}/holders?limit=100",
-      "p50Ms": 2.3728,
-      "p95Ms": 2.8891,
-      "p99Ms": 3.6411,
+      "p50Ms": 1.5566,
+      "p95Ms": 1.91,
+      "p99Ms": 2.6327,
       "concurrency": 16,
-      "requestsPerSecond": 1302.0261153888096,
-      "concurrentP95Ms": 18.9233,
+      "requestsPerSecond": 1643.7389735934978,
+      "concurrentP95Ms": 16.7756,
       "requests": 2300,
       "errors": 0
     },
     {
       "name": "token info",
       "path": "/tokens/algo/0",
-      "p50Ms": 0.6713,
-      "p95Ms": 0.7776,
-      "p99Ms": 0.8809,
+      "p50Ms": 0.4369,
+      "p95Ms": 0.5424,
+      "p99Ms": 0.9486,
       "concurrency": 16,
-      "requestsPerSecond": 6799.210475679563,
-      "concurrentP95Ms": 3.8281,
+      "requestsPerSecond": 9325.809270413964,
+      "concurrentP95Ms": 3.0936,
       "requests": 2300,
       "errors": 0
     }
@@ -218,8 +218,8 @@
   "assets": {
     "tokensByKind": {
       "algo": 1,
-      "arc200": 23,
-      "asa": 4
+      "arc200": 24,
+      "asa": 5
     },
     "assetsCreated": 0,
     "arc20Assets": 0,
@@ -227,63 +227,63 @@
       {
         "token": "algo:0",
         "name": "VOI",
-        "effects": 20849,
-        "holders": 61,
-        "optedIn": 99
+        "effects": 29275,
+        "holders": 62,
+        "optedIn": 104
       },
       {
         "token": "arc200:390001",
-        "effects": 888,
+        "effects": 920,
         "holders": 11,
         "optedIn": 21
       },
       {
         "token": "asa:586896",
-        "effects": 626,
+        "effects": 490,
         "holders": 1,
         "optedIn": 2
       },
       {
         "token": "arc200:395614",
-        "effects": 404,
+        "effects": 408,
         "holders": 5,
         "optedIn": 14
       },
       {
         "token": "arc200:420069",
-        "effects": 316,
+        "effects": 362,
         "holders": 17,
         "optedIn": 26
       },
       {
         "token": "arc200:300279",
-        "effects": 220,
+        "effects": 232,
         "holders": 19,
         "optedIn": 27
       },
       {
         "token": "arc200:47138068",
-        "effects": 180,
+        "effects": 212,
         "holders": 7,
         "optedIn": 11
       },
       {
         "token": "arc200:412682",
-        "effects": 166,
+        "effects": 174,
         "holders": 6,
         "optedIn": 13
       },
       {
         "token": "asa:302190",
-        "effects": 132,
-        "holders": 5,
-        "optedIn": 9
+        "effects": 134,
+        "holders": 6,
+        "optedIn": 11
       },
       {
-        "token": "arc200:410419",
-        "effects": 80,
-        "holders": 6,
-        "optedIn": 9
+        "token": "arc200:404004",
+        "effects": 94,
+        "holders": 16,
+        "optedIn": 19
       }
     ]
   }
