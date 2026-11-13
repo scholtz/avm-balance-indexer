@@ -91,7 +91,7 @@ curl http://localhost:5000/v1/algorand-testnet/status
 | `Storage:Cassandra:LeaseTtlSeconds` / `Storage:PostgreSql:LeaseHeartbeatSeconds` | Writer lease tuning (default 30 / 5): the Cassandra lease row TTL bounds failover time; the PostgreSQL heartbeat detects a dead lease session. |
 | `Storage:Cassandra:ContactPoints` / `Port` | Required for Cassandra: hosts and native-protocol port (default 9042). |
 | `Storage:Cassandra:Keyspace` / `LocalDatacenter` | One keyspace per chain deployment; the datacenter the driver routes to. Reads and writes use `LOCAL_QUORUM`. |
-| `Storage:Cassandra:RetiredKeyspaces` | Keyspaces used before a rebuild. The writer drops them once the deployment follows the chain; it refuses another chain's keyspace and one that is still written to (ADR 0020). Cannot be undone. |
+| `Storage:Cassandra:RetiredKeyspaces` / `RetiredKeyspaceQuietMinutes` | Keyspaces used before a rebuild. The writer drops them once the deployment follows the chain; it refuses another chain's keyspace and waits while one has a writer lease or was written to in the last 60 minutes (ADR 0020). Cannot be undone. |
 | `Storage:Cassandra:CreateKeyspace` / `ReplicationFactor` | Let the worker create the keyspace (`NetworkTopologyStrategy`, default 3 replicas). Use `ReplicationFactor` 1 on a single-node dev cluster (reads and writes need a `LOCAL_QUORUM`). Set `CreateKeyspace` to false when the operator manages it. |
 | `Storage:Cassandra:Username` / `Password` / `UseTls` | Optional credentials (keep them in a secret) and TLS. Without `UseTls` credentials travel in clear text. |
 | `Algorand:AlgodUrl` / `AlgodToken` | Algod node for the latest round and genesis. Defaults to a public endpoint. |

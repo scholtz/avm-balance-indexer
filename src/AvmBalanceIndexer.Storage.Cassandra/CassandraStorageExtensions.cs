@@ -108,6 +108,10 @@ internal sealed partial class CassandraOptionsValidator : IValidateOptions<Stora
         }
 
         errors.AddRange(RetiredKeyspaceErrors(settings));
+        if (settings.RetiredKeyspaceQuietMinutes is < 0 or > 43200)
+        {
+            errors.Add("Storage:Cassandra:RetiredKeyspaceQuietMinutes must be between 0 and 43200 (30 days).");
+        }
 
         if (!IsValidDatacenter(settings.LocalDatacenter))
         {

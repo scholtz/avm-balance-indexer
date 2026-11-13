@@ -51,6 +51,13 @@ data:
   Storage__Cassandra__Keyspace: {{ .Values.storage.cassandra.keyspace | quote }}
   Storage__Cassandra__LocalDatacenter: {{ .Values.storage.cassandra.localDatacenter | quote }}
   {{- range $i, $retired := .Values.storage.cassandra.retiredKeyspaces }}
+  {{- /* The same rules as the options validator: a wrong entry must fail here, not in a pod that then cannot start. */}}
+  {{- if not (regexMatch "^[A-Za-z][A-Za-z0-9_]{0,47}$" (toString $retired)) }}
+  {{- fail (printf "storage.cassandra.retiredKeyspaces holds %q, which is not a keyspace name (a letter, then letters, digits and underscores, at most 48 characters)" (toString $retired)) }}
+  {{- end }}
+  {{- if hasPrefix "system" (lower $retired) }}
+  {{- fail (printf "storage.cassandra.retiredKeyspaces holds %q, a Cassandra system keyspace" $retired) }}
+  {{- end }}
   {{- if eq (lower $retired) (lower $.Values.storage.cassandra.keyspace) }}
   {{- fail (printf "storage.cassandra.retiredKeyspaces holds %q, the keyspace this release uses: it would drop its own data" $retired) }}
   {{- end }}

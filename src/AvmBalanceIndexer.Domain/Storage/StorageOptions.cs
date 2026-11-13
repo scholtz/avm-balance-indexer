@@ -49,6 +49,12 @@ public sealed class CassandraOptions
     /// </summary>
     public string[] RetiredKeyspaces { get; set; } = [];
 
+    /// <summary>
+    /// How long the status of a retired keyspace must have been untouched before it is dropped. A writer keeps it moving, so this
+    /// tells an abandoned keyspace from one whose writer is only restarting, and leaves time to roll a switch back.
+    /// </summary>
+    public int RetiredKeyspaceQuietMinutes { get; set; } = 60;
+
     /// <summary>Let the schema manager create the keyspace (NetworkTopologyStrategy with <see cref="ReplicationFactor"/> replicas in <see cref="LocalDatacenter"/>).</summary>
     public bool CreateKeyspace { get; set; } = true;
 

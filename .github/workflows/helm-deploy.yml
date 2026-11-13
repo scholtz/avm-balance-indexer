@@ -238,35 +238,6 @@ jobs:
           RELEASE: ${{ inputs.release }}
         run: |
           kubectl -n "$NAMESPACE" get pods,svc,ingress -l "app.kubernetes.io/instance=$RELEASE" -o wide || true
-      # Database change requests (docs/adr/0020): the values list keyspaces to retire, the worker drops them once it follows the chain.
-      # This step only reports what the worker said; a refused request (wrong chain, not an indexer keyspace) fails the job so that it is seen.
-      - name: Database change requests
-        env:
-          RELEASE: ${{ inputs.release }}
-          CHAIN: ${{ inputs.chain }}
-        run: |
-          retired="$(helm get values "$RELEASE" --namespace "$NAMESPACE" --all -o json | jq -r '.storage.cassandra.retiredKeyspaces // [] | join(", ")')"
-          if [ -z "$retired" ]; then echo "No retired keyspaces are listed for $RELEASE"; exit 0; fi
-          echo "Retired keyspaces of $RELEASE: $retired"
-          # The writer checks once a minute after it took the lease; give it a little time to say what it did.
-          lines=""
-          for attempt in 1 2 3 4 5 6; do
-            if ! logs="$(kubectl -n "$NAMESPACE" logs "deploy/${RELEASE}-${CHAIN}-worker" --since=30m 2>/dev/null)"; then
-              echo "::warning::The worker log could not be read; check there what happened to the retired keyspaces ($retired)"; exit 0
-            fi
-            lines="$(printf '%s\n' "$logs" | grep 'Retired storage' | grep -E 'was removed|does not exist|was not removed|still in use' || true)"
-            [ -n "$lines" ] && break
-            sleep 30
-          done
-          printf '%s\n' "$lines"
-          if printf '%s\n' "$lines" | grep -q 'was not removed'; then
-            echo "::error::The worker refused a retired keyspace of $RELEASE; correct storage.cassandra.retiredKeyspaces in the values (the worker log has the reason)"; exit 1
-          fi
-          if [ -z "$lines" ]; then
-            echo "::notice::Retired keyspaces of $RELEASE ($retired) are still pending: the worker drops them once the chain status is Following"
-          elif printf '%s\n' "$lines" | grep -q 'was removed'; then
-            echo "::notice::Retired keyspaces of $RELEASE were dropped; take them off storage.cassandra.retiredKeyspaces at the next change"
-          fi
       - name: Smoke test
         env:
           HOST: ${{ inputs.host }}
@@ -277,4 +248,39 @@ jobs:
             echo
           else
             echo "::warning::https://${HOST}/v1/${CHAIN}/status did not answer; check the ingress, DNS and the certificate"
+          fi
+      # Database change requests (docs/adr/0020): the values list keyspaces to retire, the worker drops them once it follows the chain.
+      # This step only reports what the worker log says, after everything else. A refused request (wrong chain, not an indexer keyspace) marks
+      # the step failed and raises an error annotation, but not the job: the release itself is deployed and healthy, and the other chains must
+      # still be deployed. The words searched for are pinned by RetiredStorageCleanerTests.
+      - name: Database change requests
+        continue-on-error: true
+        env:
+          RELEASE: ${{ inputs.release }}
+        run: |
+          set -o pipefail
+          retired="$(helm get values "$RELEASE" --namespace "$NAMESPACE" --all -o json | jq -r '.storage.cassandra.retiredKeyspaces // [] | join(", ")')"
+          if [ -z "$retired" ]; then echo "No retired keyspaces are listed for $RELEASE"; exit 0; fi
+          echo "Retired keyspaces of $RELEASE: $retired"
+          # Only the replica that holds the writer lease reports, so every worker pod is read. The writer checks once a minute after it
+          # took the lease; give it a little time to say what it did.
+          lines=""
+          for attempt in 1 2 3 4 5 6; do
+            if ! logs="$(kubectl -n "$NAMESPACE" logs -l "app.kubernetes.io/instance=${RELEASE},app.kubernetes.io/component=worker" --tail=-1 --prefix --max-log-requests 10 2>/dev/null)"; then
+              echo "::warning::The worker logs could not be read; check there what happened to the retired keyspaces ($retired)"; exit 0
+            fi
+            lines="$(printf '%s\n' "$logs" | grep 'Retired storage' | grep -E 'was removed|does not exist|was not removed|still in use' || true)"
+            [ -n "$lines" ] && break
+            sleep 30
+          done
+          printf '%s\n' "$lines"
+          if printf '%s\n' "$lines" | grep -q 'was not removed'; then
+            echo "::error::The worker refused a retired keyspace of $RELEASE; correct storage.cassandra.retiredKeyspaces in the values (the worker log has the reason)"; exit 1
+          fi
+          if [ -z "$lines" ]; then
+            echo "::notice::The workers of $RELEASE have reported nothing about the retired keyspaces ($retired) yet. They are dropped once the chain status is Following; a worker that logs below Information does not report keyspaces that are already gone"
+          elif printf '%s\n' "$lines" | grep -q 'was removed'; then
+            echo "::notice::Retired keyspaces of $RELEASE were dropped; take them off storage.cassandra.retiredKeyspaces at the next change"
+          elif printf '%s\n' "$lines" | grep -q 'still in use'; then
+            echo "::notice::Retired keyspaces of $RELEASE are not dropped yet: they must be unused and untouched for the quiet period first (the worker tries again every minute)"
           fi

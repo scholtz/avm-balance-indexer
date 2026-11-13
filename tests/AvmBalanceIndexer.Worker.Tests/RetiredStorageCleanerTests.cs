@@ -1,6 +1,8 @@
 using AvmBalanceIndexer.Domain.Chains;
 using AvmBalanceIndexer.Domain.Storage;
 using AvmBalanceIndexer.TestSupport;
+using System.Collections.Concurrent;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
@@ -136,6 +138,81 @@ public class RetiredStorageCleanerTests
         Assert.Equal(0, storage.Reads);
     }
 
+    [Fact]
+    public async Task Each_Request_Is_Finished_By_Itself_And_A_Final_Answer_Is_Not_Asked_Again()
+    {
+        var retired = new FakeRetired("busy", "foreign", "old");
+        retired.Outcomes["busy"] = RetirementOutcome.InUse;
+        retired.Outcomes["foreign"] = RetirementOutcome.Refused;
+        using var health = Leader();
+        using var cleaner = Create(retired, new StatusStorage { Status = Status(IngestionState.Following) }, health);
+
+        await cleaner.StartAsync(CancellationToken.None);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        while (retired.Asked.Count(static name => name == "busy") < 4)
+        {
+            await Task.Delay(10, timeout.Token);
+        }
+
+        await cleaner.StopAsync(CancellationToken.None);
+
+        // The keyspace that is in use is asked at every check; the refused and the removed one only once.
+        Assert.Equal(1, retired.Asked.Count(static name => name == "foreign"));
+        Assert.Equal(1, retired.Asked.Count(static name => name == "old"));
+    }
+
+    [Fact]
+    public async Task A_Removal_Is_Logged_Even_When_A_Later_Request_Fails()
+    {
+        var retired = new FakeRetired("old", "broken");
+        retired.Failing.Add("broken");
+        var logger = new CapturingLogger();
+        using var health = Leader();
+        using var cleaner = Create(retired, new StatusStorage { Status = Status(IngestionState.Following) }, health, logger);
+
+        await cleaner.StartAsync(CancellationToken.None);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        while (retired.Asked.Count(static name => name == "broken") < 3)
+        {
+            await Task.Delay(10, timeout.Token);
+        }
+
+        await cleaner.StopAsync(CancellationToken.None);
+
+        Assert.Single(logger.Lines, static line => line.Text.Contains("Retired storage old was removed", StringComparison.Ordinal));
+        Assert.Equal(1, retired.Asked.Count(static name => name == "old"));
+    }
+
+    /// <summary>
+    /// The deploy job (.github/workflows/helm-deploy.yml, step "Database change requests") finds the outcome of a request by
+    /// these words in the worker log. Change them there too.
+    /// </summary>
+    [Theory]
+    [InlineData(RetirementOutcome.Removed, "was removed", LogLevel.Warning)]
+    [InlineData(RetirementOutcome.Absent, "does not exist", LogLevel.Information)]
+    [InlineData(RetirementOutcome.Refused, "was not removed", LogLevel.Error)]
+    [InlineData(RetirementOutcome.InUse, "still in use", LogLevel.Warning)]
+    public async Task The_Outcome_Is_Logged_In_The_Words_The_Deploy_Job_Looks_For(RetirementOutcome outcome, string words, LogLevel level)
+    {
+        var retired = new FakeRetired("old_keyspace") { Final = outcome };
+        var logger = new CapturingLogger();
+        using var health = Leader();
+        using var cleaner = Create(retired, new StatusStorage { Status = Status(IngestionState.Following) }, health, logger);
+
+        await cleaner.StartAsync(CancellationToken.None);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        while (!logger.Lines.Any(line => line.Text.Contains(words, StringComparison.Ordinal)))
+        {
+            await Task.Delay(10, timeout.Token);
+        }
+
+        await cleaner.StopAsync(CancellationToken.None);
+
+        var logged = logger.Lines.First(line => line.Text.Contains(words, StringComparison.Ordinal));
+        Assert.StartsWith("Retired storage old_keyspace ", logged.Text, StringComparison.Ordinal);
+        Assert.Equal(level, logged.Level);
+    }
+
     private static WorkerHealth Leader()
     {
         var health = new WorkerHealth(Guid.NewGuid().ToString("N"));
@@ -146,14 +223,14 @@ public class RetiredStorageCleanerTests
     private static ChainStatus Status(IngestionState state) =>
         new(ChainId.AlgorandTestnet, 10, TestChain.FakeHash(10), 10, state, DateTimeOffset.UnixEpoch);
 
-    private static RetiredStorageCleaner Create(FakeRetired? retired, StatusStorage storage, WorkerHealth health) =>
+    private static RetiredStorageCleaner Create(IRetiredStorage? retired, StatusStorage storage, WorkerHealth health, ILogger<RetiredStorageCleaner>? logger = null) =>
         new(
             retired is null ? [] : [retired],
             storage,
             new ChainContext(ChainId.AlgorandTestnet),
             health,
             Options.Create(new WorkerOptions()),
-            NullLogger<RetiredStorageCleaner>.Instance)
+            logger ?? NullLogger<RetiredStorageCleaner>.Instance)
         {
             CheckInterval = TimeSpan.FromMilliseconds(20),
         };
@@ -188,31 +265,54 @@ public class RetiredStorageCleanerTests
 
         public RetirementOutcome Final { get; init; } = RetirementOutcome.Removed;
 
+        /// <summary>Outcome per name, for requests that end differently; names not listed end with <see cref="Final"/>.</summary>
+        public Dictionary<string, RetirementOutcome> Outcomes { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>Names whose removal always throws.</summary>
+        public HashSet<string> Failing { get; } = new(StringComparer.Ordinal);
+
+        public ConcurrentQueue<string> Asked { get; } = new();
+
         public TaskCompletionSource Removed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public int Calls => Volatile.Read(ref _calls);
 
         public IReadOnlyList<string> Retired => names;
 
-        public Task<IReadOnlyList<RetirementResult>> RemoveRetiredAsync(CancellationToken cancellationToken)
+        public Task<RetirementResult> RemoveRetiredAsync(string name, CancellationToken cancellationToken)
         {
             var call = Interlocked.Increment(ref _calls);
-            if (call <= FailuresBeforeSuccess)
+            Asked.Enqueue(name);
+            if (call <= FailuresBeforeSuccess || Failing.Contains(name))
             {
                 throw new TimeoutException("the drop timed out");
             }
 
             if (call <= InUseAnswers)
             {
-                return Task.FromResult<IReadOnlyList<RetirementResult>>([.. names.Select(static n => new RetirementResult(n, RetirementOutcome.InUse, "a writer holds its lease"))]);
+                return Task.FromResult(new RetirementResult(name, RetirementOutcome.InUse, "a writer holds its lease"));
             }
 
-            if (Final == RetirementOutcome.Removed)
+            var outcome = Outcomes.GetValueOrDefault(name, Final);
+            if (outcome == RetirementOutcome.Removed)
             {
                 Removed.TrySetResult();
             }
 
-            return Task.FromResult<IReadOnlyList<RetirementResult>>([.. names.Select(n => new RetirementResult(n, Final, Final == RetirementOutcome.Refused ? "another chain" : string.Empty))]);
+            return Task.FromResult(new RetirementResult(name, outcome, outcome is RetirementOutcome.Refused or RetirementOutcome.InUse ? "another chain" : string.Empty));
         }
+    }
+
+    private sealed class CapturingLogger : ILogger<RetiredStorageCleaner>
+    {
+        public ConcurrentQueue<(LogLevel Level, string Text)> Lines { get; } = new();
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Lines.Enqueue((logLevel, formatter(state, exception)));
     }
 }

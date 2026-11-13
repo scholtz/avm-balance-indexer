@@ -24,13 +24,13 @@ public sealed partial class RetiredStorageCleaner(
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         // Providers without retirement (PostgreSQL) register nothing.
-        var pending = retired.Where(static r => r.Retired.Count > 0).ToList();
+        var pending = retired.SelectMany(static provider => provider.Retired.Select(name => (Provider: provider, Name: name))).ToList();
         if (pending.Count == 0)
         {
             return;
         }
 
-        var names = string.Join(", ", pending.SelectMany(static r => r.Retired));
+        var names = string.Join(", ", pending.Select(static request => request.Name));
         LogPending(logger, names, chain.Chain);
         using var timer = new PeriodicTimer(CheckInterval ?? TimeSpan.FromSeconds(Math.Max(1, options.Value.RetirementCheckSeconds)));
         try
@@ -41,11 +41,14 @@ public sealed partial class RetiredStorageCleaner(
                 {
                     if (await MayRemoveAsync(stoppingToken).ConfigureAwait(false))
                     {
-                        for (var i = pending.Count - 1; i >= 0; i--)
+                        // Each request is finished and logged by itself: a failure of a later one must not hide a drop that happened.
+                        foreach (var request in pending.ToArray())
                         {
-                            if (await RemoveAsync(pending[i], stoppingToken).ConfigureAwait(false))
+                            var result = await request.Provider.RemoveRetiredAsync(request.Name, stoppingToken).ConfigureAwait(false);
+                            Report(result);
+                            if (result.Outcome != RetirementOutcome.InUse)
                             {
-                                pending.RemoveAt(i);
+                                pending.Remove(request);
                             }
                         }
                     }
@@ -69,31 +72,23 @@ public sealed partial class RetiredStorageCleaner(
         health.State == WorkerState.Leader
         && await storage.GetAsync(chain.Chain, cancellationToken).ConfigureAwait(false) is { State: IngestionState.Following };
 
-    /// <summary>True when nothing is left to try for this provider.</summary>
-    private async Task<bool> RemoveAsync(IRetiredStorage provider, CancellationToken cancellationToken)
+    private void Report(RetirementResult result)
     {
-        var finished = true;
-        foreach (var result in await provider.RemoveRetiredAsync(cancellationToken).ConfigureAwait(false))
+        switch (result.Outcome)
         {
-            switch (result.Outcome)
-            {
-                case RetirementOutcome.Removed:
-                    LogRemoved(logger, result.Name);
-                    break;
-                case RetirementOutcome.Absent:
-                    LogAbsent(logger, result.Name);
-                    break;
-                case RetirementOutcome.InUse:
-                    LogInUse(logger, result.Name, result.Reason);
-                    finished = false;
-                    break;
-                default:
-                    LogRefused(logger, result.Name, result.Reason);
-                    break;
-            }
+            case RetirementOutcome.Removed:
+                LogRemoved(logger, result.Name);
+                break;
+            case RetirementOutcome.Absent:
+                LogAbsent(logger, result.Name);
+                break;
+            case RetirementOutcome.InUse:
+                LogInUse(logger, result.Name, result.Reason);
+                break;
+            default:
+                LogRefused(logger, result.Name, result.Reason);
+                break;
         }
-
-        return finished;
     }
 
     [LoggerMessage(EventId = 1340, Level = LogLevel.Information, Message = "Retired storage {Names} will be removed once {Chain} follows the chain and this replica is the writer")]

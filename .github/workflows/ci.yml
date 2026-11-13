@@ -160,19 +160,18 @@ jobs:
           echo "$out" | grep -q 'Storage__Cassandra__RetiredKeyspaces__1: "avm_old_2"'
           echo "$out" | grep -q 'auto_snapshot_ttl: 7d/'
           echo "$out" | grep -q 'exec docker-entrypoint.sh cassandra -f'
-          if t --set storage.cassandra.keyspace=avm_new --set "storage.cassandra.retiredKeyspaces={AVM_New}" > /dev/null 2>&1; then
-            echo "a retired keyspace equal to the active one must fail the render"; exit 1
-          fi
+          # What the worker's options validation refuses must already fail the render: a pod that cannot start stops indexing.
+          for bad in AVM_New avm-old system_auth System 1old; do
+            if t --set storage.cassandra.keyspace=avm_new --set "storage.cassandra.retiredKeyspaces={$bad}" > /dev/null 2>&1; then
+              echo "the retired keyspace '$bad' must fail the render"; exit 1
+            fi
+          done
           if t --set cassandra.embedded.autoSnapshotTtl=7days > /dev/null 2>&1; then
             echo "an invalid autoSnapshotTtl must fail the render"; exit 1
           fi
           if t --set cassandra.embedded.autoSnapshotTtl= | grep -q 'auto_snapshot_ttl'; then
             echo "an empty autoSnapshotTtl must leave the Cassandra start command alone"; exit 1
           fi
-          # Every overlay: what is listed as retired must never be the keyspace the release uses (the chart fails the render above).
-          for v in deploy/helm/values/*.yaml; do
-            helm template ci deploy/helm/avm-balance-indexer -f "$v" --set cassandra.embedded.node=ci-node | grep 'Storage__Cassandra__\(Keyspace\|RetiredKeyspaces\)' || true
-          done
       - name: Deployment overlays render (hostPath, ingress host, embedded Cassandra contact point)
         run: |
           check() { # overlay release hostPath host

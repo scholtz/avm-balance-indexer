@@ -34,9 +34,7 @@ public sealed partial class CassandraChainStorage
 
     private async Task<bool> SchemaExistsAsync(ISession session, CancellationToken cancellationToken)
     {
-        var rows = await session.ExecuteAsync(new SimpleStatement("SELECT table_name FROM system_schema.tables WHERE keyspace_name = ?", _keyspace))
-            .WaitAsync(cancellationToken).ConfigureAwait(false);
-        var existing = rows.Select(static row => row.GetValue<string>("table_name")).ToHashSet(StringComparer.Ordinal);
+        var existing = await TablesOfAsync(session, _keyspace, cancellationToken).ConfigureAwait(false);
         var statements = ReadEmbeddedStatements().ToArray();
         var expectedTables = statements
             .Select(static statement => System.Text.RegularExpressions.Regex.Match(statement, @"^CREATE TABLE IF NOT EXISTS (\w+)"))

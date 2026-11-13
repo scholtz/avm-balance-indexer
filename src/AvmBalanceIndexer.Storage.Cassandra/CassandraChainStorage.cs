@@ -31,6 +31,7 @@ public sealed partial class CassandraChainStorage : IChainStorage
     private readonly int _replicationFactor;
     private readonly bool _createKeyspace;
     private readonly string[] _retiredKeyspaces;
+    private readonly TimeSpan _retirementQuietPeriod;
     private readonly TimeSpan _readDeadline;
     private readonly TimeSpan _leaseTtl;
     private readonly int _writeConcurrency;
@@ -67,7 +68,8 @@ public sealed partial class CassandraChainStorage : IChainStorage
         _createKeyspace = options.CreateKeyspace;
         _retiredKeyspaces = CassandraOptionsValidator.RetiredKeyspaceErrors(options).FirstOrDefault() is { } error
             ? throw new ArgumentException(error, nameof(options))
-            : [.. options.RetiredKeyspaces.Select(static name => name.ToLowerInvariant()).Distinct(StringComparer.Ordinal)];
+            : [.. (options.RetiredKeyspaces ?? []).Select(static name => name.ToLowerInvariant()).Distinct(StringComparer.Ordinal)];
+        _retirementQuietPeriod = TimeSpan.FromMinutes(options.RetiredKeyspaceQuietMinutes);
         _writeConcurrency = options.WriteConcurrency is >= 1 and <= 4096
             ? options.WriteConcurrency
             : throw new ArgumentOutOfRangeException(nameof(options), "WriteConcurrency must be between 1 and 4096.");

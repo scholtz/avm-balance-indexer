@@ -10,10 +10,11 @@ public interface IRetiredStorage
     IReadOnlyList<string> Retired { get; }
 
     /// <summary>
-    /// Removes every retired data set that can be removed safely and says what happened to each. Idempotent: a data set that is
+    /// Removes one data set of <see cref="Retired"/> if that is safe and says what happened. Idempotent: a data set that is
     /// already gone is reported as <see cref="RetirementOutcome.Absent"/>.
     /// </summary>
-    Task<IReadOnlyList<RetirementResult>> RemoveRetiredAsync(CancellationToken cancellationToken);
+    /// <exception cref="ArgumentException"><paramref name="name"/> is not one of <see cref="Retired"/>.</exception>
+    Task<RetirementResult> RemoveRetiredAsync(string name, CancellationToken cancellationToken);
 }
 
 public enum RetirementOutcome
