@@ -16,6 +16,9 @@ public sealed class WorkerOptions
 
     /// <summary>How often the published status is read for the indexed-round, lag and status-age metrics.</summary>
     public int StatusSampleSeconds { get; set; } = 15;
+
+    /// <summary>How often the writer checks whether retired storage may be removed (it waits for the state Following).</summary>
+    public int RetirementCheckSeconds { get; set; } = 60;
 }
 
 /// <summary>

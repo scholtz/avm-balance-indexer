@@ -43,6 +43,12 @@ public sealed class CassandraOptions
 
     public string Keyspace { get; set; } = "avm_indexer";
 
+    /// <summary>
+    /// Keyspaces this deployment used before a rebuild. The writer drops each one once <see cref="Keyspace"/> follows the chain,
+    /// provided it holds only this chain's data and nobody writes to it (ADR 0020). The drop cannot be undone.
+    /// </summary>
+    public string[] RetiredKeyspaces { get; set; } = [];
+
     /// <summary>Let the schema manager create the keyspace (NetworkTopologyStrategy with <see cref="ReplicationFactor"/> replicas in <see cref="LocalDatacenter"/>).</summary>
     public bool CreateKeyspace { get; set; } = true;
 

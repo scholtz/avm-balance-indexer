@@ -50,6 +50,12 @@ data:
   Storage__Cassandra__ReplicationFactor: {{ .Values.storage.cassandra.replicationFactor | quote }}
   Storage__Cassandra__Keyspace: {{ .Values.storage.cassandra.keyspace | quote }}
   Storage__Cassandra__LocalDatacenter: {{ .Values.storage.cassandra.localDatacenter | quote }}
+  {{- range $i, $retired := .Values.storage.cassandra.retiredKeyspaces }}
+  {{- if eq (lower $retired) (lower $.Values.storage.cassandra.keyspace) }}
+  {{- fail (printf "storage.cassandra.retiredKeyspaces holds %q, the keyspace this release uses: it would drop its own data" $retired) }}
+  {{- end }}
+  Storage__Cassandra__RetiredKeyspaces__{{ $i }}: {{ $retired | quote }}
+  {{- end }}
   {{- $contactPoints := .Values.storage.cassandra.contactPoints }}
   {{- if and .Values.cassandra.embedded.enabled (not $contactPoints) }}
   {{- $contactPoints = list (printf "%s-cassandra" (include "avm.fullname" .)) }}

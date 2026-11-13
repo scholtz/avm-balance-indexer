@@ -15,5 +15,6 @@ builder.Services.AddOptions<ScanOptions>().Bind(builder.Configuration.GetSection
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddHostedService<ScanExecutor>();
 builder.Services.AddHostedService<IndexerWorker>();
+builder.Services.AddHostedService<RetiredStorageCleaner>();
 
 builder.Build().Run();

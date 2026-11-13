@@ -28,6 +28,7 @@ public static class CassandraStorageExtensions
         services.AddSingleton<IStorageFailureClassifier, CassandraErrors>();
         services.AddSingleton<IScanJobStore>(static provider => provider.GetRequiredService<CassandraChainStorage>());
         services.AddSingleton<IWriterLeaseProvider>(static provider => provider.GetRequiredService<CassandraChainStorage>());
+        services.AddSingleton<IRetiredStorage>(static provider => provider.GetRequiredService<CassandraChainStorage>());
         return services;
     }
 }
@@ -43,6 +44,29 @@ internal sealed partial class CassandraOptionsValidator : IValidateOptions<Stora
     internal static bool IsValidIdentifier(string? value) => value is not null && KeyspacePattern().IsMatch(value);
 
     internal static bool IsValidDatacenter(string? value) => value is not null && DatacenterPattern().IsMatch(value);
+
+    /// <summary>
+    /// A retired keyspace is dropped, so a name that is not plainly another keyspace of this deployment is refused before anything
+    /// runs. Unquoted CQL identifiers are case-insensitive, hence the comparison ignores case.
+    /// </summary>
+    internal static IEnumerable<string> RetiredKeyspaceErrors(CassandraOptions settings)
+    {
+        foreach (var retired in settings.RetiredKeyspaces ?? [])
+        {
+            if (!IsValidIdentifier(retired))
+            {
+                yield return $"Storage:Cassandra:RetiredKeyspaces holds '{retired}', which is not a keyspace name (a letter, then letters, digits and underscores, at most 48 characters).";
+            }
+            else if (string.Equals(retired, settings.Keyspace, StringComparison.OrdinalIgnoreCase))
+            {
+                yield return $"Storage:Cassandra:RetiredKeyspaces holds '{retired}', the keyspace this deployment uses (Storage:Cassandra:Keyspace); it would drop its own data.";
+            }
+            else if (retired.StartsWith("system", StringComparison.OrdinalIgnoreCase))
+            {
+                yield return $"Storage:Cassandra:RetiredKeyspaces holds '{retired}', a Cassandra system keyspace.";
+            }
+        }
+    }
 
     public ValidateOptionsResult Validate(string? name, StorageOptions options)
     {
@@ -82,6 +106,8 @@ internal sealed partial class CassandraOptionsValidator : IValidateOptions<Stora
         {
             errors.Add("Storage:Cassandra:Keyspace must start with a letter and contain only letters, digits and underscores (at most 48 characters).");
         }
+
+        errors.AddRange(RetiredKeyspaceErrors(settings));
 
         if (!IsValidDatacenter(settings.LocalDatacenter))
         {

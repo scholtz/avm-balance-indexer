@@ -102,11 +102,12 @@ public sealed class CassandraFixture : IAsyncLifetime
     };
 
     /// <summary>Creates a fresh keyspace, applies the schema (unless told not to) and returns the storage bound to it.</summary>
-    public async Task<CassandraChainStorage> CreateStorageAsync(string chain = ChainId.AlgorandTestnet, bool applySchema = true, TimeSpan? readDeadline = null, TimeSpan? leaseTtl = null, int? writeConcurrency = null)
+    public async Task<CassandraChainStorage> CreateStorageAsync(string chain = ChainId.AlgorandTestnet, bool applySchema = true, TimeSpan? readDeadline = null, TimeSpan? leaseTtl = null, int? writeConcurrency = null, string[]? retiredKeyspaces = null)
     {
         await EnsureStartedAsync().ConfigureAwait(false);
         await RetireOldKeyspacesAsync().ConfigureAwait(false);
         var options = NewOptions();
+        options.RetiredKeyspaces = retiredKeyspaces ?? [];
         if (writeConcurrency is { } concurrency)
         {
             options.WriteConcurrency = concurrency;
