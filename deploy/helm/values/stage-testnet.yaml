@@ -3,13 +3,17 @@ chain: algorand-testnet
 storage:
   provider: Cassandra
   cassandra:
-    # avm_testnet was indexed before asset close-outs of protocols below v25 were fixed (#115) and cannot be repaired in place
-    # (ADR 0003): this keyspace is rebuilt from genesis. Drop avm_testnet once this one agrees with the chain (#119, docs/operations.md).
+    # avm_testnet was indexed before asset close-outs of protocols below v25 were fixed (#115) and could not be repaired in place
+    # (ADR 0003); avm_testnet_2 was rebuilt from genesis and agrees with the Nodely indexer (#119). The worker drops the old keyspace
+    # once the status has been quiet for an hour (ADR 0020); take the entry off after the deployment reports it removed.
     keyspace: avm_testnet_2
+    retiredKeyspaces: [avm_testnet]
     replicationFactor: 1
 cassandra:
   embedded:
     enabled: true
+    # Frees the disk of the dropped keyspace after a week; Cassandra keeps a snapshot of a drop until then (one restart of the database pod).
+    autoSnapshotTtl: 7d
     hostPath: /mnt/nvme1/avm-balance-indexer/testnet
 ingress:
   enabled: true
