@@ -4,10 +4,8 @@ storage:
   provider: Cassandra
   cassandra:
     # avm_testnet was indexed before asset close-outs of protocols below v25 were fixed (#115) and could not be repaired in place
-    # (ADR 0003): avm_testnet_2 is rebuilt from genesis and agrees with the Nodely indexer. The worker drops the old keyspace once its
-    # status has been quiet for an hour (ADR 0020, #119); take the entry off in the next change after the log reports it removed.
+    # (ADR 0003): avm_testnet_2 was rebuilt from genesis. The old keyspace was dropped by the worker on 2026-11-13 (ADR 0020, #119).
     keyspace: avm_testnet_2
-    retiredKeyspaces: [avm_testnet]
     replicationFactor: 1
 cassandra:
   embedded:
