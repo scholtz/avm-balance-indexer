@@ -76,8 +76,9 @@ spec:
           args:
             - >-
               sed -i -E "s/^(# *)?auto_snapshot_ttl:.*/auto_snapshot_ttl: {{ . }}/" /etc/cassandra/cassandra.yaml;
-              grep -q "^auto_snapshot_ttl: {{ . }}$" /etc/cassandra/cassandra.yaml
-              || echo "WARNING: auto_snapshot_ttl is not in cassandra.yaml of this image; snapshots of dropped keyspaces will not expire";
+              { grep -q "^auto_snapshot_ttl: {{ . }}$" /etc/cassandra/cassandra.yaml
+              || echo "auto_snapshot_ttl: {{ . }}" >> /etc/cassandra/cassandra.yaml
+              || echo "WARNING: auto_snapshot_ttl could not be written to cassandra.yaml; snapshots of dropped keyspaces will not expire"; };
               exec docker-entrypoint.sh cassandra -f
           {{- end }}
           ports:
