@@ -162,6 +162,8 @@ jobs:
           echo "$out" | grep -q 'Storage__Cassandra__RetiredKeyspaces__1: "avm_old_2"'
           echo "$out" | grep -q 'auto_snapshot_ttl: 7d/'
           echo "$out" | grep -q 'exec docker-entrypoint.sh cassandra -f'
+          # A missing setting must never keep Cassandra from starting: the check only warns, the exec is unconditional.
+          if echo "$out" | grep -q '&& exec docker-entrypoint'; then echo "the Cassandra start must not depend on the sed"; exit 1; fi
           # What the worker's options validation refuses must already fail the render: a pod that cannot start stops indexing.
           for bad in AVM_New avm-old system_auth System 1old; do
             if t --set storage.cassandra.keyspace=avm_new --set "storage.cassandra.retiredKeyspaces={$bad}" > /dev/null 2>&1; then

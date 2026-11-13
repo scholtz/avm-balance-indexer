@@ -32,6 +32,25 @@ public class RetiredStorageCleanerTests
     }
 
     [Fact]
+    public async Task A_Following_Status_Left_By_A_Previous_Writer_Is_Not_Trusted()
+    {
+        var retired = new FakeRetired("old_keyspace");
+        var stale = Status(IngestionState.Following) with { UpdatedAt = DateTimeOffset.UtcNow - RetiredStorageCleaner.FreshStatus - TimeSpan.FromMinutes(1) };
+        var storage = new StatusStorage { Status = stale };
+        using var health = Leader();
+        using var cleaner = Create(retired, storage, health);
+
+        await cleaner.StartAsync(CancellationToken.None);
+        await Task.Delay(Settle);
+        Assert.Equal(0, retired.Calls);
+
+        // The new writer publishes again (it is at the tip): now the request goes ahead.
+        storage.Status = Status(IngestionState.Following);
+        await retired.Removed.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await cleaner.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
     public async Task Nothing_Is_Removed_Before_Anything_Was_Indexed()
     {
         var retired = new FakeRetired("old_keyspace");
@@ -276,7 +295,7 @@ public class RetiredStorageCleanerTests
     }
 
     private static ChainStatus Status(IngestionState state) =>
-        new(ChainId.AlgorandTestnet, 10, TestChain.FakeHash(10), 10, state, DateTimeOffset.UnixEpoch);
+        new(ChainId.AlgorandTestnet, 10, TestChain.FakeHash(10), 10, state, DateTimeOffset.UtcNow);
 
     private static RetiredStorageCleaner Create(IRetiredStorage? retired, StatusStorage storage, WorkerHealth health, ILogger<RetiredStorageCleaner>? logger = null) =>
         new(

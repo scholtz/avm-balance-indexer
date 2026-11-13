@@ -47,7 +47,7 @@ public sealed partial class RetiredStorageCleaner(
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException || !stoppingToken.IsCancellationRequested)
                 {
-                    var level = Level("status", ex.GetType().Name);
+                    var level = Level("#status", ex.GetType().Name);
                     LogStatusUnreadable(logger, ex, level);
                     continue;
                 }
@@ -86,9 +86,17 @@ public sealed partial class RetiredStorageCleaner(
     }
 
     /// <summary>Only the writer acts (one replica sends the schema change), and only when the current data has caught up with the chain.</summary>
+    /// <remarks>
+    /// A writer at the tip refreshes the status every few seconds, so a status that is not recent was written by a previous writer
+    /// and says nothing about now (a replica that has just taken the lease after a long outage reads the old "Following").
+    /// </remarks>
     private async Task<bool> MayRemoveAsync(CancellationToken cancellationToken) =>
         health.State == WorkerState.Leader
-        && await storage.GetAsync(chain.Chain, cancellationToken).ConfigureAwait(false) is { State: IngestionState.Following };
+        && await storage.GetAsync(chain.Chain, cancellationToken).ConfigureAwait(false) is { State: IngestionState.Following } status
+        && DateTimeOffset.UtcNow - status.UpdatedAt <= FreshStatus;
+
+    /// <summary>How old the published status may be for the indexer to count as following the chain right now.</summary>
+    internal static readonly TimeSpan FreshStatus = TimeSpan.FromMinutes(5);
 
     /// <summary>
     /// A request that waits is checked every minute, possibly for days: the same answer is a warning once and debug detail
