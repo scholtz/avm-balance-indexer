@@ -37,6 +37,9 @@ storage:
     # `keyspace` follows the chain; it refuses a keyspace of another chain or one that is still written to. The drop cannot be
     # undone, so list a keyspace only after the checks of the reindex runbook (docs/operations.md).
     retiredKeyspaces: []
+    # A retired keyspace is dropped only after its status was untouched for this long (a writer keeps it moving): the time
+    # in which a switch to a new keyspace can still be rolled back.
+    retiredKeyspaceQuietMinutes: 60
     localDatacenter: dc1
     # Encrypt the connection; credentials from existingSecret travel in clear text without it.
     useTls: false

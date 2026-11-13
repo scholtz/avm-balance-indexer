@@ -265,22 +265,29 @@ jobs:
           # Only the replica that holds the writer lease reports, so every worker pod is read. The writer checks once a minute after it
           # took the lease; give it a little time to say what it did.
           lines=""
-          for attempt in 1 2 3 4 5 6; do
+          for attempt in 1 2 3 4; do
             if ! logs="$(kubectl -n "$NAMESPACE" logs -l "app.kubernetes.io/instance=${RELEASE},app.kubernetes.io/component=worker" --tail=-1 --prefix --max-log-requests 10 2>/dev/null)"; then
               echo "::warning::The worker logs could not be read; check there what happened to the retired keyspaces ($retired)"; exit 0
             fi
-            lines="$(printf '%s\n' "$logs" | grep 'Retired storage' | grep -E 'was removed|does not exist|was not removed|still in use' || true)"
+            # Here-strings, not pipes from printf: with pipefail a grep that stops at its first match would fail the pipeline on a long log.
+            lines="$(grep 'Retired storage' <<< "$logs" | grep -E 'was removed|does not exist|was not removed|still in use|could not be removed' || true)"
             [ -n "$lines" ] && break
-            sleep 30
+            sleep 20
           done
-          printf '%s\n' "$lines"
-          if printf '%s\n' "$lines" | grep -q 'was not removed'; then
+          has() { grep -q "$1" <<< "$lines"; }
+          cat <<< "$lines"
+          if has 'was not removed'; then
             echo "::error::The worker refused a retired keyspace of $RELEASE; correct storage.cassandra.retiredKeyspaces in the values (the worker log has the reason)"; exit 1
           fi
           if [ -z "$lines" ]; then
             echo "::notice::The workers of $RELEASE have reported nothing about the retired keyspaces ($retired) yet. They are dropped once the chain status is Following; a worker that logs below Information does not report keyspaces that are already gone"
-          elif printf '%s\n' "$lines" | grep -q 'was removed'; then
+          fi
+          if has 'could not be removed'; then
+            echo "::warning::A worker of $RELEASE failed to drop a retired keyspace and keeps trying (the worker log has the error; a role without the right to drop keyspaces never succeeds)"
+          fi
+          if has 'was removed'; then
             echo "::notice::Retired keyspaces of $RELEASE were dropped; take them off storage.cassandra.retiredKeyspaces at the next change"
-          elif printf '%s\n' "$lines" | grep -q 'still in use'; then
+          fi
+          if has 'still in use'; then
             echo "::notice::Retired keyspaces of $RELEASE are not dropped yet: they must be unused and untouched for the quiet period first (the worker tries again every minute)"
           fi

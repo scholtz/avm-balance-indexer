@@ -109,7 +109,8 @@ Steps:
    No cluster access is needed. After the deployment the worker that holds the writer lease drops the keyspace as soon as the status is `Following` (it checks once a minute, `Worker:RetirementCheckSeconds`) and logs
    `Retired storage <name> was removed`; the deploy job prints that line. It refuses a keyspace that holds another chain or is not an indexer keyspace (`was not removed`, the step *Database change requests* of the deploy job is marked failed), and waits
    (`still in use`) while a writer holds a lease in it or its status was updated in the last hour (`Storage:Cassandra:RetiredKeyspaceQuietMinutes`): a keyspace is dropped one hour after its last writer stopped at the earliest,
-   which is also the time left to roll a switch back. Readers are not detected, so list a keyspace only when no release (API included) is configured with it any more.
+   which is also the time left to roll a switch back (`storage.cassandra.retiredKeyspaceQuietMinutes` in the values). Readers and a writer that has been failing for longer than that are not detected, so list a keyspace only when no release (API included) is configured with it any more.
+   A keyspace without any published round is refused as well (drop such an empty one by hand).
    An entry whose keyspace is gone is harmless (`does not exist`); remove it with the next change. The drop ends the rollback option of step 1
    (the old name would be recreated empty). Cassandra keeps a snapshot of a dropped keyspace, which still holds its disk space: with the embedded Cassandra set `cassandra.embedded.autoSnapshotTtl`
    (for example `7d`; changing it restarts the Cassandra pod once) so that the snapshot, the last way back, expires by itself; on an external cluster set `auto_snapshot_ttl` or run `nodetool clearsnapshot`.

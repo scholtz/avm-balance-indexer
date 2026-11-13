@@ -18,14 +18,17 @@ shell is the right one.
 - A drop cannot be undone, so the provider refuses anything that is not plainly ours to drop:
   the active keyspace, `system*` keyspaces and invalid names fail the options validation and, before that, the chart render
   (a pod that cannot start would stop indexing); a keyspace without `chain_status` and `writer_lease` tables, or with a
-  `chain_status` row of another chain, is reported as refused. A missing keyspace is "absent", so the request is idempotent
+  `chain_status` row of another chain, or without any published round (nothing shows whose it is or that it is abandoned,
+  and it holds nothing worth the risk), is reported as refused. A missing keyspace is "absent", so the request is idempotent
   and the entry may stay listed.
 - "Nobody writes to it" needs more than one look, because the lease row of a restarting writer is missing for a moment. A
   keyspace is in use while any lease row exists in it (of any chain: a keyspace that has not published a round yet does not
   say whose it is) or while its status was updated within the quiet period (`Storage:Cassandra:RetiredKeyspaceQuietMinutes`,
-  60 by default; a writer keeps the status moving even when idle). It is then tried again at the next check. The quiet period
-  is also the time in which a switch to a new keyspace can still be rolled back.
-- Each keyspace is its own request: it is logged as soon as it is done, and a refused or finished one is not asked again.
+  60 by default; a writer keeps the status moving even when idle). It is then tried again at the next check. The lease is read
+  once more at SERIAL immediately before the drop. The quiet period is also the time in which a switch to a new keyspace can
+  still be rolled back.
+- Each keyspace is its own request: it is logged as soon as it is done, a refused or finished one is not asked again, and one
+  that keeps failing does not hold up the others. A repeated answer is a warning once and debug detail afterwards.
 - The deploy job reads the logs of all worker pods after the upgrade and reports each request; a refused one marks its step
   failed with an error annotation, without failing the deployment of this or the following chains.
 - Cassandra snapshots a dropped keyspace (`auto_snapshot`), which keeps its disk space. The embedded Cassandra of the chart
@@ -35,8 +38,10 @@ shell is the right one.
 ## Consequences
 - Listing a keyspace is the approval to delete it. The comparison of the rebuilt data with the chain (runbook step 3) stays
   a human check before the entry is added; the worker only verifies `Following`.
-- Readers are invisible: an API that still serves from a retired keyspace (the two-release rebuild of a healthy chain) holds
-  no lease and writes nothing. List a keyspace only when no release is configured with it any more.
+- The guards catch mistakes, they do not replace the rule: list a keyspace only when no release is configured with it any
+  more. Readers are invisible (an API that still serves from a retired keyspace holds no lease and writes nothing), and so
+  is a writer that has been failing for longer than the quiet period (it publishes nothing and holds the lease only between
+  restarts).
 - PostgreSQL has no equivalent (a rebuild there uses another database); the provider registers no `IRetiredStorage`.
 - Setting `autoSnapshotTtl` changes the Cassandra pod and restarts it once. An external Cassandra needs
   `auto_snapshot_ttl` (or `nodetool clearsnapshot`) from its operator.

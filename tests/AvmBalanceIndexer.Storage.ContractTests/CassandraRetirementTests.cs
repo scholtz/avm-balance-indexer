@@ -35,15 +35,18 @@ public class CassandraRetirementTests(CassandraFixture cassandra)
     }
 
     [Fact]
-    public async Task A_Keyspace_With_Schema_But_No_Published_Round_And_No_Writer_Is_Dropped()
+    public async Task A_Keyspace_Without_A_Published_Round_Is_Kept_Because_Nothing_Shows_Whose_It_Is()
     {
+        // It may be the keyspace another release created a moment ago, between applying the schema and taking the lease.
         var old = await cassandra.CreateStorageAsync();
         var oldKeyspace = cassandra.KeyspaceOf(old);
-        var rebuilt = await cassandra.CreateStorageAsync(retiredKeyspaces: [oldKeyspace], retiredQuietMinutes: 60);
+        var rebuilt = await cassandra.CreateStorageAsync(retiredKeyspaces: [oldKeyspace]);
 
         var result = await rebuilt.RemoveRetiredAsync(oldKeyspace, CancellationToken.None);
 
-        Assert.Equal(RetirementOutcome.Removed, result.Outcome);
+        Assert.Equal(RetirementOutcome.Refused, result.Outcome);
+        Assert.Contains("no published round", result.Reason, StringComparison.Ordinal);
+        Assert.True(await ExistsAsync(rebuilt, oldKeyspace));
     }
 
     [Fact]
@@ -110,6 +113,7 @@ public class CassandraRetirementTests(CassandraFixture cassandra)
     public async Task A_Keyspace_Another_Writer_Still_Indexes_Into_Is_Kept_Until_Its_Lease_Is_Gone()
     {
         var old = await cassandra.CreateStorageAsync();
+        await old.WriteRoundAsync(Status(ChainId.AlgorandTestnet, 0), [], CancellationToken.None);
         var oldKeyspace = cassandra.KeyspaceOf(old);
         var rebuilt = await cassandra.CreateStorageAsync(retiredKeyspaces: [oldKeyspace]);
         var lease = await ((IWriterLeaseProvider)old).TryAcquireAsync(CancellationToken.None);

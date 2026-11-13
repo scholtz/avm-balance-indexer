@@ -155,7 +155,9 @@ jobs:
       - name: Database change requests render (retired keyspaces reach the worker, the active keyspace is refused, snapshot expiry)
         run: |
           t() { helm template ci deploy/helm/avm-balance-indexer -f deploy/helm/values/stage-testnet.yaml --set cassandra.embedded.node=ci-node "$@"; }
-          out=$(t --set storage.cassandra.keyspace=avm_new --set "storage.cassandra.retiredKeyspaces={avm_old_1,avm_old_2}" --set cassandra.embedded.autoSnapshotTtl=7d)
+          t | grep -q 'Storage__Cassandra__RetiredKeyspaceQuietMinutes: "60"'
+          out=$(t --set storage.cassandra.keyspace=avm_new --set "storage.cassandra.retiredKeyspaces={avm_old_1,avm_old_2}" --set cassandra.embedded.autoSnapshotTtl=7d --set storage.cassandra.retiredKeyspaceQuietMinutes=240)
+          echo "$out" | grep -q 'Storage__Cassandra__RetiredKeyspaceQuietMinutes: "240"'
           echo "$out" | grep -q 'Storage__Cassandra__RetiredKeyspaces__0: "avm_old_1"'
           echo "$out" | grep -q 'Storage__Cassandra__RetiredKeyspaces__1: "avm_old_2"'
           echo "$out" | grep -q 'auto_snapshot_ttl: 7d/'

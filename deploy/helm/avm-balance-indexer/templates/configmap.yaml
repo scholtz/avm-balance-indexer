@@ -50,6 +50,7 @@ data:
   Storage__Cassandra__ReplicationFactor: {{ .Values.storage.cassandra.replicationFactor | quote }}
   Storage__Cassandra__Keyspace: {{ .Values.storage.cassandra.keyspace | quote }}
   Storage__Cassandra__LocalDatacenter: {{ .Values.storage.cassandra.localDatacenter | quote }}
+  Storage__Cassandra__RetiredKeyspaceQuietMinutes: {{ .Values.storage.cassandra.retiredKeyspaceQuietMinutes | quote }}
   {{- range $i, $retired := .Values.storage.cassandra.retiredKeyspaces }}
   {{- /* The same rules as the options validator: a wrong entry must fail here, not in a pod that then cannot start. */}}
   {{- if not (regexMatch "^[A-Za-z][A-Za-z0-9_]{0,47}$" (toString $retired)) }}

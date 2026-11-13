@@ -53,16 +53,28 @@ public sealed partial class CassandraChainStorage : IRetiredStorage
         }
 
         // The lease row is missing for a moment whenever a writer restarts, so one look is not proof. A writer also keeps the
-        // status timestamp moving (even when idle at the tip): only a keyspace that has been silent for the quiet period is abandoned.
-        var now = DateTimeOffset.UtcNow;
+        // status timestamp moving (even when idle at the tip): only a keyspace that has been silent for the quiet period is
+        // abandoned. Without a published round there is no such evidence, and nothing says whose keyspace it is.
         var lastWrite = statuses.Select(static row => row.GetValue<DateTimeOffset?>("updated_at")).Max();
-        if (lastWrite is { } written && now - written < _retirementQuietPeriod)
+        if (lastWrite is not { } written)
         {
-            var minutes = Math.Max(0, (now - written).TotalMinutes).ToString("0", CultureInfo.InvariantCulture);
+            return new RetirementResult(keyspace, RetirementOutcome.Refused, "it has no published round, so nothing shows that it belongs to this chain and is abandoned; it holds no data worth the risk, drop it by hand");
+        }
+
+        if (DateTimeOffset.UtcNow - written < _retirementQuietPeriod)
+        {
             return new RetirementResult(
                 keyspace,
                 RetirementOutcome.InUse,
-                $"its status was updated {minutes} min ago; it must be untouched for {_retirementQuietPeriod.TotalMinutes.ToString("0", CultureInfo.InvariantCulture)} min");
+                string.Create(CultureInfo.InvariantCulture, $"its status was last updated at {written.UtcDateTime:yyyy-MM-dd HH:mm} UTC; it must be untouched for {_retirementQuietPeriod.TotalMinutes:0} min"));
+        }
+
+        // Last look, at SERIAL like the lease is taken (a lightweight transaction): a writer that is acquiring it right now is seen.
+        var taken = await session.ExecuteAsync(new SimpleStatement($"SELECT owner FROM {keyspace}.writer_lease WHERE chain = ?", _chain).SetConsistencyLevel(ConsistencyLevel.Serial))
+            .WaitAsync(cancellationToken).ConfigureAwait(false);
+        if (taken.Any())
+        {
+            return new RetirementResult(keyspace, RetirementOutcome.InUse, $"a writer of {_chain} holds its lease");
         }
 
         await session.ExecuteAsync(new SimpleStatement($"DROP KEYSPACE IF EXISTS {keyspace}")).WaitAsync(cancellationToken).ConfigureAwait(false);

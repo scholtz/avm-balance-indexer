@@ -162,6 +162,61 @@ public class RetiredStorageCleanerTests
     }
 
     [Fact]
+    public async Task A_Request_That_Keeps_Failing_Does_Not_Hold_Up_The_Ones_After_It()
+    {
+        var retired = new FakeRetired("broken", "old");
+        retired.Failing.Add("broken");
+        var logger = new CapturingLogger();
+        using var health = Leader();
+        using var cleaner = Create(retired, new StatusStorage { Status = Status(IngestionState.Following) }, health, logger);
+
+        await cleaner.StartAsync(CancellationToken.None);
+        await retired.Removed.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        while (retired.Asked.Count(static name => name == "broken") < 4)
+        {
+            await Task.Delay(10, timeout.Token);
+        }
+
+        await cleaner.StopAsync(CancellationToken.None);
+
+        Assert.Equal(1, retired.Asked.Count(static name => name == "old"));
+
+        // The deploy job reports this line as a failed request; the repeats are debug detail, not a warning a minute.
+        var failures = logger.Lines.Where(static line => line.Text == "Retired storage broken could not be removed; trying again later").ToList();
+        Assert.True(failures.Count >= 4);
+        Assert.Single(failures, static line => line.Level == LogLevel.Warning);
+        Assert.All(failures.Skip(1), static line => Assert.Equal(LogLevel.Debug, line.Level));
+    }
+
+    [Fact]
+    public async Task A_Keyspace_That_Stays_In_Use_Is_A_Warning_Once_And_Again_When_The_Reason_Changes()
+    {
+        var retired = new FakeRetired("busy") { Final = RetirementOutcome.InUse };
+        var logger = new CapturingLogger();
+        using var health = Leader();
+        using var cleaner = Create(retired, new StatusStorage { Status = Status(IngestionState.Following) }, health, logger);
+
+        await cleaner.StartAsync(CancellationToken.None);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        while (retired.Calls < 4)
+        {
+            await Task.Delay(10, timeout.Token);
+        }
+
+        retired.Reason = "its status was last updated later";
+        var seen = retired.Calls;
+        while (retired.Calls < seen + 3)
+        {
+            await Task.Delay(10, timeout.Token);
+        }
+
+        await cleaner.StopAsync(CancellationToken.None);
+
+        Assert.Equal(2, logger.Lines.Count(static line => line.Level == LogLevel.Warning && line.Text.Contains("still in use", StringComparison.Ordinal)));
+    }
+
+    [Fact]
     public async Task A_Removal_Is_Logged_Even_When_A_Later_Request_Fails()
     {
         var retired = new FakeRetired("old", "broken");
@@ -185,7 +240,7 @@ public class RetiredStorageCleanerTests
 
     /// <summary>
     /// The deploy job (.github/workflows/helm-deploy.yml, step "Database change requests") finds the outcome of a request by
-    /// these words in the worker log. Change them there too.
+    /// these words in the worker log ("could not be removed" is pinned by the failing-request test above). Change them there too.
     /// </summary>
     [Theory]
     [InlineData(RetirementOutcome.Removed, "was removed", LogLevel.Warning)]
@@ -273,6 +328,8 @@ public class RetiredStorageCleanerTests
 
         public ConcurrentQueue<string> Asked { get; } = new();
 
+        public string Reason { get; set; } = "another chain";
+
         public TaskCompletionSource Removed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public int Calls => Volatile.Read(ref _calls);
@@ -299,7 +356,7 @@ public class RetiredStorageCleanerTests
                 Removed.TrySetResult();
             }
 
-            return Task.FromResult(new RetirementResult(name, outcome, outcome is RetirementOutcome.Refused or RetirementOutcome.InUse ? "another chain" : string.Empty));
+            return Task.FromResult(new RetirementResult(name, outcome, outcome is RetirementOutcome.Refused or RetirementOutcome.InUse ? Reason : string.Empty));
         }
     }
 
