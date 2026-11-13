@@ -44,6 +44,7 @@ public sealed partial class RetiredStorageCleaner(
                 try
                 {
                     allowed = await MayRemoveAsync(stoppingToken).ConfigureAwait(false);
+                    _reported.Remove("#status"); // recovered: the next outage is a warning again
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException || !stoppingToken.IsCancellationRequested)
                 {

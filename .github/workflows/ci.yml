@@ -170,6 +170,9 @@ jobs:
               echo "the retired keyspace '$bad' must fail the render"; exit 1
             fi
           done
+          if helm template ci deploy/helm/avm-balance-indexer --set storage.provider=PostgreSql --set storage.postgreSql.existingSecret=x --set "storage.cassandra.retiredKeyspaces={avm_old}" > /dev/null 2>&1; then
+            echo "retired keyspaces for a PostgreSQL release must fail the render"; exit 1
+          fi
           if t --set cassandra.embedded.autoSnapshotTtl=7days > /dev/null 2>&1; then
             echo "an invalid autoSnapshotTtl must fail the render"; exit 1
           fi

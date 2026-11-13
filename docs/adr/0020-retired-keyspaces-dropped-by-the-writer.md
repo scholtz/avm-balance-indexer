@@ -38,6 +38,11 @@ shell is the right one.
 ## Consequences
 - Listing a keyspace is the approval to delete it. The comparison of the rebuilt data with the chain (runbook step 3) stays
   a human check before the entry is added; the worker only verifies `Following`.
+- Cassandra has no conditional drop, so the last lease look and the `DROP KEYSPACE` are not atomic: a writer that starts in
+  that instant (a rolled-back release restarted by hand) would lose its keyspace. The quiet period makes this a matter of
+  milliseconds after an hour of silence, and rolling back to a keyspace that is listed as retired is against the rule below.
+- A keyspace with the indexer tables but no published round is refused, not dropped, and stays refused until it is dropped by
+  hand or taken off the list; leaving an empty keyspace is cheaper than guessing whose it is.
 - The guards catch mistakes, they do not replace the rule: list a keyspace only when no release is configured with it any
   more. Readers are invisible (an API that still serves from a retired keyspace holds no lease and writes nothing), and so
   is a writer that has been failing for longer than the quiet period (it publishes nothing and holds the lease only between
