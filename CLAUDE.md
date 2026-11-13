@@ -159,3 +159,9 @@ prove it), size it to one PR, and add `enhancement` plus your team label. Cite s
 - Generated or cached output (generator caches, build volumes) must be git-ignored before the first run: a `git add -A` after it committed 133 MB once. Check `git status` before the first commit of a new tool.
 - Run `gofmt -l .` and read its (possibly empty) output before pushing Go code; a piped `| tail` hid a formatting failure that CI then reported.
 - Code that polls or pages against a server (scan exports) needs a test for the server race (state changes between two reads), not only the happy path: the review found four real bugs of that kind in five SDKs.
+- `ubuntu-latest` moves (26.04 had no Python 3.9 for setup-python): pin a job to a fixed image (`ubuntu-24.04`) when it needs an old toolchain, and say when to drop the pin.
+- A per-project `VersionOverride` drifts from the central version at the next bump (NU1605): `CentralPackageVersionOverrideEnabled=false` makes it a build error; fix the root cause instead of pinning.
+- A manual rebase of a Dependabot branch changes the pushing actor, and the SDK version rule only exempts `dependabot[bot]`: ask Dependabot to `@dependabot recreate` instead, or bump `sdk/VERSION`.
+- A setting that Cassandra reads only at start (`auto_snapshot_ttl`) must be deployed in an earlier release than the action that depends on it (a drop), otherwise the snapshot is made without it; split such a change into two merges.
+- `gh pr checks --watch` and a poll for "no pending" return while only the first checks are registered: wait until the expected number of checks exists and none is pending.
+- Test Helm and shell snippets of CI/workflows before pushing (`docker run alpine/helm` with a mounted repo, a shell case per branch): the review found real defects in them that no .NET test reaches.
