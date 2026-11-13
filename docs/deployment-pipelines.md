@@ -113,6 +113,10 @@ Upgrades follow the rules of [operations.md](operations.md) automatically: when 
 seconds a worker restart takes. Deployments of one release never overlap (a run waits for the running one; of several waiting runs only the newest is kept, so start a rollback when nothing else is pending), testnet only ever deploys the head of `main`, and a production tag is refused unless CI succeeded on its commit.
 For a rollback give *Deploy production* the image tag; the chart and values come from the commit in it (or from `ref` for older tags such as `main-<sha7>`).
 
+Database change requests travel the same way (ADR 0020): a keyspace listed in `storage.cassandra.retiredKeyspaces` of a values file is dropped by the worker once the release follows the chain. The step
+*Database change requests* of the deploy job prints what the workers reported (removed, already gone, still in use or pending). When the worker refused a keyspace the step is marked failed with an error annotation; the
+job and the deployment of the other chains continue, because the release itself is healthy. Nothing is run by hand in the cluster.
+
 Before anything changes the job checks every right in `deploy/rbac/deployer.yaml` that the chart and `helm --atomic` use and lists the missing ones. Only the NetworkPolicy and the PodDisruptionBudget are optional: a new release is installed without them (with a warning) when the account may not manage them, but an existing NetworkPolicy is never dropped, the job fails instead. Missing `delete` rights only produce a warning.
 A failed upgrade is rolled back by Helm (`--atomic`). Each production job (MainNet, then Voi) asks the environment's reviewers for its own approval. The pods need a namespace without Pod Security enforcement
 stricter than `privileged` for the Cassandra pod (it uses a hostPath volume and a root init container). Pre-release tags (`v1.2.3-rc1`) do not deploy.

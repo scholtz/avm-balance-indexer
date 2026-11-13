@@ -67,6 +67,19 @@ spec:
         - name: cassandra
           image: {{ .Values.cassandra.embedded.image }}
           imagePullPolicy: IfNotPresent
+          {{- with .Values.cassandra.embedded.autoSnapshotTtl }}
+          {{- if not (regexMatch "^[1-9][0-9]{0,4}[dhm]$" .) }}
+          {{- fail (printf "cassandra.embedded.autoSnapshotTtl %q must be a number followed by d, h or m (for example 7d)" .) }}
+          {{- end }}
+          # The image has no setting for this: write it into cassandra.yaml, then start as the image would.
+          command: ["sh", "-c"]
+          args:
+            - >-
+              sed -i -E "s/^(# *)?auto_snapshot_ttl:.*/auto_snapshot_ttl: {{ . }}/" /etc/cassandra/cassandra.yaml;
+              grep -q "^auto_snapshot_ttl: {{ . }}$" /etc/cassandra/cassandra.yaml
+              || echo "WARNING: auto_snapshot_ttl is not in cassandra.yaml of this image; snapshots of dropped keyspaces will not expire";
+              exec docker-entrypoint.sh cassandra -f
+          {{- end }}
           ports:
             - name: cql
               containerPort: 9042

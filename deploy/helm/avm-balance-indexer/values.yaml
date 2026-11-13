@@ -33,6 +33,13 @@ storage:
     leaseTtlSeconds: 30
     readTimeoutSeconds: 30
     keyspace: avm_indexer
+    # Database change request (docs/adr/0020): keyspaces this release used before a rebuild. The worker drops each one once
+    # `keyspace` follows the chain; it refuses a keyspace of another chain or one that is still written to. The drop cannot be
+    # undone, so list a keyspace only after the checks of the reindex runbook (docs/operations.md).
+    retiredKeyspaces: []
+    # A retired keyspace is dropped only after its status was untouched for this long (a writer keeps it moving): the time
+    # in which a switch to a new keyspace can still be rolled back.
+    retiredKeyspaceQuietMinutes: 60
     localDatacenter: dc1
     # Encrypt the connection; credentials from existingSecret travel in clear text without it.
     useTls: false
@@ -58,6 +65,12 @@ cassandra:
     initImage: busybox:1.37
     maxHeapSize: 2G
     heapNewSize: 400M
+    # Cassandra keeps a snapshot of every dropped keyspace (auto_snapshot), which holds its whole disk space. The snapshot
+    # expires after this time (d, h or m), so a retired keyspace frees its space then; until it expires, the data can still be
+    # restored from the snapshot directory on the node. Empty keeps Cassandra's default: snapshots stay until cleared by hand
+    # (`nodetool clearsnapshot`). Changing it restarts the Cassandra pod (indexing and the API pause until it is back), so set
+    # it for a release when that pause is acceptable, at the latest together with its first retiredKeyspaces entry.
+    autoSnapshotTtl: ""
     resources:
       requests: { cpu: "1", memory: 3Gi }
       limits: { memory: 4Gi }
