@@ -70,7 +70,7 @@ PR comments when #18 (normalizer) needs storage contract members that #14/#22 ch
 
 0. **Sync**: `git fetch origin` (branches are always based on `origin/main`, never on a local `main`). Do this at the start of every iteration
    and again before opening a PR, before every review round, and before merging.
-1. **Open PRs of your team first**: `gh pr list --label team:<t> --state open`. For each: rebase on `origin/main` (not `dependabot/*` PRs: comment `@dependabot rebase`),
+1. **Open PRs of your team first**: `gh pr list --label team:<t> --state open`. For each: rebase on `origin/main` (not `dependabot/*` PRs: comment `@dependabot rebase`, or `@dependabot recreate` when it does not act; a manual push changes the actor, see Lessons),
    check CI (`gh pr checks <n>`), fix failures, address review comments, finish the review/merge steps below. Only when
    none are left, continue.
 2. **Pick an issue**: `gh issue list --label team:<t> --state open`. Take the first one that is not blocked (use the order in "Team assignments", else lowest number).
@@ -93,7 +93,7 @@ PR comments when #18 (normalizer) needs storage contract members that #14/#22 ch
    change. A finding you reject gets a short PR comment explaining why and counts as resolved. If round 4 still
    produces only speculative or style findings, stop and note it in the PR; real bugs are never skipped.
 7. **Merge**: if main moved and conflicts with you, rebase and force-push (CI restarts); otherwise just wait for green CI
-   (`gh pr checks <n> --watch`), then
+   (all five checks exist and none is pending or failing; `gh pr checks <n> --watch` can return before they are registered, see Lessons), then
    `gh pr merge <n> --squash --delete-branch`. Confirm the issue is closed (`gh issue view <n>`); if not, close it with
    a comment linking the PR.
 8. **Retrospective**: note what cost time (CI failures, review findings, merge conflicts, tooling quirks, wrong
@@ -160,8 +160,8 @@ prove it), size it to one PR, and add `enhancement` plus your team label. Cite s
 - Run `gofmt -l .` and read its (possibly empty) output before pushing Go code; a piped `| tail` hid a formatting failure that CI then reported.
 - Code that polls or pages against a server (scan exports) needs a test for the server race (state changes between two reads), not only the happy path: the review found four real bugs of that kind in five SDKs.
 - `ubuntu-latest` moves (26.04 had no Python 3.9 for setup-python): pin a job to a fixed image (`ubuntu-24.04`) when it needs an old toolchain, and say when to drop the pin.
-- A per-project `VersionOverride` drifts from the central version at the next bump (NU1605): `CentralPackageVersionOverrideEnabled=false` makes it a build error; fix the root cause instead of pinning.
+- A per-project `VersionOverride` drifts from the central version at the next bump (NU1605): `CentralPackageVersionOverrideEnabled=false` makes it a build error; raise the central version in `Directory.Packages.props` and delete the override.
 - A manual rebase of a Dependabot branch changes the pushing actor, and the SDK version rule only exempts `dependabot[bot]`: ask Dependabot to `@dependabot recreate` instead, or bump `sdk/VERSION`.
 - A setting that Cassandra reads only at start (`auto_snapshot_ttl`) must be deployed in an earlier release than the action that depends on it (a drop), otherwise the snapshot is made without it; split such a change into two merges.
 - `gh pr checks --watch` and a poll for "no pending" return while only the first checks are registered: wait until the expected number of checks exists and none is pending.
-- Test Helm and shell snippets of CI/workflows before pushing (`docker run alpine/helm` with a mounted repo, a shell case per branch): the review found real defects in them that no .NET test reaches.
+- Run the Helm and shell snippets of CI/workflows before pushing, one case per branch (`docker run alpine/helm` with the repo mounted): reviews found real defects (pipefail with `grep -q`, a failing `sed` stopping a pod) that no .NET test reaches.
