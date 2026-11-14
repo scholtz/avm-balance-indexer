@@ -24,11 +24,8 @@ public sealed partial class IndexerWorker(
     IWriterLeaseProvider leases,
     IStorageFailureClassifier failures,
     WorkerHealth health,
-    ILogger<IndexerWorker> logger,
-    AvmBalanceIndexer.Indexing.IndexingMetrics? metrics = null) : BackgroundService
+    ILogger<IndexerWorker> logger) : BackgroundService
 {
-    private readonly AvmBalanceIndexer.Indexing.IndexingMetrics _metrics = metrics ?? AvmBalanceIndexer.Indexing.IndexingMetrics.None;
-
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         health.ReportRoundsSource(() => indexer.RoundsCommitted);
@@ -44,7 +41,6 @@ public sealed partial class IndexerWorker(
         {
             var indexedRound = await TryReadIndexedRoundAsync().ConfigureAwait(false);
             var reason = ex.Message;
-            _metrics.RoundFailed(transient: false);
             LogFatal(logger, ex, chain.Chain, indexedRound, reason);
             Environment.ExitCode = 1;
             lifetime.StopApplication();
@@ -179,7 +175,6 @@ public sealed partial class IndexerWorker(
                 }
 
                 health.ReportTransientFailure();
-                _metrics.RoundFailed(transient: true);
                 LogTransientFailure(logger, ex, backoff, failures);
                 try
                 {

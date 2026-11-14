@@ -29,6 +29,9 @@ public sealed partial class RoundIndexer(
 {
     private readonly IndexerOptions _options = options.Value;
     private readonly IndexingMetrics _metrics = metrics ?? IndexingMetrics.None;
+
+    /// <summary>Malformed ARC-200 logs of the queued, not yet published rounds: counted when they are published, so a replay does not count twice.</summary>
+    private int _pendingMalformedArc200Logs;
     private readonly HashSet<ulong> _knownArc200 = [];
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
     private static readonly TimeSpan FlushGracePeriod = TimeSpan.FromSeconds(10);
@@ -49,6 +52,7 @@ public sealed partial class RoundIndexer(
     public async Task<IndexingResult> RunAsync(ulong? stopAfterRound, CancellationToken cancellationToken)
     {
         _writeFailed = false;
+        _pendingMalformedArc200Logs = 0;
         var chain = adapter.Profile.Chain;
         var status = await storage.GetAsync(chain, cancellationToken).ConfigureAwait(false);
         RewardsState rewards;
@@ -304,7 +308,7 @@ public sealed partial class RoundIndexer(
         }
 
         var normalized = normalizer.NormalizeBlock(block, previousRewards, await LoadReferencedAssetsAsync(block, cancellationToken).ConfigureAwait(false));
-        _metrics.DecoderError(DecoderErrorKind.Arc200Log, normalized.MalformedArc200Logs);
+        _pendingMalformedArc200Logs += normalized.MalformedArc200Logs;
         var round = await tracker.ApplyAsync(normalized.Deltas, cancellationToken).ConfigureAwait(false);
 
         // Token records are written before the round is published: a crash in between only leaves rows that replaying the
@@ -372,7 +376,9 @@ public sealed partial class RoundIndexer(
         }
 
         tracker.CommitStaged();
-        _metrics.CommitRecorded(_time.GetElapsedTime(started), pending.Count, pending.Sum(static round => round.Effects.Count));
+        _metrics.CommitRecorded(_time.GetElapsedTime(started), pending.Sum(static round => round.Effects.Count));
+        _metrics.DecoderError(DecoderErrorKind.Arc200Log, _pendingMalformedArc200Logs);
+        _pendingMalformedArc200Logs = 0;
         Interlocked.Add(ref _roundsCommitted, pending.Count);
         pending.Clear();
     }

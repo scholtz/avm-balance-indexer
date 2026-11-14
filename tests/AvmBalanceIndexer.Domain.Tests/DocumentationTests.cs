@@ -94,14 +94,15 @@ public partial class DocumentationTests
     public void Every_Metric_The_Runbook_Names_Is_Registered_On_The_Worker_Meter()
     {
         var runbook = File.ReadAllText(Path.Combine(Root, "docs", "operations.md"));
-        var registrations = File.ReadAllText(Path.Combine(Root, "src", "AvmBalanceIndexer.Worker", "WorkerHealth.cs"));
+        var registrations = File.ReadAllText(Path.Combine(Root, "src", "AvmBalanceIndexer.Worker", "WorkerHealth.cs"))
+            + File.ReadAllText(Path.Combine(Root, "src", "AvmBalanceIndexer.Indexing", "IndexingMetrics.cs"));
 
         var metrics = Metric().Matches(runbook).Select(static m => m.Groups[1].Value).Distinct().ToArray();
 
         Assert.NotEmpty(metrics);
         foreach (var metric in metrics)
         {
-            Assert.Matches($@"Create(?:Observable)?(?:Gauge|Counter)(?:<\w+>)?\(\s*""{Regex.Escape(metric)}""", registrations);
+            Assert.Matches($@"Create(?:Observable)?(?:Gauge|Counter|Histogram)(?:<\w+>)?\(\s*""{Regex.Escape(metric)}""", registrations);
         }
     }
 

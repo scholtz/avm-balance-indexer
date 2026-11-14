@@ -561,6 +561,10 @@ public class GossipBlockFetcherTests
                     Interlocked.Increment(ref relayCalls);
                 }
 
+                // Every answer takes as long as an unknown host is assumed to take: otherwise the archival node measures as infinitely fast
+                // on the manual clock and the latency-weighted choice almost never asks the relay (a flaky test).
+                clock.Advance(TimeSpan.FromMilliseconds(250));
+
                 // The relay answers with another round's block: it fails validation. The archival node is right.
                 return Task.FromResult(relay ? Ok(Chain.Encode(1001, [])) : Volatile.Read(ref archiveHasBlock) ? Ok(Chain.Encode(1000, [])) : new HttpResponseMessage(HttpStatusCode.NotFound));
             },

@@ -137,10 +137,9 @@ Set `telemetry.otlpEndpoint` (ADR 0011). The metrics:
 | `avm.worker.leases_acquired` | A step of 1 is a failover; many in a short time is flapping. |
 | `avm.worker.transient_failures` | Sustained growth means the archive, algod or the database is unhealthy. |
 | `avm.worker.rounds_committed` | Throughput of this replica; zero on the leader while lag is large means stuck. |
-| `avm.indexer.commit.duration` (histogram, s), `avm.indexer.commit.rounds`, `avm.indexer.commit.effects` | Commit latency and throughput of the writer; p95 well above a second while following means a slow database. |
-| `avm.indexer.round_failures{reason=transient\|fatal}` | Transient: retried failures (archive, algod, database); a sustained rate is unhealthy. Fatal: the worker stopped; always alert. |
-| `avm.fetch.block.duration{source}` (histogram, s), `avm.fetch.block.failures{source,reason}` | Block download latency and failures per source (`archival`, `relay`) and reason (`throttled`, `not_found`, `invalid`, `network`). Archival `throttled` or `network` rising is the usual cause of a slow backfill; relay failures are expected and harmless. |
-| `avm.indexer.decoder_errors{kind=block\|arc200_log}` | `block`: a block failed validation (a bad node, or a block this decoder cannot read); alert when archival `invalid` failures rise with it. `arc200_log`: contracts emitting a non-standard transfer event, informational. |
+| `avm.indexer.commit.duration` (histogram, s), `avm.indexer.commit.effects` | Commit latency and effects written by the writer; p95 well above a second while following means a slow database. Rounds are `avm.worker.rounds_committed`. |
+| `avm.fetch.block.duration{source}` (histogram, s), `avm.fetch.block.failures{source,reason}` | Latency of blocks that were served, per source (`archival`, `relay`), and failed requests per source and reason (`throttled`, `not_found`, `invalid`, `network`); slow failures show up as `network` (timeouts), not in the latency. Archival `throttled` or `network` rising is the usual cause of a slow backfill; relay failures are expected and harmless. |
+| `avm.indexer.decoder_errors{kind=block\|arc200_log}` | `block`: a fetch failed because every node that answered served a block that does not validate (a bad fleet, or a block this decoder cannot read); alert on any. `arc200_log`: contracts emitting a non-standard transfer event in published rounds, informational. |
 | `avm.scan.duration{outcome=completed\|failed\|abandoned}` (histogram, s) | Holder scan duration; `failed` rising means scans hit the storage read timeout repeatedly. |
 | ASP.NET Core `http.server.request.duration`, Kestrel and runtime metrics | Latency and error-rate SLOs of the API; 429 shows the rate limiter at work. |
 

@@ -183,11 +183,6 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
             catch (Exception ex) when (ex is HttpRequestException or BlockValidationException or TimeoutException or IOException or UriFormatException)
             {
                 _metrics.FetchFailed(relays.Contains(host), ex is BlockValidationException ? FetchFailure.Invalid : FetchFailure.Network);
-                if (ex is BlockValidationException)
-                {
-                    _metrics.DecoderError(DecoderErrorKind.Block);
-                }
-
                 if (relays.Contains(host))
                 {
                     // Relays are optional extra capacity: a failing one is cooled down and left out of this fetch without using up an
@@ -240,6 +235,12 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
         if (notFound > 0 && notFound >= errors && notFound > badData)
         {
             throw new BlockNotAvailableException(round);
+        }
+
+        if (badData > 0)
+        {
+            // Nodes answered with blocks that failed validation and none served one that validates: a bad fleet, or this decoder.
+            _metrics.DecoderError(DecoderErrorKind.Block);
         }
 
         throw new BlockFetchException($"Block {round} could not be fetched after {_options.MaxAttempts} attempts.", round, last);

@@ -176,11 +176,13 @@ public sealed partial class ScanExecutor(
         }
         catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
         {
-            outcome = AvmBalanceIndexer.Indexing.ScanOutcome.Failed;
             LogFailed(logger, ex, job.Id);
             try
             {
                 await jobs.FailAsync(job.Id, _owner, Describe(ex), clock.GetUtcNow(), CancellationToken.None).ConfigureAwait(false);
+
+                // Only a stored failure is the end of the scan; when it cannot be stored, the job is resumed later.
+                outcome = AvmBalanceIndexer.Indexing.ScanOutcome.Failed;
             }
             catch (Exception failure)
             {

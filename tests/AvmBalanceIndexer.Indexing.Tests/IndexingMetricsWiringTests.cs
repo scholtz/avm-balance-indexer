@@ -67,7 +67,7 @@ public sealed class IndexingMetricsWiringTests : IDisposable
         await Assert.ThrowsAnyAsync<BlockFetchException>(() => fetcher.FetchBlockAsync(4, CancellationToken.None));
 
         Assert.Equal(2, _capture.Sum("avm.fetch.block.failures", ("reason", "invalid")));
-        Assert.Equal(2, _capture.Sum("avm.indexer.decoder_errors", ("kind", "block")));
+        Assert.Equal(1, _capture.Sum("avm.indexer.decoder_errors", ("kind", "block"))); // once for the failed fetch
     }
 
     [Fact]
@@ -86,14 +86,56 @@ public sealed class IndexingMetricsWiringTests : IDisposable
     }
 
     [Fact]
-    public async Task Committed_Batches_Record_Rounds_Effects_And_Duration()
+    public async Task A_Block_Served_By_A_Relay_Is_Tagged_As_Relay()
+    {
+        var fetcher = Fetcher(
+            request => request.RequestUri!.Host.StartsWith("relay", StringComparison.Ordinal)
+                ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(Chain.Encode(1000, [])) }
+                : new HttpResponseMessage(HttpStatusCode.NotFound),
+            new Tiered(["http://archive.test:4160"], ["http://relay.test:4160"]));
+
+        for (var i = 0; i < 100 && _capture.Sum("avm.fetch.block.duration") == 0; i++)
+        {
+            try
+            {
+                await fetcher.FetchBlockAsync(1000, 1000, CancellationToken.None);
+                break;
+            }
+            catch (BlockNotAvailableException)
+            {
+                // The archival node was asked first and the relay was cooled down by an earlier attempt; ask again.
+            }
+        }
+
+        Assert.All(_capture.Of("avm.fetch.block.duration"), static m => Assert.Equal("relay", m.Tags["source"]));
+        Assert.NotEmpty(_capture.Of("avm.fetch.block.duration"));
+        Assert.All(_capture.Of("avm.fetch.block.failures"), static m => Assert.Equal("archival", m.Tags["source"])); // only the archival node lacks it
+    }
+
+    [Fact]
+    public async Task A_Malformed_Arc200_Log_Of_A_Published_Round_Is_Counted_Once()
+    {
+        // Rounds 1 to 5 of the scenario, then round 6 with an application call that logs a truncated transfer event.
+        var log = TestChain.Arc200TransferLog(Alice, Bob, 5);
+        byte[] truncated = [.. log[..^1]];
+        var chain = new TestChain(); // blocks link through the hashes one chain instance remembers
+        var blocks = Blocks(chain).Append(chain.Block(6, [new TestPayment(Alice, Bob, 0, Fee: 1_000, Application: new TestApplication(4242, [truncated]))], rewards: RewardsAt(5)));
+        var storage = new InMemoryChainStorage(new ChainContext(ChainId.AlgorandTestnet));
+        var indexer = new RoundIndexer(Adapter(blocks), new AlgoEffectNormalizer(), storage, Options.Create(new IndexerOptions { FetchConcurrency = 2 }), NullLogger<RoundIndexer>.Instance, metrics: _capture.Metrics);
+
+        await indexer.RunAsync(LastRound + 1, CancellationToken.None);
+
+        Assert.Equal(1, _capture.Sum("avm.indexer.decoder_errors", ("kind", "arc200_log")));
+    }
+
+    [Fact]
+    public async Task Committed_Batches_Record_Effects_And_Duration()
     {
         var storage = new InMemoryChainStorage(new ChainContext(ChainId.AlgorandTestnet));
         var indexer = new RoundIndexer(Adapter(), new AlgoEffectNormalizer(), storage, Options.Create(new IndexerOptions { FetchConcurrency = 2 }), NullLogger<RoundIndexer>.Instance, metrics: _capture.Metrics);
 
         await indexer.RunAsync(LastRound, CancellationToken.None);
 
-        Assert.Equal(LastRound, (ulong)_capture.Sum("avm.indexer.commit.rounds")); // the rounds after genesis
         var effects = (int)_capture.Sum("avm.indexer.commit.effects");
         Assert.InRange(effects, 1, storage.EffectCount - 1); // every effect after genesis (genesis is written on its own)
         Assert.NotEmpty(_capture.Of("avm.indexer.commit.duration"));
@@ -111,6 +153,13 @@ public sealed class IndexingMetricsWiringTests : IDisposable
 
         Assert.Equal(2, normalized.Deltas.Count(static d => d.Token == Domain.Tokens.TokenKey.Arc200(4242))); // the well-formed transfer
         Assert.Equal(1, normalized.MalformedArc200Logs);
+    }
+
+    private sealed class Tiered(string[] archival, string[] relays) : IGossipHostProvider
+    {
+        public Task<IReadOnlyList<string>> GetHostsAsync(CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<string>>(archival);
+
+        public Task<IReadOnlyList<string>> GetRelayHostsAsync(CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<string>>(relays);
     }
 
     private sealed class Handler(Func<HttpRequestMessage, HttpResponseMessage> answer) : HttpMessageHandler
