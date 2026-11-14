@@ -237,9 +237,9 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
             throw new BlockNotAvailableException(round);
         }
 
-        if (badData > 0)
+        if (badData > 0 && badData >= errors)
         {
-            // Nodes answered with blocks that failed validation and none served one that validates: a bad fleet, or this decoder.
+            // Mostly blocks that failed validation and none that validates: a bad fleet, or this decoder (not a network outage).
             _metrics.DecoderError(DecoderErrorKind.Block);
         }
 

@@ -308,7 +308,6 @@ public sealed partial class RoundIndexer(
         }
 
         var normalized = normalizer.NormalizeBlock(block, previousRewards, await LoadReferencedAssetsAsync(block, cancellationToken).ConfigureAwait(false));
-        _pendingMalformedArc200Logs += normalized.MalformedArc200Logs;
         var round = await tracker.ApplyAsync(normalized.Deltas, cancellationToken).ConfigureAwait(false);
 
         // Token records are written before the round is published: a crash in between only leaves rows that replaying the
@@ -330,6 +329,9 @@ public sealed partial class RoundIndexer(
         var state = targetRound - block.Round <= (ulong)_options.FollowingThresholdRounds ? IngestionState.Following : IngestionState.Backfilling;
         var status = new ChainStatus(chain, block.Round, block.Hash, targetRound, state, _time.GetUtcNow());
         tracker.Stage(round);
+
+        // Counted with the round only once it is queued: a round that fails before it never reaches a flush.
+        _pendingMalformedArc200Logs += normalized.MalformedArc200Logs;
         return new RoundWrite(status, round.Effects);
     }
 

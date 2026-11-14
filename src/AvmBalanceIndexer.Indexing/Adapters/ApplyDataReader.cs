@@ -192,16 +192,6 @@ public static class ApplyDataReader
         return (logs, malformed);
     }
 
-    private static bool StartsWithTransferSelector(System.Buffers.ReadOnlySequence<byte> log)
-    {
-        var selector = Normalization.Arc200Events.TransferSelector;
-        if (log.Length < selector.Length)
-        {
-            return false;
-        }
-
-        Span<byte> head = stackalloc byte[selector.Length];
-        log.Slice(0, selector.Length).CopyTo(head);
-        return head.SequenceEqual(selector);
-    }
+    private static bool StartsWithTransferSelector(System.Buffers.ReadOnlySequence<byte> log) =>
+        new System.Buffers.SequenceReader<byte>(log).IsNext(Normalization.Arc200Events.TransferSelector);
 }
