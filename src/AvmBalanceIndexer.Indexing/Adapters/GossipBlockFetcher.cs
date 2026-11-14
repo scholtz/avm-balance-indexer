@@ -24,6 +24,10 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
     private readonly ConcurrentDictionary<string, DateTimeOffset> _cooldownUntil = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, DateTimeOffset> _invalidRelayReported = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, DateTimeOffset> _relayRestUntil = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<ulong, (string Host, BlockValidationException Error)[]> _suspectRelays = new();
+
+    /// <summary>Rounds whose invalid relay answers are kept until the round validates.</summary>
+    private const int MaxSuspectRounds = 64;
     private readonly ConcurrentDictionary<string, HostLatency> _latency = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, HostGate> _gates = new(StringComparer.OrdinalIgnoreCase);
     private readonly ThrottleReport _throttleReport;
@@ -84,7 +88,6 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
         var errors = 0;
         var badData = 0;
         var throttling = new ThrottleState();
-        List<(string Host, BlockValidationException Error)>? invalidRelays = null;
 
         // A rate-limited answer is not an attempt: the node is paused and the request goes to the next one, or waits.
         for (var attempt = 0; attempt < _options.MaxAttempts;)
@@ -97,11 +100,12 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
                 var block = BlockDecoder.Decode(payload, round, _profile, _expectedGenesisHash);
                 _cooldownUntil.TryRemove(host, out _);
                 ReportThrottling(_throttleReport.Flush(_time.GetUtcNow()));
-                if (invalidRelays is not null)
+                if (_suspectRelays.TryRemove(round, out var suspects))
                 {
-                    // Another node served a block that validates: the relays that failed validation served wrong data. (When no node
-                    // does, the cause may be this decoder, and no relay is blamed.)
-                    foreach (var (relay, error) in invalidRelays)
+                    // A node served a block of this round that validates: the relays whose block of this round failed validation (in
+                    // this fetch or an earlier one, for example while the archival nodes did not have it yet) served wrong data.
+                    // While no node does, the cause may be this decoder, and no relay is blamed.
+                    foreach (var (relay, error) in suspects)
                     {
                         ReportInvalidRelay(relay, round, error);
                     }
@@ -174,8 +178,8 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
                     LogAttemptFailed(_logger, ex, round, host, attempt + 1, _options.MaxAttempts);
                     if (ex is BlockValidationException invalid)
                     {
-                        // Judged once the fetch knows whether another node serves a block that validates.
-                        (invalidRelays ??= []).Add((host, invalid));
+                        // Judged once some node serves a block of this round that validates.
+                        SuspectRelay(round, host, invalid);
                     }
                     if (++relayFailures >= MaxRelayFailuresPerFetch)
                     {
@@ -234,9 +238,16 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
             var relays = await _hosts.GetRelayHostsAsync(cancellationToken).ConfigureAwait(false);
             // A relay resting after serving an invalid block is left out entirely, not just ordered last.
             var now = _time.GetUtcNow();
+            foreach (var (relay, until) in _relayRestUntil)
+            {
+                if (until <= now)
+                {
+                    _relayRestUntil.TryRemove(new KeyValuePair<string, DateTimeOffset>(relay, until));
+                }
+            }
+
             return new HashSet<string>(
-                relays.Except(archival, StringComparer.OrdinalIgnoreCase)
-                    .Where(relay => !(_relayRestUntil.TryGetValue(relay, out var until) && until > now)),
+                relays.Except(archival, StringComparer.OrdinalIgnoreCase).Where(relay => !_relayRestUntil.ContainsKey(relay)),
                 StringComparer.OrdinalIgnoreCase);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -462,8 +473,22 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
         }
     }
 
+    /// <summary>Remembers a relay whose block of a round failed validation, until a block of that round validates (bounded).</summary>
+    private void SuspectRelay(ulong round, string host, BlockValidationException error)
+    {
+        _suspectRelays.AddOrUpdate(round, _ => [(host, error)], (_, list) => [.. list, (host, error)]);
+        if (_suspectRelays.Count > MaxSuspectRounds)
+        {
+            // Rounds that never got a valid block (a hole in the archive, or this decoder): forget the oldest.
+            foreach (var old in _suspectRelays.Keys.Order().Take(_suspectRelays.Count - MaxSuspectRounds))
+            {
+                _suspectRelays.TryRemove(old, out _);
+            }
+        }
+    }
+
     /// <summary>
-    /// A relay served a block that fails validation while another node served one that validates: it serves corrupt or foreign data.
+    /// A relay served a block that fails validation while a node served one of the same round that validates: it serves corrupt or foreign data.
     /// It is left out of relay lists for ten times the host cooldown (at least the cooldown, at most an hour) and reported at Error at
     /// most once an hour.
     /// </summary>
@@ -471,8 +496,10 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
     {
         var now = _time.GetUtcNow();
         var hour = TimeSpan.FromHours(1);
+
+        // Ten times the cooldown, capped at an hour, but never shorter than the cooldown itself (computed without overflowing).
         var cooldown = _options.HostCooldown;
-        var rest = cooldown >= hour / 10 ? (cooldown > hour ? cooldown : hour) : cooldown * 10;
+        var rest = TimeSpan.FromTicks(Math.Max(cooldown.Ticks, cooldown.Ticks > hour.Ticks / 10 ? hour.Ticks : cooldown.Ticks * 10));
         _relayRestUntil[host] = now + rest;
 
         // One report per hour even when concurrent fetches hit the same relay at once: only the caller that installs the new time logs.
@@ -603,7 +630,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
         public TimeSpan? RetryAfter { get; } = retryAfter;
     }
 
-    [LoggerMessage(EventId = 1116, Level = LogLevel.Error, Message = "Relay {Host} served block {Round} that failed validation; it is not asked for {Rest}. Indexing is not affected (the archival nodes serve the block); report the relay if this repeats")]
+    [LoggerMessage(EventId = 1116, Level = LogLevel.Error, Message = "Relay {Host} served block {Round} that failed validation while another node served a valid one; it is not asked for {Rest}. Indexing is not affected. If it repeats for this relay, report it; if it happens for many relays at once, check whether they run a newer node release this indexer cannot read")]
     private static partial void LogInvalidRelay(ILogger logger, Exception exception, string host, ulong round, TimeSpan rest);
 
     [LoggerMessage(EventId = 1115, Level = LogLevel.Debug, Message = "Relays could not be looked up; fetching from the archival nodes only")]

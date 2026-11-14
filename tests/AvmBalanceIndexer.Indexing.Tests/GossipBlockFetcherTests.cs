@@ -606,6 +606,35 @@ public class GossipBlockFetcherTests
     }
 
     [Fact]
+    public async Task A_Relay_Is_Blamed_When_A_Later_Fetch_Of_The_Same_Round_Gets_A_Valid_Block()
+    {
+        // At the tip the archival nodes often do not have the block yet: the fetch that met the bad relay fails as "not available",
+        // and the round only validates on a later fetch. The relay must still be reported then.
+        var logger = new CapturingLogger();
+        var archiveHasBlock = false;
+        var fetcher = CreateFetcher(
+            (request, _) => Task.FromResult(request.RequestUri!.Host.StartsWith("relay", StringComparison.Ordinal)
+                ? Ok(Chain.Encode(1001, []))
+                : Volatile.Read(ref archiveHasBlock) ? Ok(Chain.Encode(1000, [])) : new HttpResponseMessage(HttpStatusCode.NotFound)),
+            maxAttempts: 3,
+            logger: logger,
+            provider: new TieredHosts(["http://archive.test:4160"], ["http://relay.test:4160"]));
+
+        for (var i = 0; i < 200 && !logger.Entries.Any(static e => e.Message.Contains("relay.test", StringComparison.Ordinal)); i++)
+        {
+            await Assert.ThrowsAsync<BlockNotAvailableException>(() => fetcher.FetchBlockAsync(1000, 1000, CancellationToken.None));
+        }
+
+        Assert.DoesNotContain(logger.Entries, static e => e.Level == LogLevel.Error); // not judged while no node has a valid block
+
+        Volatile.Write(ref archiveHasBlock, true);
+        Assert.Equal(1000UL, (await fetcher.FetchBlockAsync(1000, 1000, CancellationToken.None)).Round);
+
+        var reported = Assert.Single(logger.Entries, static e => e.Level == LogLevel.Error);
+        Assert.Contains("relay.test", reported.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task No_Relay_Is_Blamed_When_No_Node_Serves_A_Block_That_Validates()
     {
         // Every node's answer fails validation, for example a block this decoder cannot handle: not the relay's fault.
