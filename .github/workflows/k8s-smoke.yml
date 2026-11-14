@@ -13,7 +13,6 @@ on:
       - global.json
       - AvmBalanceIndexer.slnx
       - .dockerignore
-      - .editorconfig
       - .github/workflows/k8s-smoke.yml
   push:
     branches: [main]
@@ -24,8 +23,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: k8s-smoke-${{ github.ref }}
-  # A newer push to a PR replaces its run; every commit on main is tested to the end.
+  # A newer push to a PR replaces its run; every commit on main gets its own group and is tested to the end.
+  group: k8s-smoke-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
