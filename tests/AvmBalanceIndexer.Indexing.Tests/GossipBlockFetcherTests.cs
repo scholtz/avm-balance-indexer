@@ -546,6 +546,73 @@ public class GossipBlockFetcherTests
     }
 
     [Fact]
+    public async Task A_Relay_That_Serves_An_Invalid_Block_Is_Reported_Once_And_Rested_Longer()
+    {
+        var logger = new CapturingLogger();
+        var clock = new ManualClock();
+        var relayCalls = 0;
+        var fetcher = CreateFetcher(
+            (request, _) =>
+            {
+                var relay = request.RequestUri!.Host.StartsWith("relay", StringComparison.Ordinal);
+                if (relay)
+                {
+                    Interlocked.Increment(ref relayCalls);
+                }
+
+                // The relay answers with another round's block: it fails validation. The archival node is right.
+                return Task.FromResult(Ok(Chain.Encode(relay ? 1001UL : 1000UL, [])));
+            },
+            time: clock,
+            logger: logger,
+            provider: new TieredHosts(["http://archive.test:4160"], ["http://relay.test:4160"]));
+
+        async Task FetchUntilTheRelayWasAskedAsync()
+        {
+            var before = Volatile.Read(ref relayCalls);
+            for (var i = 0; i < 200 && Volatile.Read(ref relayCalls) == before; i++)
+            {
+                Assert.Equal(1000UL, (await fetcher.FetchBlockAsync(1000, 1000, CancellationToken.None)).Round);
+            }
+
+            Assert.True(Volatile.Read(ref relayCalls) > before, "the relay was never asked");
+        }
+
+        await FetchUntilTheRelayWasAskedAsync();
+        var reported = Assert.Single(logger.Entries, static e => e.Level == LogLevel.Error);
+        Assert.Contains("relay.test", reported.Message, StringComparison.Ordinal);
+
+        // Longer than the normal cooldown (1 minute here), shorter than the long one (10 minutes): the relay is left alone.
+        clock.Advance(TimeSpan.FromMinutes(2));
+        var calls = Volatile.Read(ref relayCalls);
+        for (var i = 0; i < 40; i++)
+        {
+            await fetcher.FetchBlockAsync(1000, 1000, CancellationToken.None);
+        }
+
+        Assert.Equal(calls, Volatile.Read(ref relayCalls));
+
+        // After the long rest it is asked again; a second invalid answer within the hour is not reported again.
+        clock.Advance(TimeSpan.FromMinutes(9));
+        await FetchUntilTheRelayWasAskedAsync();
+        Assert.Single(logger.Entries, static e => e.Level == LogLevel.Error);
+    }
+
+    [Fact]
+    public async Task An_Invalid_Block_From_A_Relay_Does_Not_Make_The_Fetch_Fail_As_Bad_Data()
+    {
+        // Only the relay answers, and wrongly; the archival node does not have the block yet: that is "not available", as before.
+        var fetcher = CreateFetcher(
+            (request, _) => Task.FromResult(request.RequestUri!.Host.StartsWith("relay", StringComparison.Ordinal)
+                ? Ok(Chain.Encode(1001, []))
+                : new HttpResponseMessage(HttpStatusCode.NotFound)),
+            maxAttempts: 3,
+            provider: new TieredHosts(["http://archive.test:4160"], ["http://relay.test:4160"]));
+
+        await Assert.ThrowsAsync<BlockNotAvailableException>(() => fetcher.FetchBlockAsync(1000, 1000, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task Failing_Relays_Between_Archival_Attempts_Do_Not_Make_The_Rotation_Skip_An_Archival_Node()
     {
         string[] archival = ["http://a1.test:4160", "http://a2.test:4160", "http://a3.test:4160"];

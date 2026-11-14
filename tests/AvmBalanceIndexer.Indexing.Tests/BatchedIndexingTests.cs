@@ -87,6 +87,41 @@ public class BatchedIndexingTests
     }
 
     [Fact]
+    public async Task A_Writer_Resuming_At_The_Tip_Fetches_Its_Seed_Block_With_The_Tip_Hint()
+    {
+        // The seed block (the last published round) is re-fetched on every start; at the tip relays can serve it (#169, ADR 0019).
+        var storage = new RecordingStorage(new ChainContext(ChainId.AlgorandTestnet));
+        await Indexer(storage, Adapter()).RunAsync(LastRound, CancellationToken.None);
+        var restarted = Adapter();
+        restarted.Latest = LastRound;
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+
+        var run = Indexer(storage, restarted, new IndexerOptions { FetchConcurrency = 2, FollowPollInterval = TimeSpan.FromMilliseconds(10) }).RunAsync(null, stop.Token);
+        while (restarted.FetchCount == 0)
+        {
+            await Task.Delay(10, stop.Token);
+        }
+
+        await stop.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+
+        Assert.Equal([LastRound], restarted.TipHints); // the seed fetch, the only fetch of a writer that is already caught up
+    }
+
+    [Fact]
+    public async Task A_Bounded_Resume_Fetches_Its_Seed_Block_Without_A_Tip_Hint()
+    {
+        var storage = new RecordingStorage(new ChainContext(ChainId.AlgorandTestnet));
+        await Indexer(storage, Adapter()).RunAsync(LastRound - 2, CancellationToken.None);
+        var resumed = Adapter();
+
+        await Indexer(storage, resumed).RunAsync(LastRound, CancellationToken.None);
+
+        Assert.True(resumed.FetchCount > 0);
+        Assert.Empty(resumed.TipHints); // a bounded run's target is not the chain tip
+    }
+
+    [Fact]
     public async Task A_Backfill_Pass_Gives_The_Fetcher_No_Tip_Because_The_Tip_Moves_On_During_It()
     {
         var storage = new RecordingStorage(new ChainContext(ChainId.AlgorandTestnet));

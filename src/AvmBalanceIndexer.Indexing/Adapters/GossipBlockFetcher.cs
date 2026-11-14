@@ -22,6 +22,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
     private readonly ILogger<GossipBlockFetcher> _logger;
     private readonly TimeProvider _time;
     private readonly ConcurrentDictionary<string, DateTimeOffset> _cooldownUntil = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, DateTimeOffset> _invalidRelayReported = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, HostLatency> _latency = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, HostGate> _gates = new(StringComparer.OrdinalIgnoreCase);
     private readonly ThrottleReport _throttleReport;
@@ -157,8 +158,17 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
                     // Relays are optional extra capacity: a failing one is cooled down and left out of this fetch without using up an
                     // attempt, and says nothing about the archival fleet.
                     missedRelays.Add(host);
-                    _cooldownUntil[host] = _time.GetUtcNow() + _options.HostCooldown;
-                    LogAttemptFailed(_logger, ex, round, host, attempt + 1, _options.MaxAttempts);
+                    if (ex is BlockValidationException invalid)
+                    {
+                        // A relay that answers with a block that fails validation serves corrupt or foreign data: rest it much longer,
+                        // and report it at Error at most once an hour, so that a persistently bad relay is visible.
+                        ReportInvalidRelay(host, round, invalid);
+                    }
+                    else
+                    {
+                        _cooldownUntil[host] = _time.GetUtcNow() + _options.HostCooldown;
+                        LogAttemptFailed(_logger, ex, round, host, attempt + 1, _options.MaxAttempts);
+                    }
                     if (++relayFailures >= MaxRelayFailuresPerFetch)
                     {
                         // Several dead relays in a row (each may have taken a whole request timeout): the archival nodes go first now.
@@ -439,6 +449,19 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
         }
     }
 
+    /// <summary>Rests a relay that served an invalid block ten times the normal cooldown (at most an hour) and reports it at most hourly.</summary>
+    private void ReportInvalidRelay(string host, ulong round, BlockValidationException error)
+    {
+        var now = _time.GetUtcNow();
+        var rest = TimeSpan.FromTicks(Math.Min(_options.HostCooldown.Ticks * 10, TimeSpan.FromHours(1).Ticks));
+        _cooldownUntil[host] = now + rest;
+        if (!_invalidRelayReported.TryGetValue(host, out var last) || now - last >= TimeSpan.FromHours(1))
+        {
+            _invalidRelayReported[host] = now;
+            LogInvalidRelay(_logger, error, host, round, rest);
+        }
+    }
+
     private TimeSpan BackoffDelay(int attempt)
     {
         var ceiling = Math.Min(_options.MaxRetryDelay.TotalMilliseconds, _options.BaseRetryDelay.TotalMilliseconds * Math.Pow(2, attempt));
@@ -542,6 +565,9 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
     {
         public TimeSpan? RetryAfter { get; } = retryAfter;
     }
+
+    [LoggerMessage(EventId = 1116, Level = LogLevel.Error, Message = "Relay {Host} served block {Round} that failed validation; it is not asked for {Rest}. Indexing is not affected (the archival nodes serve the block); report the relay if this repeats")]
+    private static partial void LogInvalidRelay(ILogger logger, Exception exception, string host, ulong round, TimeSpan rest);
 
     [LoggerMessage(EventId = 1115, Level = LogLevel.Debug, Message = "Relays could not be looked up; fetching from the archival nodes only")]
     private static partial void LogRelaysSkipped(ILogger logger, Exception exception);

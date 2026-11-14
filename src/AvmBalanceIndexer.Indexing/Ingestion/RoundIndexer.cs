@@ -60,7 +60,7 @@ public sealed partial class RoundIndexer(
                 }
                 else
                 {
-                    rewards = await SeedRewardsAsync(status, cancellationToken).ConfigureAwait(false);
+                    rewards = await SeedRewardsAsync(status, stopAfterRound, cancellationToken).ConfigureAwait(false);
                 }
 
                 break;
@@ -245,12 +245,17 @@ public sealed partial class RoundIndexer(
 
     /// <summary>
     /// Rebuilds the rewards state of the last published block when resuming. The block is re-fetched, which also
-    /// proves that the archival source still serves the chain the database was built from.
+    /// proves that the archival source still serves the chain the database was built from. While following the chain the
+    /// fetch gets the tip, so that a writer restarting at the tip can take the block from a relay (ADR 0019) instead of
+    /// spending a request of the scarce archival nodes on every restart. A bounded run's target is not the tip: no hint.
+    /// Block 1 of a fresh start is fetched without a hint too, since relays prune old blocks.
     /// </summary>
-    private async Task<RewardsState> SeedRewardsAsync(ChainStatus status, CancellationToken cancellationToken)
+    private async Task<RewardsState> SeedRewardsAsync(ChainStatus status, ulong? stopAfterRound, CancellationToken cancellationToken)
     {
         var seedRound = Math.Max(status.IndexedRound, 1UL);
-        var seed = await adapter.FetchBlockAsync(seedRound, cancellationToken).ConfigureAwait(false);
+        var seed = stopAfterRound is null
+            ? await adapter.FetchBlockAsync(seedRound, await adapter.GetLatestRoundAsync(cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false)
+            : await adapter.FetchBlockAsync(seedRound, cancellationToken).ConfigureAwait(false);
         if (status.IndexedRound == 0)
         {
             // Block 1 links back to the genesis block hash that was stored as the round 0 cursor.
