@@ -4,7 +4,7 @@
 {{- $value := get $.Values.alerts $name }}
 {{- /* Numbers from a values file are float64 and print as 1e+06 when large; check the kind and the value, not the text. */}}
 {{- /* A values file gives numbers; --set gives integers as numbers but fractions (0.07) as strings. */}}
-{{- if not (or (kindIs "float64" $value) (kindIs "int64" $value) (kindIs "int" $value) (and (kindIs "string" $value) (regexMatch "^[0-9]+(\\.[0-9]+)?$" $value))) }}
+{{- if not (or (kindIs "float64" $value) (kindIs "int64" $value) (kindIs "int" $value) (and (kindIs "string" $value) (regexMatch "^([0-9]+(\\.[0-9]*)?|\\.[0-9]+)$" $value))) }}
 {{- fail (printf "alerts.%s %v must be a number" $name $value) }}
 {{- end }}
 {{- if le (float64 $value) 0.0 }}
@@ -27,12 +27,16 @@
 {{- $sel := default (printf "avm_chain=%q" $.Values.chain) .selector }}
 {{- /* API requests without the kubelet's probes, which would dilute the error share and the latency of real requests. */}}
 {{- $api := printf "%s,http_route!~\"/healthz/.*\"" $sel }}
-{{- $lag := printf "%g" (float64 .lagRounds) }}
-{{- $age := printf "%g" (float64 .statusAgeSeconds) }}
+{{- /* Whole rounds and seconds, printed without exponent (1e+06 would read badly in a summary). */}}
+{{- $lag := printf "%.0f" (float64 .lagRounds) }}
+{{- $age := printf "%.0f" (float64 .statusAgeSeconds) }}
 {{- $ratio := printf "%g" (float64 .api5xxRatio) }}
 {{- $p95 := printf "%g" (float64 .apiP95Seconds) }}
 {{- $runbook := "https://github.com/scholtz/avm-balance-indexer/blob/main/docs/operations.md#failure-modes" }}
-{{- /* A failover waits for the lease to expire: Cassandra's lease TTL plus a minute, at least the 3 minutes PostgreSQL needs. */}}
+{{- /*
+  A failover waits for the lease to expire (Cassandra: the lease TTL; PostgreSQL: about 30 s) and for the new leader's pod to report; 3 minutes
+  is the floor that covers a pod restart, the Cassandra TTL plus a minute when that is longer.
+*/}}
 {{- $noWriterFor := 180 }}
 {{- if eq $.Values.storage.provider "Cassandra" }}
 {{- $noWriterFor = max 180 (add (int $.Values.storage.cassandra.leaseTtlSeconds) 60) }}
@@ -47,12 +51,12 @@ spec:
     - name: {{ include "avm.fullname" $ }}
       rules:
         - alert: AvmIndexerLagHigh
-          # Needs 30 minutes of history (the last line), so a release that has just started its backfill is not judged yet.
           # Not while it catches up: a backfill or reindex starts millions of rounds behind and shrinks the lag for days. Catching up
-          # means the lag fell by at least the threshold in 30 minutes; a flat or noisy lag is not catching up.
+          # means the lag is below its lowest value in the 30 minutes before the last 30, whatever the speed; a flat lag that only moves
+          # up and down is not. Needs that history (the last line), so a release that has just started is not judged yet.
           expr: |
             (max(avm_indexer_lag_rounds{ {{- $sel -}} }) > {{ $lag }}
-              unless max(avm_indexer_lag_rounds{ {{- $sel -}} }) < max(avm_indexer_lag_rounds{ {{- $sel -}} } offset 30m) - {{ $lag }})
+              unless max(avm_indexer_lag_rounds{ {{- $sel -}} }) < min(min_over_time(avm_indexer_lag_rounds{ {{- $sel -}} }[30m] offset 30m)))
               and max(avm_indexer_lag_rounds{ {{- $sel -}} } offset 30m) >= 0
           for: 15m
           labels: { severity: warning, chain: {{ $.Values.chain | quote }} }
@@ -66,7 +70,7 @@ spec:
           labels: { severity: critical, chain: {{ $.Values.chain | quote }} }
           annotations:
             summary: "{{ $.Values.chain }}: the published status has not changed for {{ $age }} s"
-            description: "The writer is stuck, has no lease, or cannot reach the database or a block. The API reports health Stalled."
+            description: "The writer is stuck, has no lease, or cannot reach the database or a block. The API reports health Stalled once the status is older than api.stalledAfterSeconds."
             runbook_url: {{ $runbook | quote }}
         - alert: AvmIndexerNoWriter
           # No series at all (no worker exports) counts as no writer.

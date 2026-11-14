@@ -143,6 +143,14 @@ tests:
     alert_rule_test:
       - { eval_time: 20m, alertname: AvmApiErrors, exp_alerts: [] }
 
+  - name: a slow backfill is still catching up (the speed does not matter, only that the lag keeps falling)
+    interval: 1m
+    input_series:
+      - series: 'avm_indexer_lag_rounds{avm_chain="algorand-testnet"}'
+        values: '5000000-10x90'
+    alert_rule_test:
+      - { eval_time: 80m, alertname: AvmIndexerLagHigh, exp_alerts: [] }
+
   - name: a backfill far behind but catching up is not a lag alert
     interval: 1m
     input_series:

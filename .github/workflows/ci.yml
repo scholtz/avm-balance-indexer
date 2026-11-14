@@ -215,7 +215,8 @@ jobs:
           if t --set alerts.enabled=true --set alerts.apiP95Seconds=10 > /dev/null 2>&1; then echo "alerts.apiP95Seconds=10 must fail the render"; exit 1; fi
           # Large numbers from a values file (float64, printed as 1e+06) are valid thresholds.
           printf 'alerts:\n  enabled: true\n  lagRounds: 1000000\n' > /tmp/big.yaml
-          grep -q "AvmIndexerLagHigh" <<< "$(t -f /tmp/big.yaml)"
+          grep -q "more than 1000000 rounds" <<< "$(t -f /tmp/big.yaml)"
+          grep -q "> 0.05" <<< "$(t --set alerts.enabled=true --set alerts.api5xxRatio=.05)"
           # The no-writer delay follows the Cassandra lease: 30 s TTL -> 3 minutes, 300 s -> 6 minutes.
           grep -q "for: 360s" <<< "$(t --set alerts.enabled=true --set storage.cassandra.leaseTtlSeconds=300)"
           # Extra labels are merged with the chart labels, not duplicated.
