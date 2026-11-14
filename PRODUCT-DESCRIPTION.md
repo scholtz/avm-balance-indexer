@@ -36,7 +36,7 @@ Select one provider per chain deployment at startup. Stage TestNet, production A
 }
 ```
 
-Only the selected provider is opened by the service. Store credentials in Kubernetes Secrets and non-secret settings in Helm values/ConfigMaps. Switching providers requires redeploying with the new setting and indexing/replaying the chain into that provider’s database; do not dual-write production traffic to both backends. Keep a backend-neutral immutable source (archived blocks or canonical effects) for repeatable data loads and fair benchmarking. One API image can support both providers; package provider dependencies in the image and validate each provider in CI and deployment smoke tests.
+Only the selected provider is opened by the service. Store credentials in Kubernetes Secrets and non-secret settings in Helm values/ConfigMaps. Switching providers requires redeploying with the new setting and indexing/replaying the chain into that provider’s database; do not dual-write production traffic to both backends. The chain's archival nodes are the backend-neutral immutable source for repeatable data loads and fair benchmarking; the product keeps no block archive of its own. One API image can support both providers; package provider dependencies in the image and validate each provider in CI and deployment smoke tests.
 
 The shared contract must guarantee the same exact amount encoding, end-of-round semantics, deterministic effect identity, idempotent replay, pagination behavior, and publication rule: an API must never expose a round until all required rows for that round are committed in that provider.
 
@@ -281,9 +281,18 @@ Cassandra does not provide a relational transaction spanning all partitions. Do 
 2. Derive all canonical balance effects with stable keys from chain, round, transaction ID, inner path, and effect ordinal; compute each account/token’s ordered `balance_after` during round processing.
 3. Upsert query tables idempotently, using explicit consistency levels and retry policy.
 4. Verify expected write counts/checksums and then advance the visible `chain_status.indexed_round` as the final publication step.
-5. On restart, replay incomplete rounds safely; detect unexpected block-hash changes and rebuild by replaying from the last verified round or archived block.
+5. On restart, replay incomplete rounds safely; detect unexpected block-hash changes and recover by a partial rebuild from the last verified round (see below).
 
-This makes API reads expose only completed rounds while allowing independently written query tables to converge. Keep an immutable raw/canonical block archive (object storage is suitable) or another replayable source so the database can be rebuilt. Avoid Cassandra counters for balances; compute exact totals from deterministic effects and write absolute current balance values.
+This makes API reads expose only completed rounds while allowing independently written query tables to converge. The chain's archival nodes are the replayable source; no raw block archive is kept next to them. Avoid Cassandra counters for balances; compute exact totals from deterministic effects and write absolute current balance values.
+
+### Recovery without a full rebuild
+
+A fix in the normalizer only changes rounds indexed afterwards, and stored rows are never edited in place in Cassandra. Rebuilding a chain from genesis takes weeks, so a fix must not need it:
+
+- **Partial rebuild (fork at a round).** The operator names the last round R known to be good. The data up to R is taken over and only the rounds after R are indexed again with the fixed code. Cassandra fills a new keyspace from the old one (effects up to R are copied; holdings, the touched-account directory and the bucket index are derived from them; the status row for R is published last), then the old keyspace is retired. PostgreSQL deletes the rows after R and recomputes the affected holdings in one transaction. Either way the API never exposes a half-built state, and the result must equal a database that was indexed straight through with the fixed code.
+- **It is a reviewed database change request**, set in the release values and carried out by the writer, like the retirement of an old keyspace. Nobody runs statements by hand.
+- **Keep R recent and known.** At the tip the writer audits every round against the ledger deltas of the node where the chain offers them and stops at the first disagreement, and the database records which build indexed which range of rounds.
+- **Limits.** A bug in an early protocol era still costs most of the chain; that class is covered by era tests, not by this mechanism. Token records are not versioned: a field changed after R keeps its newer value until the replay passes that round again; balances do not depend on it.
 
 ## Kubernetes deployment model
 
@@ -318,7 +327,7 @@ Keep separate Helm values or Kustomize overlays for `stage-testnet`, `prod-algor
 3. **Build shared .NET domain/indexing library.** Normalize each network’s block/transaction data into deterministic token effects. Keep chain-specific adapters for genesis/network parameters and source APIs.
 4. **Implement replayable ingestion.** Read from an archival source/Conduit-compatible stream. Process rounds sequentially per chain; parallelize decoding, but publish commits in round order. Use exact arithmetic and provider-specific idempotent writes. PostgreSQL commits round data and cursor transactionally; Cassandra uses the publication workflow described above.
 5. **Bootstrap and validate.** Backfill TestNet first, then production chain deployments. Expose backfill progress. Compare sampled balances, holders, and transaction effects against a trusted Indexer/source at the same rounds. Validate Voi separately.
-6. **Add incremental workers.** Resume from stored round/hash cursor, process new rounds, retry safely, and alert on lag and gaps. Publish a round only when all required tables are complete.
+6. **Add incremental workers.** Resume from stored round/hash cursor, process new rounds, retry safely, and alert on lag and gaps. Publish a round only when all required tables are complete. Audit followed rounds against the ledger and support a partial rebuild from a chosen round, so a fix never needs a rebuild from genesis.
 7. **Build API read models.** ASP.NET Core endpoints read precomputed query tables; avoid request-time table scans or broad aggregation. Use stable cursors, bounded ranges, per-chain status, and exact amount strings in JSON for JavaScript clients.
 8. **Implement no-snapshot historical queries.** Stream effects by token bucket/shard and aggregate with bounded memory or temporary disk; provide async jobs for queries exceeding synchronous budgets. Benchmark worst-case holder scans.
 9. **Deploy on Kubernetes.** Package API, indexer, historical-query workers, and chain data-source components as containers. Provision the configured PostgreSQL or Cassandra backend and separate credentials/storage for TestNet, MainNet, and Voi. Add GitOps/Helm deployment, probes, autoscaling where safe, backups, restore drills, and rolling upgrade procedures.
@@ -360,6 +369,7 @@ Callers integrate through generated, typed client libraries instead of hand-writ
 - **All accounts definition:** clarify whether “all accounts” means addresses ever seen, current ALGO accounts, or accounts with any token opt-in. The proposed API covers addresses seen in indexed chain activity and preserves zero opted-in holdings.
 - **Chain adapters:** Algorand MainNet, TestNet, and Voi need separate cursors, genesis/network configuration, data sources, and validation. Voi-specific compatibility and historical access must be confirmed in a prototype.
 - **ARC-200 support:** standard events are the primary source, but contract implementations can vary. Preserve decoder identity and verification status.
+- **Recovery cost:** the archival nodes are the only copy of the blocks. A partial rebuild keeps everything before the first bad round, but that round has to be found; an undetected bug in an old era still means reindexing from there.
 - **Kubernetes operations:** Cassandra needs persistent storage, careful node topology, repair, compaction, backup, and restore procedures. Stateful workload operations are part of the product, not an afterthought.
 
 ## Sources
