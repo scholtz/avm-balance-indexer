@@ -689,7 +689,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
     [LoggerMessage(EventId = 1116, Level = LogLevel.Warning, Message = "Relay {Host} served block {Round} that failed validation while another node served a valid one; it is not asked for {Rest}. Indexing is not affected. If it repeats for this relay, report it; if it happens for many relays at once, check whether they run a newer node release this indexer cannot read")]
     private static partial void LogInvalidRelay(ILogger logger, Exception exception, string host, ulong round, TimeSpan rest);
 
-    [LoggerMessage(EventId = 1117, Level = LogLevel.Warning, Message = "Relay {Host} served a block {Round} that does not link to the chain the archival nodes serve (another history or a fork); the archival block was indexed and the relay is not asked for {Rest}. If it repeats for this relay, report it")]
+    [LoggerMessage(EventId = 1117, Level = LogLevel.Warning, Message = "Relay {Host} served a block {Round} that does not link to the chain the archival nodes serve (another history or a fork); the archival block is used instead and the relay is not asked for {Rest}. If it repeats for this relay, report it")]
     private static partial void LogForeignRelay(ILogger logger, string host, ulong round, TimeSpan rest);
 
     [LoggerMessage(EventId = 1115, Level = LogLevel.Debug, Message = "Relays could not be looked up; fetching from the archival nodes only")]
