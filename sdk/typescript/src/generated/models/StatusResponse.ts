@@ -13,6 +13,14 @@
  */
 
 import { mapValues, parseDate, parseDateTime, serializeDate, serializeDateTime } from '../runtime.js';
+import type { HistoricalQueriesInfo } from './HistoricalQueriesInfo.js';
+import {
+    HistoricalQueriesInfoFromJSON,
+    HistoricalQueriesInfoFromJSONTyped,
+    HistoricalQueriesInfoToJSON,
+    HistoricalQueriesInfoToJSONTyped,
+} from './HistoricalQueriesInfo.js';
+
 /**
  * Indexed round, target round, lag and ingestion state of the chain this deployment serves.
  * @export
@@ -20,33 +28,45 @@ import { mapValues, parseDate, parseDateTime, serializeDate, serializeDateTime }
  */
 export interface StatusResponse {
     /**
-     * 
+     * The chain this deployment serves.
      */
     chain: string;
     /**
-     * 
+     * The storage provider (`PostgreSql` or `Cassandra`).
      */
     provider: string;
     /**
-     * 
+     * What the writer published (for example `Backfilling` or `Following`), or `NotStarted` before the first round.
      */
     state: string;
     /**
-     * 
+     * The newest round the API serves; null before the first round.
      */
     indexedRound: number | null;
     /**
-     * 
+     * The newest round of the chain as last seen by the writer.
      */
     targetRound: number | null;
     /**
-     * 
+     * Rounds between the target round and the indexed round.
      */
     lag: number | null;
     /**
-     * 
+     * When the writer last updated the status.
      */
     updatedAt: Date | null;
+    /**
+     * The API's view of ingestion: `NotStarted`, `Healthy`, or `Stalled` when the writer has not updated the status for longer than `Api:StalledAfterSeconds`.
+     */
+    health: string;
+    /**
+     * Whole seconds since the writer last updated the status; never negative, null before the first round.
+     */
+    statusAgeSeconds: number | null;
+    /**
+     * 
+     */
+    historicalQueries: HistoricalQueriesInfo;
 }
 
 /**
@@ -60,6 +80,9 @@ export function instanceOfStatusResponse(value: object): value is StatusResponse
     if (!('targetRound' in value) || value['targetRound'] === undefined) return false;
     if (!('lag' in value) || value['lag'] === undefined) return false;
     if (!('updatedAt' in value) || value['updatedAt'] === undefined) return false;
+    if (!('health' in value) || value['health'] === undefined) return false;
+    if (!('statusAgeSeconds' in value) || value['statusAgeSeconds'] === undefined) return false;
+    if (!('historicalQueries' in value) || value['historicalQueries'] === undefined) return false;
     return true;
 }
 
@@ -80,6 +103,9 @@ export function StatusResponseFromJSONTyped(json: any, ignoreDiscriminator: bool
         'targetRound': json['targetRound'],
         'lag': json['lag'],
         'updatedAt': (json['updatedAt'] == null ? null : parseDateTime(json['updatedAt'])),
+        'health': json['health'],
+        'statusAgeSeconds': json['statusAgeSeconds'],
+        'historicalQueries': HistoricalQueriesInfoFromJSON(json['historicalQueries']),
     };
 }
 
@@ -101,6 +127,9 @@ export function StatusResponseToJSONTyped(value?: StatusResponse | null, ignoreD
         'targetRound': value['targetRound'],
         'lag': value['lag'],
         'updatedAt': value['updatedAt'] == null ? value['updatedAt'] : serializeDateTime(value['updatedAt']),
+        'health': value['health'],
+        'statusAgeSeconds': value['statusAgeSeconds'],
+        'historicalQueries': HistoricalQueriesInfoToJSON(value['historicalQueries']),
     };
 }
 

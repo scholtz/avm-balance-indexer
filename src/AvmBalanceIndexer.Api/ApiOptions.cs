@@ -16,6 +16,13 @@ public sealed class ApiOptions
     public int RequestTimeoutSeconds { get; set; } = 60;
 
     /// <summary>
+    /// The status reports <c>Stalled</c> when the published status is older than this. A healthy writer refreshes it every few seconds,
+    /// also when it is idle at the tip.
+    /// </summary>
+    [Range(10, 86_400)]
+    public int StalledAfterSeconds { get; set; } = 120;
+
+    /// <summary>
     /// Honour <c>X-Forwarded-For</c> and <c>X-Forwarded-Proto</c> (the client address then comes from the ingress). Only enable it when
     /// the API is reachable exclusively through a proxy you control, otherwise clients can pick their own address.
     /// </summary>

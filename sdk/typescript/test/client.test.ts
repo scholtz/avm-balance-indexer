@@ -84,12 +84,14 @@ describe("defaults", () => {
 describe("requests", () => {
   it("binds the chain into the path and sends custom headers", async () => {
     handler = (_request, response) =>
-      json(response, 200, { chain: "voi", provider: "Cassandra", state: "Following", indexedRound: 10, targetRound: 11, lag: 1, updatedAt: "2026-10-14T10:00:00Z" });
+      json(response, 200, { chain: "voi", provider: "Cassandra", state: "Following", indexedRound: 10, targetRound: 11, lag: 1, updatedAt: "2026-10-14T10:00:00Z", health: "Healthy", statusAgeSeconds: 3, historicalQueries: { mode: "EffectAggregation", synchronousTimeoutSeconds: 60, asynchronousScans: true, maxActiveScans: 20 } });
     const client = AvmBalanceIndexer.voi({ baseUrl, headers: { "X-Api-Key": "k" } });
 
     const status = await client.status();
 
     assert.equal(status.indexedRound, 10);
+    assert.equal(status.health, "Healthy");
+    assert.equal(status.historicalQueries.mode, "EffectAggregation");
     assert.equal(requests[0]?.url, "/v1/voi/status");
     assert.equal(requests[0]?.headers["x-api-key"], "k");
   });

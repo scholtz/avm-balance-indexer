@@ -1209,6 +1209,35 @@
         },
         "description": "The body of an error response: a message, and for some errors extra fields that name the offending values."
       },
+      "HistoricalQueriesInfo": {
+        "required": [
+          "mode",
+          "synchronousTimeoutSeconds",
+          "asynchronousScans",
+          "maxActiveScans"
+        ],
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "description": "Always \u0060EffectAggregation\u0060: holders at a round are computed by aggregating token effects, there are no snapshots."
+          },
+          "synchronousTimeoutSeconds": {
+            "type": "integer",
+            "description": "Longest a data request may take before it is answered with 504.",
+            "format": "int32"
+          },
+          "asynchronousScans": {
+            "type": "boolean",
+            "description": "Whether holder scans can be started (\u0060POST .../holders/scans\u0060) for queries too large to answer synchronously."
+          },
+          "maxActiveScans": {
+            "type": "integer",
+            "description": "How many scans may be pending or running at once.",
+            "format": "int32"
+          }
+        }
+      },
       "HistoryResponse": {
         "required": [
           "account",
@@ -1467,38 +1496,61 @@
           "indexedRound",
           "targetRound",
           "lag",
-          "updatedAt"
+          "updatedAt",
+          "health",
+          "statusAgeSeconds",
+          "historicalQueries"
         ],
         "type": "object",
         "properties": {
           "chain": {
-            "type": "string"
+            "type": "string",
+            "description": "The chain this deployment serves."
           },
           "provider": {
-            "type": "string"
+            "type": "string",
+            "description": "The storage provider (\u0060PostgreSql\u0060 or \u0060Cassandra\u0060)."
           },
           "state": {
-            "type": "string"
+            "type": "string",
+            "description": "What the writer published (for example \u0060Backfilling\u0060 or \u0060Following\u0060), or \u0060NotStarted\u0060 before the first round."
           },
           "indexedRound": {
             "type": "integer",
+            "description": "The newest round the API serves; null before the first round.",
             "format": "uint64",
             "nullable": true
           },
           "targetRound": {
             "type": "integer",
+            "description": "The newest round of the chain as last seen by the writer.",
             "format": "uint64",
             "nullable": true
           },
           "lag": {
             "type": "integer",
+            "description": "Rounds between the target round and the indexed round.",
             "format": "uint64",
             "nullable": true
           },
           "updatedAt": {
             "type": "string",
+            "description": "When the writer last updated the status.",
             "format": "date-time",
             "nullable": true
+          },
+          "health": {
+            "type": "string",
+            "description": "The API\u0027s view of ingestion: \u0060NotStarted\u0060, \u0060Healthy\u0060, or \u0060Stalled\u0060 when the writer has not updated the status for longer than \u0060Api:StalledAfterSeconds\u0060."
+          },
+          "statusAgeSeconds": {
+            "type": "integer",
+            "description": "Whole seconds since the writer last updated the status; never negative, null before the first round.",
+            "format": "int64",
+            "nullable": true
+          },
+          "historicalQueries": {
+            "$ref": "#/components/schemas/HistoricalQueriesInfo"
           }
         },
         "description": "Indexed round, target round, lag and ingestion state of the chain this deployment serves."

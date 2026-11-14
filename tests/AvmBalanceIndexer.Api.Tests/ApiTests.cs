@@ -23,17 +23,26 @@ public sealed class ApiTests : IDisposable
         }
     }
 
-    private HttpClient CreateClient(IChainStorage? storage = null)
+    private static readonly DateTimeOffset Now = new(2026, 11, 14, 12, 0, 0, TimeSpan.Zero);
+
+    private HttpClient CreateClient(IChainStorage? storage = null, params (string Key, string Value)[] settings)
     {
         var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.UseSetting("Chain", ChainId.AlgorandTestnet);
             builder.UseSetting("Storage:Provider", "PostgreSql");
             builder.UseSetting("Storage:PostgreSql:ConnectionString", "Host=localhost;Database=unused;Username=u;Password=p");
+            foreach (var (key, value) in settings)
+            {
+                builder.UseSetting(key, value);
+            }
+
             builder.ConfigureServices(services =>
             {
                 services.RemoveAll<IChainStorage>();
                 services.AddSingleton(storage ?? _storage);
+                services.RemoveAll<TimeProvider>();
+                services.AddSingleton<TimeProvider>(new FixedClock(Now));
             });
         });
         _factories.Add(factory);
@@ -73,6 +82,72 @@ public sealed class ApiTests : IDisposable
         Assert.Equal("NotStarted", status.GetProperty("state").GetString());
         Assert.Equal(JsonValueKind.Null, status.GetProperty("indexedRound").ValueKind);
         Assert.Equal("PostgreSql", status.GetProperty("provider").GetString());
+        Assert.Equal("NotStarted", status.GetProperty("health").GetString());
+        Assert.Equal(JsonValueKind.Null, status.GetProperty("statusAgeSeconds").ValueKind);
+        Assert.Equal("EffectAggregation", status.GetProperty("historicalQueries").GetProperty("mode").GetString());
+    }
+
+    [Theory]
+    [InlineData(0, "Healthy", 0)]
+    [InlineData(-30, "Healthy", 30)]
+    [InlineData(-120, "Healthy", 120)]
+    [InlineData(-121, "Stalled", 121)]
+    [InlineData(45, "Healthy", 0)] // a writer clock ahead of the API's: never a negative age
+    public async Task Status_Reports_Stalled_When_The_Writer_Has_Not_Updated_It_For_Too_Long(int offsetSeconds, string health, long age)
+    {
+        await _storage.WriteRoundAsync(
+            new ChainStatus(ChainId.AlgorandTestnet, 0, TestChain.FakeHash(0), 0, IngestionState.Following, Now.AddSeconds(offsetSeconds)),
+            [],
+            CancellationToken.None);
+        using var client = CreateClient();
+
+        var status = await client.GetFromJsonAsync<JsonElement>(new Uri("/v1/algorand-testnet/status", UriKind.Relative));
+
+        Assert.Equal(health, status.GetProperty("health").GetString());
+        Assert.Equal(age, status.GetProperty("statusAgeSeconds").GetInt64());
+        Assert.Equal("Following", status.GetProperty("state").GetString()); // the state is what the writer published, health is the API's view
+    }
+
+    [Fact]
+    public async Task Status_Uses_The_Configured_Stall_Threshold_And_Reports_The_Historical_Query_Limits()
+    {
+        await _storage.WriteRoundAsync(
+            new ChainStatus(ChainId.AlgorandTestnet, 0, TestChain.FakeHash(0), 0, IngestionState.Following, Now.AddSeconds(-30)),
+            [],
+            CancellationToken.None);
+        using var client = CreateClient(null, ("Api:StalledAfterSeconds", "20"), ("Api:RequestTimeoutSeconds", "45"), ("Scans:MaxActive", "7"));
+
+        var status = await client.GetFromJsonAsync<JsonElement>(new Uri("/v1/algorand-testnet/status", UriKind.Relative));
+
+        Assert.Equal("Stalled", status.GetProperty("health").GetString());
+        var queries = status.GetProperty("historicalQueries");
+        Assert.Equal("EffectAggregation", queries.GetProperty("mode").GetString());
+        Assert.Equal(45, queries.GetProperty("synchronousTimeoutSeconds").GetInt32());
+        Assert.True(queries.GetProperty("asynchronousScans").GetBoolean());
+        Assert.Equal(7, queries.GetProperty("maxActiveScans").GetInt32());
+    }
+
+    [Theory]
+    [InlineData("9")]
+    [InlineData("86401")]
+    public void A_Stall_Threshold_Outside_Its_Range_Stops_The_Api(string seconds)
+    {
+        using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Chain", ChainId.AlgorandTestnet);
+            builder.UseSetting("Storage:Provider", "PostgreSql");
+            builder.UseSetting("Storage:PostgreSql:ConnectionString", "Host=localhost;Database=unused;Username=u;Password=p");
+            builder.UseSetting("Api:StalledAfterSeconds", seconds);
+        });
+
+        var error = Assert.ThrowsAny<Exception>(() => factory.CreateClient());
+
+        Assert.Contains("StalledAfterSeconds", error.ToString(), StringComparison.Ordinal);
+    }
+
+    private sealed class FixedClock(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
     }
 
     [Fact]

@@ -126,7 +126,7 @@ They take a few minutes.
 
 | Endpoint | Purpose | State |
 |---|---|---|
-| `GET /v1/{chain}/status` | indexed round, target round, lag, ingestion state | available |
+| `GET /v1/{chain}/status` | indexed round, target round, lag, ingestion state, health (`Healthy`, or `Stalled` when the writer has not updated the status for `Api:StalledAfterSeconds`, default 120) and the historical-query mode and limits | available |
 | `GET /v1/{chain}/accounts/{address}/tokens` | current holdings | available |
 | `GET /v1/{chain}/accounts/{address}/tokens/{kind}/{tokenId}/balance?round=R` | end-of-round balance | available |
 | `GET /v1/{chain}/tokens/{kind}/{tokenId}/holders?round=R` | paginated end-of-round holders | available |

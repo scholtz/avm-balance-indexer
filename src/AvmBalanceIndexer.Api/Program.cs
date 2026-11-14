@@ -234,19 +234,35 @@ v1.AddEndpointFilter(async (context, next) =>
 
 v1.MapGet(
     "/status",
-    async (ChainContext chain, IChainStorage storage, IOptions<StorageOptions> options, CancellationToken cancellationToken) =>
+    async (
+        ChainContext chain,
+        IChainStorage storage,
+        IOptions<StorageOptions> options,
+        IOptions<ScanOptions> scanOptions,
+        TimeProvider clock,
+        CancellationToken cancellationToken) =>
     {
         var status = await storage.GetAsync(chain.Chain, cancellationToken);
-        return status is null
-            ? Results.Ok(new StatusResponse(chain.Chain, options.Value.Provider.ToString(), "NotStarted", null, null, null, null))
-            : Results.Ok(new StatusResponse(
-                chain.Chain,
-                options.Value.Provider.ToString(),
-                status.State.ToString(),
-                status.IndexedRound,
-                status.TargetRound,
-                status.Lag,
-                status.UpdatedAt));
+        // ApiOptions is read and validated once at start (the `api` local above), like the rate limit and the timeout it reports.
+        var queries = new HistoricalQueriesInfo("EffectAggregation", api.RequestTimeoutSeconds, true, scanOptions.Value.MaxActive);
+        if (status is null)
+        {
+            return Results.Ok(new StatusResponse(chain.Chain, options.Value.Provider.ToString(), "NotStarted", null, null, null, null, "NotStarted", null, queries));
+        }
+
+        // A writer clock ahead of the API's would give a negative age; that is not a stall.
+        var age = (long)Math.Max(0, Math.Floor((clock.GetUtcNow() - status.UpdatedAt).TotalSeconds));
+        return Results.Ok(new StatusResponse(
+            chain.Chain,
+            options.Value.Provider.ToString(),
+            status.State.ToString(),
+            status.IndexedRound,
+            status.TargetRound,
+            status.Lag,
+            status.UpdatedAt,
+            age > api.StalledAfterSeconds ? "Stalled" : "Healthy",
+            age,
+            queries));
     })
     .WithName("GetChainStatus")
     .Produces<StatusResponse>()

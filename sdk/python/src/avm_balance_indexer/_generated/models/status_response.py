@@ -20,6 +20,7 @@ import json
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
+from avm_balance_indexer._generated.models.historical_queries_info import HistoricalQueriesInfo
 from typing import Optional, Set
 from typing_extensions import Self
 from pydantic_core import to_jsonable_python
@@ -28,14 +29,17 @@ class StatusResponse(BaseModel):
     """
     Indexed round, target round, lag and ingestion state of the chain this deployment serves.
     """ # noqa: E501
-    chain: StrictStr
-    provider: StrictStr
-    state: StrictStr
-    indexed_round: Optional[StrictInt] = Field(alias="indexedRound")
-    target_round: Optional[StrictInt] = Field(alias="targetRound")
-    lag: Optional[StrictInt]
-    updated_at: Optional[datetime] = Field(alias="updatedAt")
-    __properties: ClassVar[List[str]] = ["chain", "provider", "state", "indexedRound", "targetRound", "lag", "updatedAt"]
+    chain: StrictStr = Field(description="The chain this deployment serves.")
+    provider: StrictStr = Field(description="The storage provider (`PostgreSql` or `Cassandra`).")
+    state: StrictStr = Field(description="What the writer published (for example `Backfilling` or `Following`), or `NotStarted` before the first round.")
+    indexed_round: Optional[StrictInt] = Field(description="The newest round the API serves; null before the first round.", alias="indexedRound")
+    target_round: Optional[StrictInt] = Field(description="The newest round of the chain as last seen by the writer.", alias="targetRound")
+    lag: Optional[StrictInt] = Field(description="Rounds between the target round and the indexed round.")
+    updated_at: Optional[datetime] = Field(description="When the writer last updated the status.", alias="updatedAt")
+    health: StrictStr = Field(description="The API's view of ingestion: `NotStarted`, `Healthy`, or `Stalled` when the writer has not updated the status for longer than `Api:StalledAfterSeconds`.")
+    status_age_seconds: Optional[StrictInt] = Field(description="Whole seconds since the writer last updated the status; never negative, null before the first round.", alias="statusAgeSeconds")
+    historical_queries: HistoricalQueriesInfo = Field(alias="historicalQueries")
+    __properties: ClassVar[List[str]] = ["chain", "provider", "state", "indexedRound", "targetRound", "lag", "updatedAt", "health", "statusAgeSeconds", "historicalQueries"]
 
     model_config = ConfigDict(
         validate_by_name=True,
@@ -76,6 +80,9 @@ class StatusResponse(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
+        # override the default output from pydantic by calling `to_dict()` of historical_queries
+        if self.historical_queries:
+            _dict['historicalQueries'] = self.historical_queries.to_dict()
         # set to None if indexed_round (nullable) is None
         # and model_fields_set contains the field
         if self.indexed_round is None and "indexed_round" in self.model_fields_set:
@@ -96,6 +103,11 @@ class StatusResponse(BaseModel):
         if self.updated_at is None and "updated_at" in self.model_fields_set:
             _dict['updatedAt'] = None
 
+        # set to None if status_age_seconds (nullable) is None
+        # and model_fields_set contains the field
+        if self.status_age_seconds is None and "status_age_seconds" in self.model_fields_set:
+            _dict['statusAgeSeconds'] = None
+
         return _dict
 
     @classmethod
@@ -114,7 +126,10 @@ class StatusResponse(BaseModel):
             "indexedRound": obj.get("indexedRound"),
             "targetRound": obj.get("targetRound"),
             "lag": obj.get("lag"),
-            "updatedAt": obj.get("updatedAt")
+            "updatedAt": obj.get("updatedAt"),
+            "health": obj.get("health"),
+            "statusAgeSeconds": obj.get("statusAgeSeconds"),
+            "historicalQueries": HistoricalQueriesInfo.from_dict(obj["historicalQueries"]) if obj.get("historicalQueries") is not None else None
         })
         return _obj
 

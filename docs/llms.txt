@@ -21,7 +21,7 @@ API base: `{deployment}/v1/{chain}`. No authentication. About 600 data requests 
 
 ## Endpoints (all GET unless noted; `{kind}` is algo | asa | arc200, native token = algo/0)
 
-- `/v1/{chain}/status`: ingestion state (NotStarted, Bootstrapping, Backfilling, Following, Replaying, Failed), indexedRound, targetRound, lag
+- `/v1/{chain}/status`: ingestion state (NotStarted, Bootstrapping, Backfilling, Following, Replaying, Failed), indexedRound, targetRound, lag; health (NotStarted, Healthy, Stalled) and statusAgeSeconds; historicalQueries (mode EffectAggregation, synchronous timeout, scans, max active scans)
 - `/v1/{chain}/accounts/{address}/tokens?includeZero&cursor&limit`: current holdings of an account
 - `/v1/{chain}/accounts/{address}/tokens/{kind}/{tokenId}/balance?round`: balance at the end of a round (latest published round if omitted); a missing holding is "0"
 - `/v1/{chain}/accounts/{address}/tokens/{kind}/{tokenId}/transactions?fromRound&toRound&cursor&limit`: balance effects, newest first

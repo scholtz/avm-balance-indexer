@@ -1777,6 +1777,46 @@ namespace AvmBalanceIndexer.Client.Generated
     }
 
     [System.CodeDom.Compiler.GeneratedCode("NJsonSchema", "14.7.1.0 (NJsonSchema v11.6.1.0 (Newtonsoft.Json v13.0.0.0))")]
+    public partial class HistoricalQueriesInfo
+    {
+
+        /// <summary>
+        /// Always `EffectAggregation`: holders at a round are computed by aggregating token effects, there are no snapshots.
+        /// </summary>
+        [System.Text.Json.Serialization.JsonPropertyName("mode")]
+        [System.ComponentModel.DataAnnotations.Required(AllowEmptyStrings = true)]
+        public string Mode { get; set; } = default!;
+
+        /// <summary>
+        /// Longest a data request may take before it is answered with 504.
+        /// </summary>
+        [System.Text.Json.Serialization.JsonPropertyName("synchronousTimeoutSeconds")]
+        public int SynchronousTimeoutSeconds { get; set; } = default!;
+
+        /// <summary>
+        /// Whether holder scans can be started (`POST .../holders/scans`) for queries too large to answer synchronously.
+        /// </summary>
+        [System.Text.Json.Serialization.JsonPropertyName("asynchronousScans")]
+        public bool AsynchronousScans { get; set; } = default!;
+
+        /// <summary>
+        /// How many scans may be pending or running at once.
+        /// </summary>
+        [System.Text.Json.Serialization.JsonPropertyName("maxActiveScans")]
+        public int MaxActiveScans { get; set; } = default!;
+
+        private System.Collections.Generic.IDictionary<string, object>? _additionalProperties;
+
+        [System.Text.Json.Serialization.JsonExtensionData]
+        public System.Collections.Generic.IDictionary<string, object> AdditionalProperties
+        {
+            get { return _additionalProperties ?? (_additionalProperties = new System.Collections.Generic.Dictionary<string, object>()); }
+            set { _additionalProperties = value; }
+        }
+
+    }
+
+    [System.CodeDom.Compiler.GeneratedCode("NJsonSchema", "14.7.1.0 (NJsonSchema v11.6.1.0 (Newtonsoft.Json v13.0.0.0))")]
     public partial class HistoryResponse
     {
 
@@ -2046,29 +2086,67 @@ namespace AvmBalanceIndexer.Client.Generated
     public partial class StatusResponse
     {
 
+        /// <summary>
+        /// The chain this deployment serves.
+        /// </summary>
         [System.Text.Json.Serialization.JsonPropertyName("chain")]
         [System.ComponentModel.DataAnnotations.Required(AllowEmptyStrings = true)]
         public string Chain { get; set; } = default!;
 
+        /// <summary>
+        /// The storage provider (`PostgreSql` or `Cassandra`).
+        /// </summary>
         [System.Text.Json.Serialization.JsonPropertyName("provider")]
         [System.ComponentModel.DataAnnotations.Required(AllowEmptyStrings = true)]
         public string Provider { get; set; } = default!;
 
+        /// <summary>
+        /// What the writer published (for example `Backfilling` or `Following`), or `NotStarted` before the first round.
+        /// </summary>
         [System.Text.Json.Serialization.JsonPropertyName("state")]
         [System.ComponentModel.DataAnnotations.Required(AllowEmptyStrings = true)]
         public string State { get; set; } = default!;
 
+        /// <summary>
+        /// The newest round the API serves; null before the first round.
+        /// </summary>
         [System.Text.Json.Serialization.JsonPropertyName("indexedRound")]
         public ulong? IndexedRound { get; set; } = default!;
 
+        /// <summary>
+        /// The newest round of the chain as last seen by the writer.
+        /// </summary>
         [System.Text.Json.Serialization.JsonPropertyName("targetRound")]
         public ulong? TargetRound { get; set; } = default!;
 
+        /// <summary>
+        /// Rounds between the target round and the indexed round.
+        /// </summary>
         [System.Text.Json.Serialization.JsonPropertyName("lag")]
         public ulong? Lag { get; set; } = default!;
 
+        /// <summary>
+        /// When the writer last updated the status.
+        /// </summary>
         [System.Text.Json.Serialization.JsonPropertyName("updatedAt")]
         public System.DateTimeOffset? UpdatedAt { get; set; } = default!;
+
+        /// <summary>
+        /// The API's view of ingestion: `NotStarted`, `Healthy`, or `Stalled` when the writer has not updated the status for longer than `Api:StalledAfterSeconds`.
+        /// </summary>
+        [System.Text.Json.Serialization.JsonPropertyName("health")]
+        [System.ComponentModel.DataAnnotations.Required(AllowEmptyStrings = true)]
+        public string Health { get; set; } = default!;
+
+        /// <summary>
+        /// Whole seconds since the writer last updated the status; never negative, null before the first round.
+        /// </summary>
+        [System.Text.Json.Serialization.JsonPropertyName("statusAgeSeconds")]
+        public long? StatusAgeSeconds { get; set; } = default!;
+
+        [System.Text.Json.Serialization.JsonPropertyName("historicalQueries")]
+        [System.ComponentModel.DataAnnotations.Required]
+        public HistoricalQueriesInfo HistoricalQueries { get; set; } = new HistoricalQueriesInfo();
 
         private System.Collections.Generic.IDictionary<string, object>? _additionalProperties;
 

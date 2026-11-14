@@ -28,6 +28,7 @@ data:
   Worker__HealthPort: {{ .Values.worker.healthPort | quote }}
   Api__RateLimitPerMinute: {{ .Values.api.rateLimitPerMinute | quote }}
   Api__RequestTimeoutSeconds: {{ .Values.api.requestTimeoutSeconds | quote }}
+  Api__StalledAfterSeconds: {{ .Values.api.stalledAfterSeconds | quote }}
   Api__TrustForwardedHeaders: {{ .Values.api.trustForwardedHeaders | quote }}
   Api__ForwardedHeadersLimit: {{ .Values.api.forwardedHeadersLimit | quote }}
   {{- range $i, $network := .Values.api.knownProxyNetworks }}
