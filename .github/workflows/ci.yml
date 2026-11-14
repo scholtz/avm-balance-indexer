@@ -164,6 +164,13 @@ jobs:
           echo "$out" | grep -q 'exec docker-entrypoint.sh cassandra -f'
           # A missing setting must never keep Cassandra from starting: the check only warns, the exec is unconditional.
           if echo "$out" | grep -q '&& exec docker-entrypoint'; then echo "the Cassandra start must not depend on the sed"; exit 1; fi
+          # The keyspace and datacenter themselves: a block scalar (`|`) keeps a trailing newline, which the options validation refuses.
+          printf 'storage:\n  cassandra:\n    keyspace: |\n      avm_x\n' > /tmp/newline-keyspace.yaml
+          if t -f /tmp/newline-keyspace.yaml > /dev/null 2>&1; then echo "a keyspace with a trailing newline must fail the render"; exit 1; fi
+          for bad in 1bad bad-name; do
+            if t --set "storage.cassandra.keyspace=$bad" > /dev/null 2>&1; then echo "the keyspace '$bad' must fail the render"; exit 1; fi
+          done
+          if t --set "storage.cassandra.localDatacenter=dc'1" > /dev/null 2>&1; then echo "an invalid datacenter must fail the render"; exit 1; fi
           # What the worker's options validation refuses must already fail the render: a pod that cannot start stops indexing.
           for bad in AVM_New avm-old system_auth System 1old; do
             if t --set storage.cassandra.keyspace=avm_new --set "storage.cassandra.retiredKeyspaces={$bad}" > /dev/null 2>&1; then

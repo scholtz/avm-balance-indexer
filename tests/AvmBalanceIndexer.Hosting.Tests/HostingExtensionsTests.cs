@@ -110,7 +110,8 @@ public class HostingExtensionsTests
             ("Storage:Cassandra:ContactPoints:0", "cassandra-0"),
             ($"Storage:Cassandra:{key}", value)));
 
-        Assert.Throws<OptionsValidationException>(() => provider.GetRequiredService<IOptions<StorageOptions>>().Value);
+        var error = Assert.Throws<OptionsValidationException>(() => provider.GetRequiredService<IOptions<StorageOptions>>().Value);
+        Assert.Contains($"Storage:Cassandra:{key}", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
