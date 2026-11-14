@@ -138,7 +138,16 @@ jobs:
             [ "$answer" = yes ]
           }
           missing=()
-          for resource in deployments.apps services configmaps secrets ingresses.networking.k8s.io; do
+          resources=(deployments.apps services configmaps secrets ingresses.networking.k8s.io)
+          # The API autoscaler is opt-in per release (api.autoscaling.enabled). Its rights are needed when the values enable it, and to
+          # delete it when they switch it off again (a missing delete right would fail the upgrade half way).
+          hpa=no
+          if [ "$(yq '.api.autoscaling.enabled // false' "deploy/helm/values/$VALUES")" = true ]; then
+            resources+=(horizontalpodautoscalers.autoscaling); hpa=yes
+          elif kubectl -n "$NAMESPACE" get horizontalpodautoscaler "${RELEASE}-${CHAIN}-api" > /dev/null 2>&1; then
+            can delete horizontalpodautoscalers.autoscaling || missing+=("delete horizontalpodautoscalers.autoscaling (to remove the API autoscaler)")
+          fi
+          for resource in "${resources[@]}"; do
             for verb in get list watch create update patch; do
               can "$verb" "$resource" || missing+=("$verb $resource")
             done
@@ -154,16 +163,7 @@ jobs:
             for item in "${missing[@]}"; do echo "::error::The kube config may not $item"; done
             echo "::error::Grant these in the namespace ${NAMESPACE} (deploy/rbac/deployer.yaml lists everything the chart needs)"; exit 1
           fi
-          # The API autoscaler is opt-in per release (api.autoscaling.enabled); when a release asks for it, its rights are required.
-          if [ "$(yq '.api.autoscaling.enabled // false' "deploy/helm/values/$VALUES")" = true ]; then
-            for verb in get list watch create update patch; do
-              can "$verb" horizontalpodautoscalers.autoscaling || missing+=("$verb horizontalpodautoscalers.autoscaling")
-            done
-            if [ ${#missing[@]} -gt 0 ]; then
-              for item in "${missing[@]}"; do echo "::error::The kube config may not $item"; done
-              echo "::error::Grant these in the namespace ${NAMESPACE} (deploy/rbac/deployer.yaml lists everything the chart needs)"; exit 1
-            fi
-          fi
+          echo "API autoscaler in the values: $hpa"
           # The PodDisruptionBudget only protects the API during node drains.
           for verb in get list watch create update patch; do
             if ! can "$verb" poddisruptionbudgets.policy; then

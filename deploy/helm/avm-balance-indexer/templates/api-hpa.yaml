@@ -6,14 +6,17 @@
 {{- if gt (int .minReplicas) (int .maxReplicas) }}
 {{- fail "api.autoscaling.minReplicas must not be greater than api.autoscaling.maxReplicas" }}
 {{- end }}
-{{- if or (lt (int .targetCPUUtilizationPercentage) 1) (gt (int .targetCPUUtilizationPercentage) 100) }}
-{{- fail "api.autoscaling.targetCPUUtilizationPercentage must be between 1 and 100" }}
+{{- /* Utilization is measured against the CPU request and may exceed 100 (limits above requests); the API field is an integer. */}}
+{{- if not (regexMatch "^[1-9][0-9]{0,3}$" (toString .targetCPUUtilizationPercentage)) }}
+{{- fail (printf "api.autoscaling.targetCPUUtilizationPercentage %v must be a whole number of percent of the CPU request (1 to 9999)" .targetCPUUtilizationPercentage) }}
 {{- end }}
-{{- if not (dig "requests" "cpu" "" $.Values.api.resources) }}
+{{- if not (dig "requests" "cpu" "" (default dict $.Values.api.resources)) }}
 {{- fail "api.autoscaling needs api.resources.requests.cpu: CPU utilization is measured against the request" }}
 {{- end }}
-{{- if and $.Values.api.podDisruptionBudget.enabled (lt (int .minReplicas) 2) }}
-{{- fail "api.autoscaling.minReplicas must be at least 2 while api.podDisruptionBudget is enabled: one replica with minAvailable 1 blocks every node drain" }}
+{{- with $.Values.api.podDisruptionBudget }}
+{{- if and .enabled (regexMatch "^[0-9]+$" (toString .minAvailable)) (le (int $.Values.api.autoscaling.minReplicas) (int .minAvailable)) }}
+{{- fail (printf "api.autoscaling.minReplicas must be greater than api.podDisruptionBudget.minAvailable (%v): at the minimum no API pod could be evicted and every node drain would block" .minAvailable) }}
+{{- end }}
 {{- end }}
 # Scales the API on CPU. Needs metrics-server. The API is stateless (reads only), so it is the one component that is safe to scale;
 # the worker has a single writer and the embedded Cassandra a single data directory.

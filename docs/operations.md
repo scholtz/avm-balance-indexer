@@ -16,7 +16,9 @@ One **deployment per chain** (`algorand-mainnet`, `algorand-testnet`, `voi`) wit
 The API is the one component that may scale with load: `api.autoscaling.enabled` gives it a HorizontalPodAutoscaler on CPU
 (`minReplicas`, `maxReplicas`, `targetCPUUtilizationPercentage`; needs metrics-server and `api.resources.requests.cpu`). The rate limit
 is per pod, so the limit a single client sees grows with the number of replicas. Keep `minReplicas` at 2 or more while the
-PodDisruptionBudget is on (the chart refuses 1). The worker (one writer) and the embedded Cassandra (one data directory) do not scale.
+PodDisruptionBudget is on (the chart refuses a minimum not above `minAvailable`). Switching autoscaling on for a running release removes
+the replica count from the API Deployment, so Kubernetes falls back to 1 replica until the autoscaler (within a minute) scales it up again:
+do it outside busy hours. The worker (one writer) and the embedded Cassandra (one data directory) do not scale.
 
 Probes: API `/healthz/live` and `/healthz/ready` (ready needs the database); worker `/healthz/live` and `/healthz/ready` on `Worker:HealthPort`
 (ready means the replica knows whether it leads or stands by, a standby is ready).

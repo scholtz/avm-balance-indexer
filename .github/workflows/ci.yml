@@ -197,8 +197,9 @@ jobs:
           t() { helm template ci deploy/helm/avm-balance-indexer -f deploy/helm/values/stage-testnet.yaml --set cassandra.embedded.node=ci-node "$@"; }
           api='select(.kind == "Deployment" and .metadata.labels."app.kubernetes.io/component" == "api")'
           # Off by default: no autoscaler, the configured replica count.
-          if t | grep -q "kind: HorizontalPodAutoscaler"; then echo "autoscaling must be off by default"; exit 1; fi
-          test "$(t | yq "$api | .spec.replicas")" = 1
+          out=$(t)
+          if grep -q "kind: HorizontalPodAutoscaler" <<< "$out"; then echo "autoscaling must be off by default"; exit 1; fi
+          test "$(yq "$api | .spec.replicas" <<< "$out")" = 1
           # On: an autoscaler for the API Deployment, and no replica count that every upgrade would reset.
           out=$(t --set api.autoscaling.enabled=true --set api.autoscaling.minReplicas=2 --set api.autoscaling.maxReplicas=5)
           test "$(echo "$out" | yq 'select(.kind == "HorizontalPodAutoscaler") | .spec.scaleTargetRef.name')" = "ci-algorand-testnet-api"
@@ -210,11 +211,16 @@ jobs:
             grep -q "$words" <<< "$err" || { echo "failed for another reason: $err"; exit 1; }
           }
           refused 'must not be greater' --set api.autoscaling.enabled=true --set api.autoscaling.minReplicas=5 --set api.autoscaling.maxReplicas=2
-          refused 'blocks every node drain' --set api.autoscaling.enabled=true --set api.autoscaling.minReplicas=1
-          refused 'between 1 and 100' --set api.autoscaling.enabled=true --set api.autoscaling.targetCPUUtilizationPercentage=0
+          refused 'greater than api.podDisruptionBudget.minAvailable' --set api.autoscaling.enabled=true --set api.autoscaling.minReplicas=1
+          refused 'whole number' --set api.autoscaling.enabled=true --set api.autoscaling.targetCPUUtilizationPercentage=0
+          refused 'whole number' --set api.autoscaling.enabled=true --set api.autoscaling.targetCPUUtilizationPercentage=70.5
+          refused 'requests.cpu' --set api.autoscaling.enabled=true --set api.resources=null
+          refused 'greater than api.podDisruptionBudget.minAvailable' --set api.autoscaling.enabled=true --set api.autoscaling.minReplicas=2 --set api.podDisruptionBudget.minAvailable=2
+          # A target above 100 is valid (utilization is relative to the request).
+          grep -q "averageUtilization: 150" <<< "$(t --set api.autoscaling.enabled=true --set api.autoscaling.targetCPUUtilizationPercentage=150)"
           refused 'requests.cpu' --set api.autoscaling.enabled=true --set api.resources.requests.cpu=null
           # One replica is allowed without the PodDisruptionBudget.
-          t --set api.autoscaling.enabled=true --set api.autoscaling.minReplicas=1 --set api.podDisruptionBudget.enabled=false | grep -q "minReplicas: 1"
+          grep -q "minReplicas: 1" <<< "$(t --set api.autoscaling.enabled=true --set api.autoscaling.minReplicas=1 --set api.podDisruptionBudget.enabled=false)"
       - name: Deployment overlays render (hostPath, ingress host, embedded Cassandra contact point)
         run: |
           check() { # overlay release hostPath host
