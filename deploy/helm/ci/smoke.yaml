@@ -23,7 +23,4 @@ worker:
 
 logging:
   format: text
-
-# kind's default CNI does not enforce policies; leaving them out keeps the test about the configuration path.
-networkPolicy:
-  enabled: false
+# networkPolicy stays on as in production: kindnet (kind 0.24+) enforces the policy in front of the embedded Cassandra.

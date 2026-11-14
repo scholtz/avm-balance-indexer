@@ -41,7 +41,8 @@ spec:
             - containerPort: 5432
           readinessProbe:
             exec:
-              command: ["pg_isready", "-U", "postgres"]
+              # Over TCP: during initdb a temporary server answers on the Unix socket only.
+              command: ["pg_isready", "-h", "127.0.0.1", "-U", "postgres"]
             periodSeconds: 3
           resources:
             requests: { cpu: 100m, memory: 256Mi }

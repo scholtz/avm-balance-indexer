@@ -14,13 +14,16 @@ sink=A7NMWS3NT3IUDMLVO26ULGXGIIOUQ3ND2TXSER6EBGRZNOBOUIQXHIBGDE
 kubectl -n "$ns" port-forward "svc/$release-algorand-testnet-api" 8080:80 > /tmp/port-forward.log 2>&1 &
 pf=$!
 trap 'kill "$pf" 2>/dev/null || true' EXIT
-for _ in $(seq 1 30); do curl -fsS "$base/healthz/ready" > /dev/null 2>&1 && break; sleep 2; done
-curl -fsS "$base/healthz/ready" > /dev/null
+# A forward to a service sticks to one pod and ends when that pod restarts: stop at once with its log instead of polling a dead port.
+forwarding() { kill -0 "$pf" 2>/dev/null || { echo "::error::kubectl port-forward ended"; cat /tmp/port-forward.log; exit 1; }; }
+for _ in $(seq 1 30); do forwarding; curl -fsS "$base/healthz/ready" > /dev/null 2>&1 && break; sleep 2; done
+curl -sS --fail-with-body "$base/healthz/ready" > /dev/null
 
 # --wait only waited for readiness (a standby worker is ready too): the published status is the real check.
 status=""
 for _ in $(seq 1 120); do
-  status="$(curl -fsS "$api/status" || true)"
+  forwarding
+  status="$(curl -fsS --max-time 5 "$api/status" || true)"
   if [ -n "$status" ] && [ "$(jq -r '.provider' <<< "$status")" = "$provider" ] && [ "$(jq -r '.indexedRound // 0' <<< "$status")" -ge 20 ]; then
     break
   fi
@@ -30,10 +33,22 @@ echo "status: $status"
 test "$(jq -r '.provider' <<< "$status")" = "$provider" || { echo "::error::the API reports provider $(jq -r '.provider' <<< "$status"), expected $provider"; exit 1; }
 test "$(jq -r '.indexedRound // 0' <<< "$status")" -ge 20 || { echo "::error::the worker did not index 20 TestNet rounds in 10 minutes"; exit 1; }
 
-balance="$(curl -fsS "$api/accounts/$sink/tokens/algo/0/balance?round=10")"
+balance="$(curl -sS --fail-with-body --max-time 30 "$api/accounts/$sink/tokens/algo/0/balance?round=10")" || { echo "::error::balance request failed: $balance"; exit 1; }
 echo "balance: $balance"
 amount="$(jq -r '.amount' <<< "$balance")"
 [[ "$amount" =~ ^[1-9][0-9]*$ ]] || { echo "::error::the fee sink balance at round 10 is $amount, expected a positive amount"; exit 1; }
+
+# /status names the configured provider; that the schema exists in that store shows the services really use it.
+if [ "$provider" = Cassandra ]; then
+  tables="$(kubectl -n "$ns" exec "deploy/$release-algorand-testnet-cassandra" -c cassandra -- \
+    cqlsh -e "SELECT table_name FROM system_schema.tables WHERE keyspace_name='avm_indexer'")"
+  grep -q "rows)" <<< "$tables" && ! grep -q "(0 rows)" <<< "$tables" || { echo "::error::no tables in keyspace avm_indexer: $tables"; exit 1; }
+else
+  tables="$(kubectl -n "$ns" exec deploy/postgres -- psql -U postgres -tAc \
+    "SELECT count(*) FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog', 'information_schema')")"
+  [ "$tables" -gt 0 ] || { echo "::error::no indexer tables in PostgreSQL"; exit 1; }
+fi
+echo "schema in $provider: OK"
 
 if [ "$provider" = Cassandra ]; then
   # The start command override of the embedded Cassandra (autoSnapshotTtl) reached cassandra.yaml.

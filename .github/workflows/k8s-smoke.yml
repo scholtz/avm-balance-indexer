@@ -8,9 +8,9 @@ on:
     paths: &paths
       - deploy/**
       - docker/**
-      - src/AvmBalanceIndexer.Hosting/**
-      - src/AvmBalanceIndexer.Api/Program.cs
-      - src/AvmBalanceIndexer.Worker/Program.cs
+      - src/**
+      - Directory.*.props
+      - global.json
       - .github/workflows/k8s-smoke.yml
   push:
     branches: [main]
@@ -27,7 +27,8 @@ concurrency:
 jobs:
   smoke:
     name: Smoke (${{ matrix.provider }})
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
+    # Image builds (~1 min), install (at most 10), API checks (at most about 12), diagnostics.
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -61,11 +62,11 @@ jobs:
               --set cassandra.embedded.resources.requests.cpu=500m --set cassandra.embedded.resources.requests.memory=2Gi
               --set cassandra.embedded.resources.limits.memory=3Gi)
           fi
-          helm install smoke deploy/helm/avm-balance-indexer -n smoke -f deploy/helm/ci/smoke.yaml "${flags[@]}" --wait --timeout 15m
+          helm install smoke deploy/helm/avm-balance-indexer -n smoke -f deploy/helm/ci/smoke.yaml "${flags[@]}" --wait --timeout 10m
       - name: The API serves the configured provider and the worker indexes TestNet
         run: deploy/helm/ci/smoke-check.sh "${{ matrix.provider }}"
       - name: Diagnostics
-        if: failure()
+        if: failure() || cancelled()
         run: |
           kubectl -n smoke get pods -o wide || true
           kubectl -n smoke describe pods || true
