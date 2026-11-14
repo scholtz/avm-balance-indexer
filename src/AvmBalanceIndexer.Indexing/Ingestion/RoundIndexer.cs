@@ -256,6 +256,13 @@ public sealed partial class RoundIndexer(
         var seed = stopAfterRound is null
             ? await adapter.FetchBlockAsync(seedRound, await adapter.GetLatestRoundAsync(cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false)
             : await adapter.FetchBlockAsync(seedRound, cancellationToken).ConfigureAwait(false);
+        if (stopAfterRound is null && !LinksToCursor(status, seed))
+        {
+            // The block may have come from a public relay, and certificate votes are not checked (ADR 0004): before telling the
+            // operator to rebuild, ask the archival nodes alone. Only their answer decides a divergence.
+            seed = await adapter.FetchBlockAsync(seedRound, cancellationToken).ConfigureAwait(false);
+        }
+
         if (status.IndexedRound == 0)
         {
             // Block 1 links back to the genesis block hash that was stored as the round 0 cursor.
@@ -270,6 +277,12 @@ public sealed partial class RoundIndexer(
             : throw new ChainDivergenceException(
                 $"The archival source serves a different block {status.IndexedRound} than the one published. The database must be rebuilt.");
     }
+
+    /// <summary>Whether the seed block is the published one (for round 0: whether block 1 links back to the stored genesis hash).</summary>
+    private static bool LinksToCursor(ChainStatus status, BlockData seed) =>
+        status.IndexedRound == 0
+            ? seed.PreviousHash.AsSpan().SequenceEqual(status.IndexedBlockHash.Span)
+            : seed.Hash.AsSpan().SequenceEqual(status.IndexedBlockHash.Span);
 
     /// <summary>Validates, normalizes and balances one block and stages the result; <see cref="FlushAsync"/> writes it.</summary>
     private async Task<RoundWrite> QueueBlockAsync(

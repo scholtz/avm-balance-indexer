@@ -580,7 +580,8 @@ public class GossipBlockFetcherTests
         }
 
         await FetchUntilTheRelayWasAskedAsync();
-        var reported = Assert.Single(logger.Entries, static e => e.Level == LogLevel.Error);
+        var reported = Assert.Single(logger.Entries, static e => e.Message.Contains("failed validation", StringComparison.Ordinal));
+        Assert.Equal(LogLevel.Warning, reported.Level);
         Assert.Contains("relay.test", reported.Message, StringComparison.Ordinal);
 
         // Longer than the normal cooldown (1 minute here), shorter than the long one (10 minutes): the relay is left alone.
@@ -602,7 +603,7 @@ public class GossipBlockFetcherTests
         // After the long rest it is asked again; a second invalid answer within the hour is not reported again.
         clock.Advance(TimeSpan.FromMinutes(9));
         await FetchUntilTheRelayWasAskedAsync();
-        Assert.Single(logger.Entries, static e => e.Level == LogLevel.Error);
+        Assert.Single(logger.Entries, static e => e.Message.Contains("failed validation", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -625,13 +626,57 @@ public class GossipBlockFetcherTests
             await Assert.ThrowsAsync<BlockNotAvailableException>(() => fetcher.FetchBlockAsync(1000, 1000, CancellationToken.None));
         }
 
-        Assert.DoesNotContain(logger.Entries, static e => e.Level == LogLevel.Error); // not judged while no node has a valid block
+        Assert.DoesNotContain(logger.Entries, static e => e.Message.Contains("failed validation", StringComparison.Ordinal)); // not judged while no node has a valid block
 
         Volatile.Write(ref archiveHasBlock, true);
         Assert.Equal(1000UL, (await fetcher.FetchBlockAsync(1000, 1000, CancellationToken.None)).Round);
 
-        var reported = Assert.Single(logger.Entries, static e => e.Level == LogLevel.Error);
+        var reported = Assert.Single(logger.Entries, static e => e.Message.Contains("failed validation", StringComparison.Ordinal));
         Assert.Contains("relay.test", reported.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(30, 300)] // ten times the cooldown
+    [InlineData(360, 3600)] // capped at an hour
+    [InlineData(600, 3600)]
+    [InlineData(7200, 7200)] // never shorter than the cooldown itself
+    public void An_Invalid_Relay_Rests_Ten_Cooldowns_Capped_At_An_Hour_But_Not_Below_The_Cooldown(int cooldownSeconds, int restSeconds) =>
+        Assert.Equal(TimeSpan.FromSeconds(restSeconds), GossipBlockFetcher.InvalidRelayRest(TimeSpan.FromSeconds(cooldownSeconds)));
+
+    [Fact]
+    public void An_Extreme_Cooldown_Does_Not_Overflow_The_Rest() =>
+        Assert.Equal(TimeSpan.MaxValue, GossipBlockFetcher.InvalidRelayRest(TimeSpan.MaxValue));
+
+    [Fact]
+    public async Task A_Relay_That_Later_Serves_The_Valid_Block_Itself_Is_Not_Blamed()
+    {
+        var logger = new CapturingLogger();
+        var relayFixed = false;
+        var fetcher = CreateFetcher(
+            (request, _) => Task.FromResult(request.RequestUri!.Host.StartsWith("relay", StringComparison.Ordinal)
+                ? Ok(Chain.Encode(Volatile.Read(ref relayFixed) ? 1000UL : 1001UL, []))
+                : new HttpResponseMessage(HttpStatusCode.NotFound)),
+            maxAttempts: 3,
+            logger: logger,
+            provider: new TieredHosts(["http://archive.test:4160"], ["http://relay.test:4160"]));
+
+        await Assert.ThrowsAsync<BlockNotAvailableException>(() => fetcher.FetchBlockAsync(1000, 1000, CancellationToken.None));
+        Volatile.Write(ref relayFixed, true);
+        ulong? served = null;
+        for (var i = 0; i < 50 && served is null; i++)
+        {
+            try
+            {
+                served = (await fetcher.FetchBlockAsync(1000, 1000, CancellationToken.None)).Round;
+            }
+            catch (BlockNotAvailableException)
+            {
+                // The relay may still be in its normal cooldown; ask again.
+            }
+        }
+
+        Assert.Equal(1000UL, served);
+        Assert.DoesNotContain(logger.Entries, static e => e.Message.Contains("failed validation", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -650,7 +695,7 @@ public class GossipBlockFetcherTests
             await Assert.ThrowsAsync<BlockFetchException>(() => fetcher.FetchBlockAsync(1000, 1000, CancellationToken.None));
         }
 
-        Assert.DoesNotContain(logger.Entries, static e => e.Level == LogLevel.Error);
+        Assert.DoesNotContain(logger.Entries, static e => e.Message.Contains("failed validation", StringComparison.Ordinal));
     }
 
     [Fact]
