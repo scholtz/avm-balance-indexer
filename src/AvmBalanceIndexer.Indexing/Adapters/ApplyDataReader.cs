@@ -84,7 +84,6 @@ public static class ApplyDataReader
         bool hgh = false, hgi = false;
         IReadOnlyList<TxnApplyData> inner = [];
         IReadOnlyList<ReadOnlyMemory<byte>> logs = [];
-        var malformed = 0;
 
         var entries = reader.ReadMapHeader();
         for (var i = 0; i < entries; i++)
@@ -124,7 +123,7 @@ public static class ApplyDataReader
                     hgi = reader.ReadBoolean();
                     break;
                 case "dt":
-                    (inner, logs, malformed) = ReadDetail(ref reader);
+                    (inner, logs) = ReadDetail(ref reader);
                     break;
                 default:
                     reader.Skip();
@@ -132,14 +131,13 @@ public static class ApplyDataReader
             }
         }
 
-        return new TxnApplyData(rawTxn, rs, rr, rc, ca, aca, caid, hgh, hgi, inner, apid, logs, malformed);
+        return new TxnApplyData(rawTxn, rs, rr, rc, ca, aca, caid, hgh, hgi, inner, apid, logs);
     }
 
-    private static (IReadOnlyList<TxnApplyData> Inner, IReadOnlyList<ReadOnlyMemory<byte>> Logs, int Malformed) ReadDetail(ref MessagePackReader reader)
+    private static (IReadOnlyList<TxnApplyData> Inner, IReadOnlyList<ReadOnlyMemory<byte>> Logs) ReadDetail(ref MessagePackReader reader)
     {
         IReadOnlyList<TxnApplyData> inner = [];
         IReadOnlyList<ReadOnlyMemory<byte>> logs = [];
-        var malformed = 0;
         var entries = reader.ReadMapHeader();
         for (var i = 0; i < entries; i++)
         {
@@ -149,7 +147,7 @@ public static class ApplyDataReader
                     inner = ReadTransactions(ref reader);
                     break;
                 case "lg":
-                    (logs, malformed) = ReadLogs(ref reader);
+                    logs = ReadLogs(ref reader);
                     break;
                 default:
                     reader.Skip();
@@ -157,41 +155,31 @@ public static class ApplyDataReader
             }
         }
 
-        return (inner, logs, malformed);
+        return (inner, logs);
     }
 
-    private static (List<ReadOnlyMemory<byte>> Logs, int Malformed) ReadLogs(ref MessagePackReader reader)
+    private static List<ReadOnlyMemory<byte>> ReadLogs(ref MessagePackReader reader)
     {
         var logs = new List<ReadOnlyMemory<byte>>();
-        var malformed = 0;
         if (reader.TryReadNil())
         {
-            return (logs, malformed);
+            return logs;
         }
 
         var count = reader.ReadArrayHeader();
         for (var i = 0; i < count; i++)
         {
-            // Only 100-byte logs can be ARC-200 transfers; keeping the others would allocate for nothing. A log that starts with the
-            // transfer selector but has another length is a non-standard event: counted (a decoder error metric), not kept.
-            if (reader.ReadBytes() is not { } log)
-            {
-                continue;
-            }
-
-            if (log.Length == Arc200TransferLogLength)
+            // Only 100-byte logs can be ARC-200 transfers; keeping the others would allocate for nothing. Logs that start with the
+            // transfer selector are kept whatever their length, so that the normalizer can count malformed transfer events.
+            if (reader.ReadBytes() is { } log && (log.Length == Arc200TransferLogLength || new System.Buffers.SequenceReader<byte>(log).IsNext(TransferSelector)))
             {
                 logs.Add(log.ToArray());
             }
-            else if (StartsWithTransferSelector(log))
-            {
-                malformed++;
-            }
         }
 
-        return (logs, malformed);
+        return logs;
     }
 
-    private static bool StartsWithTransferSelector(System.Buffers.ReadOnlySequence<byte> log) =>
-        new System.Buffers.SequenceReader<byte>(log).IsNext(Normalization.Arc200Events.TransferSelector);
+    /// <summary>The first 4 bytes of SHA-512/256 of <c>arc200_Transfer(address,address,uint256)</c> (ARC-28 event selector).</summary>
+    private static ReadOnlySpan<byte> TransferSelector => Normalization.Arc200Events.TransferSelector;
 }

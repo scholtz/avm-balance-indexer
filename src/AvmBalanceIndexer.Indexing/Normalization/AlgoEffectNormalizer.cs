@@ -189,8 +189,6 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
 
     private static void ApplyApplicationLogs(RoundBuilder round, RawTransaction raw, TxnApplyData apply, int[] path)
     {
-        // Logs with the transfer selector but the wrong length are dropped by the reader and only counted (a decoder error metric).
-        round.MalformedArc200Logs += apply.MalformedArc200Logs;
         if (apply.Logs is not { Count: > 0 } logs)
         {
             return;
@@ -206,7 +204,18 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
         var token = TokenKey.Arc200(application);
         foreach (var log in logs)
         {
-            if (!Arc200Events.TryParseTransfer(log.Span, out var fromBytes, out var toBytes, out var amount) || amount.IsZero)
+            if (!Arc200Events.TryParseTransfer(log.Span, out var fromBytes, out var toBytes, out var amount))
+            {
+                if (log.Span.StartsWith(Arc200Events.TransferSelector))
+                {
+                    // The transfer selector without the shape of a transfer event: counted as a decoder error metric, not indexed.
+                    round.MalformedArc200Logs++;
+                }
+
+                continue;
+            }
+
+            if (amount.IsZero)
             {
                 continue;
             }
