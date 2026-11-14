@@ -117,7 +117,7 @@ Database change requests travel the same way (ADR 0020): a keyspace listed in `s
 *Database change requests* of the deploy job prints what the workers reported (removed, already gone, still in use or pending). When the worker refused a keyspace the step is marked failed with an error annotation; the
 job and the deployment of the other chains continue, because the release itself is healthy. Nothing is run by hand in the cluster.
 
-Before anything changes the job checks every right in `deploy/rbac/deployer.yaml` that the chart and `helm --atomic` use and lists the missing ones. Only the NetworkPolicy and the PodDisruptionBudget are optional: a new release is installed without them (with a warning) when the account may not manage them, but an existing NetworkPolicy is never dropped, the job fails instead. Missing `delete` rights only produce a warning.
+Before anything changes the job checks every right in `deploy/rbac/deployer.yaml` that the chart and `helm --atomic` use and lists the missing ones. The HorizontalPodAutoscaler rights are required only for a release whose values enable `api.autoscaling`. Only the NetworkPolicy and the PodDisruptionBudget are optional: a new release is installed without them (with a warning) when the account may not manage them, but an existing NetworkPolicy is never dropped, the job fails instead. Missing `delete` rights only produce a warning.
 A failed upgrade is rolled back by Helm (`--atomic`). Each production job (MainNet, then Voi) asks the environment's reviewers for its own approval. The pods need a namespace without Pod Security enforcement
 stricter than `privileged` for the Cassandra pod (it uses a hostPath volume and a root init container). Pre-release tags (`v1.2.3-rc1`) do not deploy.
 

@@ -1,0 +1,41 @@
+{{- with .Values.api.autoscaling }}
+{{- if .enabled }}
+{{- if lt (int .minReplicas) 1 }}
+{{- fail "api.autoscaling.minReplicas must be at least 1" }}
+{{- end }}
+{{- if gt (int .minReplicas) (int .maxReplicas) }}
+{{- fail "api.autoscaling.minReplicas must not be greater than api.autoscaling.maxReplicas" }}
+{{- end }}
+{{- if or (lt (int .targetCPUUtilizationPercentage) 1) (gt (int .targetCPUUtilizationPercentage) 100) }}
+{{- fail "api.autoscaling.targetCPUUtilizationPercentage must be between 1 and 100" }}
+{{- end }}
+{{- if not (dig "requests" "cpu" "" $.Values.api.resources) }}
+{{- fail "api.autoscaling needs api.resources.requests.cpu: CPU utilization is measured against the request" }}
+{{- end }}
+{{- if and $.Values.api.podDisruptionBudget.enabled (lt (int .minReplicas) 2) }}
+{{- fail "api.autoscaling.minReplicas must be at least 2 while api.podDisruptionBudget is enabled: one replica with minAvailable 1 blocks every node drain" }}
+{{- end }}
+# Scales the API on CPU. Needs metrics-server. The API is stateless (reads only), so it is the one component that is safe to scale;
+# the worker has a single writer and the embedded Cassandra a single data directory.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "avm.fullname" $ }}-api
+  labels: {{- include "avm.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "avm.fullname" $ }}-api
+  minReplicas: {{ .minReplicas }}
+  maxReplicas: {{ .maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .targetCPUUtilizationPercentage }}
+{{- end }}
+{{- end }}

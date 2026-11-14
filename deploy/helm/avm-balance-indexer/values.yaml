@@ -113,6 +113,13 @@ api:
   podDisruptionBudget:
     enabled: true
     minAvailable: 1
+  # Scales the API between minReplicas and maxReplicas on CPU (replicaCount is then ignored). Needs metrics-server in the
+  # cluster and api.resources.requests.cpu. The rate limit applies per pod, so the limit a client sees grows with replicas.
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 70
 
 worker:
   # RollingUpdate keeps a writer running during an upgrade. Use Recreate (or scale to 0 first) for a release that contains a schema

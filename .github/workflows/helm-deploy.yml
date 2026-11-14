@@ -129,6 +129,7 @@ jobs:
         env:
           RELEASE: ${{ inputs.release }}
           CHAIN: ${{ inputs.chain }}
+          VALUES: ${{ inputs.values }}
         run: |
           # can-i answers yes or no; anything else (a flaky API server) stops the job instead of being read as "no".
           can() {
@@ -152,6 +153,16 @@ jobs:
           if [ ${#missing[@]} -gt 0 ]; then
             for item in "${missing[@]}"; do echo "::error::The kube config may not $item"; done
             echo "::error::Grant these in the namespace ${NAMESPACE} (deploy/rbac/deployer.yaml lists everything the chart needs)"; exit 1
+          fi
+          # The API autoscaler is opt-in per release (api.autoscaling.enabled); when a release asks for it, its rights are required.
+          if [ "$(yq '.api.autoscaling.enabled // false' "deploy/helm/values/$VALUES")" = true ]; then
+            for verb in get list watch create update patch; do
+              can "$verb" horizontalpodautoscalers.autoscaling || missing+=("$verb horizontalpodautoscalers.autoscaling")
+            done
+            if [ ${#missing[@]} -gt 0 ]; then
+              for item in "${missing[@]}"; do echo "::error::The kube config may not $item"; done
+              echo "::error::Grant these in the namespace ${NAMESPACE} (deploy/rbac/deployer.yaml lists everything the chart needs)"; exit 1
+            fi
           fi
           # The PodDisruptionBudget only protects the API during node drains.
           for verb in get list watch create update patch; do
