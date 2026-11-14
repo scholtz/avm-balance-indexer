@@ -4,6 +4,7 @@ export * from './BalanceResponse.js';
 export * from './ChainId.js';
 export * from './EffectDto.js';
 export * from './ErrorResponse.js';
+export * from './HistoricalQueriesInfo.js';
 export * from './HistoryResponse.js';
 export * from './HolderDto.js';
 export * from './HoldersResponse.js';

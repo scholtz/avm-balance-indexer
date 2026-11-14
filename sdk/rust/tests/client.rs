@@ -58,7 +58,7 @@ async fn a_zero_timeout_switches_the_timeout_off() {
     let server = MockServer::start().await;
     Mock::given(path("/v1/algorand-mainnet/status"))
         .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_millis(100)).set_body_json(json!({
-            "chain": "algorand-mainnet", "provider": "x", "state": "Following", "indexedRound": 1, "targetRound": 1, "lag": 0, "updatedAt": null
+            "chain": "algorand-mainnet", "provider": "x", "state": "Following", "indexedRound": 1, "targetRound": 1, "lag": 0, "updatedAt": null, "health": "Healthy", "statusAgeSeconds": 0, "historicalQueries": {"mode": "EffectAggregation", "synchronousTimeoutSeconds": 60, "asynchronousScans": true, "maxActiveScans": 20}
         })))
         .mount(&server)
         .await;
@@ -80,7 +80,7 @@ async fn the_chain_is_in_the_path_and_headers_are_sent() {
         .and(path("/v1/voi/status"))
         .and(wiremock::matchers::header("X-Api-Key", "k"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "chain": "voi", "provider": "Cassandra", "state": "Following", "indexedRound": 10, "targetRound": 11, "lag": 1, "updatedAt": "2026-10-14T10:00:00Z"
+            "chain": "voi", "provider": "Cassandra", "state": "Following", "indexedRound": 10, "targetRound": 11, "lag": 1, "updatedAt": "2026-10-14T10:00:00Z", "health": "Healthy", "statusAgeSeconds": 3, "historicalQueries": {"mode": "EffectAggregation", "synchronousTimeoutSeconds": 60, "asynchronousScans": true, "maxActiveScans": 20}
         })))
         .expect(1)
         .mount(&server)
@@ -90,6 +90,8 @@ async fn the_chain_is_in_the_path_and_headers_are_sent() {
     let status = indexer.status().await.unwrap();
 
     assert_eq!(status.indexed_round, Some(10));
+    assert_eq!(status.health.as_deref(), Some("Healthy"));
+    assert_eq!(status.historical_queries.as_ref().map(|q| q.mode.as_str()), Some("EffectAggregation"));
 }
 
 #[tokio::test]

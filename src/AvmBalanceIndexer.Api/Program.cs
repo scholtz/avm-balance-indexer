@@ -232,21 +232,46 @@ v1.AddEndpointFilter(async (context, next) =>
             : Results.NotFound(new { error = "This deployment does not serve that chain.", requested, served });
     });
 
+// The historical-query limits are fixed at start: ApiOptions is read once (the `api` local above), storage and scan options are validated
+// on start. A synchronous query also ends when the storage read times out (503), which by default comes before the request timeout.
+var storageSettings = app.Services.GetRequiredService<IOptions<StorageOptions>>().Value;
+var historicalQueries = new HistoricalQueriesInfo(
+    "EffectAggregation",
+    Math.Min(
+        api.RequestTimeoutSeconds,
+        storageSettings.Provider == StorageProvider.Cassandra ? storageSettings.Cassandra.ReadTimeoutSeconds : storageSettings.PostgreSql.ReadTimeoutSeconds),
+    true,
+    app.Services.GetRequiredService<IOptions<ScanOptions>>().Value.MaxActive);
+
 v1.MapGet(
     "/status",
-    async (ChainContext chain, IChainStorage storage, IOptions<StorageOptions> options, CancellationToken cancellationToken) =>
+    async (
+        ChainContext chain,
+        IChainStorage storage,
+        TimeProvider clock,
+        CancellationToken cancellationToken) =>
     {
         var status = await storage.GetAsync(chain.Chain, cancellationToken);
-        return status is null
-            ? Results.Ok(new StatusResponse(chain.Chain, options.Value.Provider.ToString(), "NotStarted", null, null, null, null))
-            : Results.Ok(new StatusResponse(
-                chain.Chain,
-                options.Value.Provider.ToString(),
-                status.State.ToString(),
-                status.IndexedRound,
-                status.TargetRound,
-                status.Lag,
-                status.UpdatedAt));
+        if (status is null)
+        {
+            return Results.Ok(new StatusResponse(chain.Chain, storageSettings.Provider.ToString(), "NotStarted", null, null, null, null, "NotStarted", null, historicalQueries));
+        }
+
+        // A writer clock ahead of the API's would give a negative age; that is not a stall. The verdict uses the exact age, the
+        // response the whole seconds.
+        var elapsed = clock.GetUtcNow() - status.UpdatedAt;
+        var age = (long)Math.Max(0, Math.Floor(elapsed.TotalSeconds));
+        return Results.Ok(new StatusResponse(
+            chain.Chain,
+            storageSettings.Provider.ToString(),
+            status.State.ToString(),
+            status.IndexedRound,
+            status.TargetRound,
+            status.Lag,
+            status.UpdatedAt,
+            elapsed > TimeSpan.FromSeconds(api.StalledAfterSeconds) ? "Stalled" : "Healthy",
+            age,
+            historicalQueries));
     })
     .WithName("GetChainStatus")
     .Produces<StatusResponse>()

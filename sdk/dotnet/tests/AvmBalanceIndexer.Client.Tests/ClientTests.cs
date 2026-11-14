@@ -73,19 +73,21 @@ public sealed class ClientTests
     [Fact]
     public async Task A_Custom_Base_Url_Is_Used_With_Its_Path_Prefix()
     {
-        var handler = new FakeHandler(_ => Json(HttpStatusCode.OK, new { chain = "voi", provider = "Cassandra", state = "Following", indexedRound = 10, targetRound = 11, lag = 1, updatedAt = "2026-10-14T10:00:00Z" }));
+        var handler = new FakeHandler(_ => Json(HttpStatusCode.OK, new { chain = "voi", provider = "Cassandra", state = "Following", indexedRound = 10, targetRound = 11, lag = 1, updatedAt = "2026-10-14T10:00:00Z", health = "Healthy", statusAgeSeconds = 3, historicalQueries = new { mode = "EffectAggregation", synchronousTimeoutSeconds = 60, asynchronousScans = true, maxActiveScans = 20 } }));
         using var client = Client(handler, ChainId.Voi, new Uri("https://my.example.com/indexer/"));
 
         var status = await client.GetStatusAsync();
 
         Assert.Equal(10UL, status.IndexedRound);
+        Assert.Equal("Healthy", status.Health);
+        Assert.Equal("EffectAggregation", status.HistoricalQueries.Mode);
         Assert.Equal("https://my.example.com/indexer/v1/voi/status", handler.Requests[0].Uri.ToString());
     }
 
     [Fact]
     public async Task Headers_And_User_Agent_Are_Sent()
     {
-        var handler = new FakeHandler(_ => Json(HttpStatusCode.OK, new { chain = "voi", provider = "x", state = "x", indexedRound = (int?)null, targetRound = (int?)null, lag = (int?)null, updatedAt = (string?)null }));
+        var handler = new FakeHandler(_ => Json(HttpStatusCode.OK, new { chain = "voi", provider = "x", state = "x", indexedRound = (int?)null, targetRound = (int?)null, lag = (int?)null, updatedAt = (string?)null, health = "NotStarted", statusAgeSeconds = (int?)null, historicalQueries = new { mode = "EffectAggregation", synchronousTimeoutSeconds = 60, asynchronousScans = true, maxActiveScans = 20 } }));
         var options = new AvmBalanceIndexerOptions { BaseUrl = new Uri("http://indexer.test"), HttpClient = new HttpClient(handler) };
         options.Headers["X-Api-Key"] = "k";
         using var client = new AvmBalanceIndexerClient(options);
@@ -395,7 +397,7 @@ public sealed class ClientTests
     [Fact]
     public async Task A_Callers_Http_Client_Is_Not_Modified()
     {
-        var handler = new FakeHandler(_ => Json(HttpStatusCode.OK, new { chain = "voi", provider = "x", state = "x", indexedRound = (int?)null, targetRound = (int?)null, lag = (int?)null, updatedAt = (string?)null }));
+        var handler = new FakeHandler(_ => Json(HttpStatusCode.OK, new { chain = "voi", provider = "x", state = "x", indexedRound = (int?)null, targetRound = (int?)null, lag = (int?)null, updatedAt = (string?)null, health = "NotStarted", statusAgeSeconds = (int?)null, historicalQueries = new { mode = "EffectAggregation", synchronousTimeoutSeconds = 60, asynchronousScans = true, maxActiveScans = 20 } }));
         using var shared = new HttpClient(handler);
         var options = new AvmBalanceIndexerOptions { Chain = ChainId.Voi, BaseUrl = new Uri("http://indexer.test/prefix"), HttpClient = shared };
         options.Headers["X-Api-Key"] = "k";

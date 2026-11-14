@@ -114,7 +114,7 @@ def test_unknown_chain_is_rejected():
 def test_chain_is_bound_into_the_path_and_headers_are_sent(server):
     server.handler = lambda r: (
         200,
-        {"chain": "voi", "provider": "Cassandra", "state": "Following", "indexedRound": 10, "targetRound": 11, "lag": 1, "updatedAt": "2026-10-14T10:00:00Z"},
+        {"chain": "voi", "provider": "Cassandra", "state": "Following", "indexedRound": 10, "targetRound": 11, "lag": 1, "updatedAt": "2026-10-14T10:00:00Z", "health": "Healthy", "statusAgeSeconds": 3, "historicalQueries": {"mode": "EffectAggregation", "synchronousTimeoutSeconds": 60, "asynchronousScans": True, "maxActiveScans": 20}},
         {},
     )
     client = AvmBalanceIndexer.voi(base_url=server.url, headers={"X-Api-Key": "k"})
@@ -122,6 +122,9 @@ def test_chain_is_bound_into_the_path_and_headers_are_sent(server):
     status = client.status()
 
     assert status.indexed_round == 10
+    assert status.health == "Healthy"
+    assert status.historical_queries.mode == "EffectAggregation"
+
     request = server.requests[0]
     assert request["path"] == "/v1/voi/status"
     assert request["headers"]["X-Api-Key"] == "k"
@@ -216,7 +219,7 @@ def test_argument_validation_errors_are_not_reported_as_decode_errors(server):
 
 def test_a_redirect_is_followed(server):
     server.handler = lambda r: (302, "", {"Location": "/moved"}) if r["path"] == "/v1/algorand-mainnet/status" else (
-        200, {"chain": "algorand-mainnet", "provider": "x", "state": "Following", "indexedRound": 1, "targetRound": 1, "lag": 0, "updatedAt": None}, {})
+        200, {"chain": "algorand-mainnet", "provider": "x", "state": "Following", "indexedRound": 1, "targetRound": 1, "lag": 0, "updatedAt": None, "health": "Healthy", "statusAgeSeconds": 0, "historicalQueries": {"mode": "EffectAggregation", "synchronousTimeoutSeconds": 60, "asynchronousScans": True, "maxActiveScans": 20}}, {})
     client = AvmBalanceIndexer.algorand_mainnet(base_url=server.url)
 
     assert client.status().state == "Following"
@@ -415,7 +418,7 @@ def test_scan_ids_stay_strict_strings():
 
 def test_proxy_environment_is_honoured_and_no_proxy_bypasses_it(server, monkeypatch):
     # openapi-generator >= 7.2x reads the proxy variables itself (urllib3 does not); documented in the README.
-    server.handler = lambda request: (200, {"chain": "algorand-mainnet", "provider": "PostgreSql", "state": "Following", "indexedRound": 10, "targetRound": 11, "lag": 1, "updatedAt": "2026-10-14T10:00:00Z"}, {})
+    server.handler = lambda request: (200, {"chain": "algorand-mainnet", "provider": "PostgreSql", "state": "Following", "indexedRound": 10, "targetRound": 11, "lag": 1, "updatedAt": "2026-10-14T10:00:00Z", "health": "Healthy", "statusAgeSeconds": 3, "historicalQueries": {"mode": "EffectAggregation", "synchronousTimeoutSeconds": 60, "asynchronousScans": True, "maxActiveScans": 20}}, {})
     for name in ("http_proxy", "https_proxy", "all_proxy", "no_proxy"):  # lower-case variants win in getproxies_environment
         monkeypatch.delenv(name, raising=False)
         monkeypatch.delenv(name.upper(), raising=False)
@@ -446,3 +449,10 @@ def test_retry_after_is_found_whatever_the_header_case():
         error = ApiException(status=429, reason="Too Many Requests", body='{"error": "slow down"}')
         error.headers = {name: "7"}  # a plain dict, as a mocked transport or another generator version may hand over
         assert _to_api_error(error).retry_after_seconds == 7
+
+
+def test_status_of_a_server_without_health_fields_is_still_read(server):
+    server.handler = lambda r: (200, {"chain": "voi", "provider": "Cassandra", "state": "Following", "indexedRound": 10, "targetRound": 11, "lag": 1, "updatedAt": "2026-10-14T10:00:00Z"}, {})
+    status = AvmBalanceIndexer.voi(base_url=server.url).status()
+    assert status.indexed_round == 10
+    assert status.health is None

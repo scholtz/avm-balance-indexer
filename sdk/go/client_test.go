@@ -83,7 +83,7 @@ func TestDefaultsArePublicDeployments(t *testing.T) {
 
 func TestCustomBaseURLKeepsItsPrefix(t *testing.T) {
 	server, requests := fakeServer(t, func(r *http.Request) (int, any, map[string]string) {
-		return 200, map[string]any{"chain": "voi", "provider": "Cassandra", "state": "Following", "indexedRound": 10, "targetRound": 11, "lag": 1, "updatedAt": "2026-10-14T10:00:00Z"}, nil
+		return 200, map[string]any{"chain": "voi", "provider": "Cassandra", "state": "Following", "indexedRound": 10, "targetRound": 11, "lag": 1, "updatedAt": "2026-10-14T10:00:00Z", "health": "Healthy", "statusAgeSeconds": 3, "historicalQueries": map[string]any{"mode": "EffectAggregation", "synchronousTimeoutSeconds": 60, "asynchronousScans": true, "maxActiveScans": 20}}, nil
 	})
 	client, err := avm.New(avm.Voi, &avm.Options{BaseURL: server.URL + "/indexer//", Headers: map[string]string{"X-Api-Key": "k"}})
 	if err != nil {
@@ -97,6 +97,9 @@ func TestCustomBaseURLKeepsItsPrefix(t *testing.T) {
 	}
 	if status.IndexedRound == nil || *status.IndexedRound != 10 {
 		t.Errorf("unexpected status %+v", status)
+	}
+	if status.Health == nil || *status.Health != "Healthy" || status.HistoricalQueries == nil || status.HistoricalQueries.Mode != "EffectAggregation" {
+		t.Errorf("unexpected health or historical queries %+v", status)
 	}
 	got := (*requests)[0]
 	if got.Path != "/indexer/v1/voi/status" {

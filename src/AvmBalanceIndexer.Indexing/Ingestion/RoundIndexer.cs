@@ -92,9 +92,7 @@ public sealed partial class RoundIndexer(
                     break;
                 }
 
-                // Caught up: keep the published target and timestamp moving so an idle indexer is distinguishable from a stalled one.
-                status = status with { TargetRound = latest, State = IngestionState.Following, UpdatedAt = _time.GetUtcNow() };
-                await storage.UpdateProgressAsync(status, cancellationToken).ConfigureAwait(false);
+                status = await HeartbeatAsync(status, latest, cancellationToken).ConfigureAwait(false);
                 await Task.Delay(_options.FollowPollInterval, _time, cancellationToken).ConfigureAwait(false);
                 continue;
             }
@@ -144,6 +142,8 @@ public sealed partial class RoundIndexer(
 
                 // At the tip the archival nodes may not have the newest block yet; wait and ask again. A block far behind the
                 // tip that nobody serves is a stall, not a wait.
+                // No heartbeat here on purpose: at the tip a block comes every few seconds, so a writer that cannot get one for
+                // longer than the stall threshold is stalled, and the status must show it (#168).
                 await WaitIfJustMissingAsync(ex, cancellationToken).ConfigureAwait(false);
             }
 
@@ -162,6 +162,17 @@ public sealed partial class RoundIndexer(
         stopAfterRound is null && target - first <= (ulong)_options.FollowingThresholdRounds
             ? (round, token) => adapter.FetchBlockAsync(round, target, token)
             : adapter.FetchBlockAsync;
+
+    /// <summary>
+    /// A writer that has caught up with the tip is alive: it republishes the status with the latest round and a fresh timestamp, so that
+    /// it is distinguishable from a stalled one (the API reports an old status as stalled).
+    /// </summary>
+    private async Task<ChainStatus> HeartbeatAsync(ChainStatus status, ulong latest, CancellationToken cancellationToken)
+    {
+        status = status with { TargetRound = latest, State = IngestionState.Following, UpdatedAt = _time.GetUtcNow() };
+        await storage.UpdateProgressAsync(status, cancellationToken).ConfigureAwait(false);
+        return status;
+    }
 
     /// <summary>
     /// Waits one poll interval when the missing block is within propagation distance of the chain tip; otherwise rethrows so

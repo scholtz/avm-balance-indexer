@@ -17,6 +17,7 @@ from avm_balance_indexer._generated.models.balance_response import BalanceRespon
 from avm_balance_indexer._generated.models.chain_id import ChainId
 from avm_balance_indexer._generated.models.effect_dto import EffectDto
 from avm_balance_indexer._generated.models.error_response import ErrorResponse
+from avm_balance_indexer._generated.models.historical_queries_info import HistoricalQueriesInfo
 from avm_balance_indexer._generated.models.history_response import HistoryResponse
 from avm_balance_indexer._generated.models.holder_dto import HolderDto
 from avm_balance_indexer._generated.models.holders_response import HoldersResponse

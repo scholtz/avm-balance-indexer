@@ -3,6 +3,7 @@ export type {
   BalanceResponse,
   EffectDto,
   ErrorResponse,
+  HistoricalQueriesInfo,
   HistoryResponse,
   HolderDto,
   HoldersResponse,

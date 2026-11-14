@@ -121,6 +121,35 @@ pub mod types {
         }
     }
 
+    ///How holders at a round are computed, and the limits a synchronous
+    /// request runs into.
+    #[derive(:: serde :: Deserialize, :: serde :: Serialize, Clone, Debug)]
+    pub struct HistoricalQueriesInfo {
+        ///Whether holder scans can be started (`POST .../holders/scans`) for
+        /// queries too large to answer synchronously.
+        #[serde(rename = "asynchronousScans")]
+        pub asynchronous_scans: bool,
+        ///How many scans may be pending or running at once.
+        #[serde(rename = "maxActiveScans")]
+        pub max_active_scans: i32,
+        ///Always `EffectAggregation`: holders at a round are computed by
+        /// aggregating token effects, there are no snapshots.
+        pub mode: ::std::string::String,
+        ///The smaller of the request timeout (answered with 504) and the
+        /// storage read timeout (answered with 503). On Cassandra the read
+        /// timeout bounds a whole read; on PostgreSQL it bounds each statement,
+        /// so a request can run until the request timeout. A query that needs
+        /// longer belongs in an asynchronous scan.
+        #[serde(rename = "synchronousTimeoutSeconds")]
+        pub synchronous_timeout_seconds: i32,
+    }
+
+    impl HistoricalQueriesInfo {
+        pub fn builder() -> builder::HistoricalQueriesInfo {
+            Default::default()
+        }
+    }
+
     ///`HistoryResponse`
     #[derive(:: serde :: Deserialize, :: serde :: Serialize, Clone, Debug)]
     pub struct HistoryResponse {
@@ -288,21 +317,46 @@ pub mod types {
     /// deployment serves.
     #[derive(:: serde :: Deserialize, :: serde :: Serialize, Clone, Debug)]
     pub struct StatusResponse {
+        ///The chain this deployment serves.
         pub chain: ::std::string::String,
+        ///The API's view of ingestion: `NotStarted`, `Healthy`, or `Stalled`
+        /// when the writer has not updated the status for longer than
+        /// `Api:StalledAfterSeconds`.
+        #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+        pub health: ::std::option::Option<::std::string::String>,
+        #[serde(
+            rename = "historicalQueries",
+            skip_serializing_if = "::std::option::Option::is_none"
+        )]
+        pub historical_queries: ::std::option::Option<HistoricalQueriesInfo>,
+        ///The newest round the API serves; null before the first round.
         #[serde(
             rename = "indexedRound",
             deserialize_with = "::std::option::Option::deserialize"
         )]
         pub indexed_round: ::std::option::Option<u64>,
+        ///Rounds between the target round and the indexed round.
         #[serde(deserialize_with = "::std::option::Option::deserialize")]
         pub lag: ::std::option::Option<u64>,
+        ///The storage provider (`PostgreSql` or `Cassandra`).
         pub provider: ::std::string::String,
+        ///What the writer published (for example `Backfilling` or
+        /// `Following`), or `NotStarted` before the first round.
         pub state: ::std::string::String,
+        ///Whole seconds since the writer last updated the status; never
+        /// negative, null before the first round.
+        #[serde(
+            rename = "statusAgeSeconds",
+            skip_serializing_if = "::std::option::Option::is_none"
+        )]
+        pub status_age_seconds: ::std::option::Option<i64>,
+        ///The newest round of the chain as last seen by the writer.
         #[serde(
             rename = "targetRound",
             deserialize_with = "::std::option::Option::deserialize"
         )]
         pub target_round: ::std::option::Option<u64>,
+        ///When the writer last updated the status.
         #[serde(
             rename = "updatedAt",
             deserialize_with = "::std::option::Option::deserialize"
@@ -733,6 +787,95 @@ pub mod types {
             fn from(value: super::ErrorResponse) -> Self {
                 Self {
                     error: Ok(value.error),
+                }
+            }
+        }
+
+        #[derive(Clone, Debug)]
+        pub struct HistoricalQueriesInfo {
+            asynchronous_scans: ::std::result::Result<bool, ::std::string::String>,
+            max_active_scans: ::std::result::Result<i32, ::std::string::String>,
+            mode: ::std::result::Result<::std::string::String, ::std::string::String>,
+            synchronous_timeout_seconds: ::std::result::Result<i32, ::std::string::String>,
+        }
+
+        impl ::std::default::Default for HistoricalQueriesInfo {
+            fn default() -> Self {
+                Self {
+                    asynchronous_scans: Err("no value supplied for asynchronous_scans".to_string()),
+                    max_active_scans: Err("no value supplied for max_active_scans".to_string()),
+                    mode: Err("no value supplied for mode".to_string()),
+                    synchronous_timeout_seconds: Err(
+                        "no value supplied for synchronous_timeout_seconds".to_string(),
+                    ),
+                }
+            }
+        }
+
+        impl HistoricalQueriesInfo {
+            pub fn asynchronous_scans<T>(mut self, value: T) -> Self
+            where
+                T: ::std::convert::TryInto<bool>,
+                T::Error: ::std::fmt::Display,
+            {
+                self.asynchronous_scans = value.try_into().map_err(|e| {
+                    format!("error converting supplied value for asynchronous_scans: {e}")
+                });
+                self
+            }
+            pub fn max_active_scans<T>(mut self, value: T) -> Self
+            where
+                T: ::std::convert::TryInto<i32>,
+                T::Error: ::std::fmt::Display,
+            {
+                self.max_active_scans = value.try_into().map_err(|e| {
+                    format!("error converting supplied value for max_active_scans: {e}")
+                });
+                self
+            }
+            pub fn mode<T>(mut self, value: T) -> Self
+            where
+                T: ::std::convert::TryInto<::std::string::String>,
+                T::Error: ::std::fmt::Display,
+            {
+                self.mode = value
+                    .try_into()
+                    .map_err(|e| format!("error converting supplied value for mode: {e}"));
+                self
+            }
+            pub fn synchronous_timeout_seconds<T>(mut self, value: T) -> Self
+            where
+                T: ::std::convert::TryInto<i32>,
+                T::Error: ::std::fmt::Display,
+            {
+                self.synchronous_timeout_seconds = value.try_into().map_err(|e| {
+                    format!("error converting supplied value for synchronous_timeout_seconds: {e}")
+                });
+                self
+            }
+        }
+
+        impl ::std::convert::TryFrom<HistoricalQueriesInfo> for super::HistoricalQueriesInfo {
+            type Error = super::error::ConversionError;
+            fn try_from(
+                value: HistoricalQueriesInfo,
+            ) -> ::std::result::Result<Self, super::error::ConversionError> {
+                Ok(Self {
+                    asynchronous_scans: value.asynchronous_scans?,
+                    max_active_scans: value.max_active_scans?,
+                    mode: value.mode?,
+                    synchronous_timeout_seconds: value.synchronous_timeout_seconds?,
+                })
+            }
+        }
+
+        impl ::std::convert::From<super::HistoricalQueriesInfo> for HistoricalQueriesInfo {
+            fn from(value: super::HistoricalQueriesInfo) -> Self {
+                Self {
+                    asynchronous_scans: Ok(value.asynchronous_scans),
+                    max_active_scans: Ok(value.max_active_scans),
+                    mode: Ok(value.mode),
+                    synchronous_timeout_seconds: Ok(value.synchronous_timeout_seconds),
                 }
             }
         }
@@ -1586,10 +1729,20 @@ pub mod types {
         #[derive(Clone, Debug)]
         pub struct StatusResponse {
             chain: ::std::result::Result<::std::string::String, ::std::string::String>,
+            health: ::std::result::Result<
+                ::std::option::Option<::std::string::String>,
+                ::std::string::String,
+            >,
+            historical_queries: ::std::result::Result<
+                ::std::option::Option<super::HistoricalQueriesInfo>,
+                ::std::string::String,
+            >,
             indexed_round: ::std::result::Result<::std::option::Option<u64>, ::std::string::String>,
             lag: ::std::result::Result<::std::option::Option<u64>, ::std::string::String>,
             provider: ::std::result::Result<::std::string::String, ::std::string::String>,
             state: ::std::result::Result<::std::string::String, ::std::string::String>,
+            status_age_seconds:
+                ::std::result::Result<::std::option::Option<i64>, ::std::string::String>,
             target_round: ::std::result::Result<::std::option::Option<u64>, ::std::string::String>,
             updated_at: ::std::result::Result<
                 ::std::option::Option<::chrono::DateTime<::chrono::offset::Utc>>,
@@ -1601,10 +1754,13 @@ pub mod types {
             fn default() -> Self {
                 Self {
                     chain: Err("no value supplied for chain".to_string()),
+                    health: Ok(Default::default()),
+                    historical_queries: Ok(Default::default()),
                     indexed_round: Err("no value supplied for indexed_round".to_string()),
                     lag: Err("no value supplied for lag".to_string()),
                     provider: Err("no value supplied for provider".to_string()),
                     state: Err("no value supplied for state".to_string()),
+                    status_age_seconds: Ok(Default::default()),
                     target_round: Err("no value supplied for target_round".to_string()),
                     updated_at: Err("no value supplied for updated_at".to_string()),
                 }
@@ -1620,6 +1776,26 @@ pub mod types {
                 self.chain = value
                     .try_into()
                     .map_err(|e| format!("error converting supplied value for chain: {e}"));
+                self
+            }
+            pub fn health<T>(mut self, value: T) -> Self
+            where
+                T: ::std::convert::TryInto<::std::option::Option<::std::string::String>>,
+                T::Error: ::std::fmt::Display,
+            {
+                self.health = value
+                    .try_into()
+                    .map_err(|e| format!("error converting supplied value for health: {e}"));
+                self
+            }
+            pub fn historical_queries<T>(mut self, value: T) -> Self
+            where
+                T: ::std::convert::TryInto<::std::option::Option<super::HistoricalQueriesInfo>>,
+                T::Error: ::std::fmt::Display,
+            {
+                self.historical_queries = value.try_into().map_err(|e| {
+                    format!("error converting supplied value for historical_queries: {e}")
+                });
                 self
             }
             pub fn indexed_round<T>(mut self, value: T) -> Self
@@ -1662,6 +1838,16 @@ pub mod types {
                     .map_err(|e| format!("error converting supplied value for state: {e}"));
                 self
             }
+            pub fn status_age_seconds<T>(mut self, value: T) -> Self
+            where
+                T: ::std::convert::TryInto<::std::option::Option<i64>>,
+                T::Error: ::std::fmt::Display,
+            {
+                self.status_age_seconds = value.try_into().map_err(|e| {
+                    format!("error converting supplied value for status_age_seconds: {e}")
+                });
+                self
+            }
             pub fn target_round<T>(mut self, value: T) -> Self
             where
                 T: ::std::convert::TryInto<::std::option::Option<u64>>,
@@ -1693,10 +1879,13 @@ pub mod types {
             ) -> ::std::result::Result<Self, super::error::ConversionError> {
                 Ok(Self {
                     chain: value.chain?,
+                    health: value.health?,
+                    historical_queries: value.historical_queries?,
                     indexed_round: value.indexed_round?,
                     lag: value.lag?,
                     provider: value.provider?,
                     state: value.state?,
+                    status_age_seconds: value.status_age_seconds?,
                     target_round: value.target_round?,
                     updated_at: value.updated_at?,
                 })
@@ -1707,10 +1896,13 @@ pub mod types {
             fn from(value: super::StatusResponse) -> Self {
                 Self {
                     chain: Ok(value.chain),
+                    health: Ok(value.health),
+                    historical_queries: Ok(value.historical_queries),
                     indexed_round: Ok(value.indexed_round),
                     lag: Ok(value.lag),
                     provider: Ok(value.provider),
                     state: Ok(value.state),
+                    status_age_seconds: Ok(value.status_age_seconds),
                     target_round: Ok(value.target_round),
                     updated_at: Ok(value.updated_at),
                 }

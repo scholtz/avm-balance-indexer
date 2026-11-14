@@ -90,6 +90,21 @@ type ErrorResponse struct {
 	Error string `json:"error"`
 }
 
+// HistoricalQueriesInfo How holders at a round are computed, and the limits a synchronous request runs into.
+type HistoricalQueriesInfo struct {
+	// AsynchronousScans Whether holder scans can be started (`POST .../holders/scans`) for queries too large to answer synchronously.
+	AsynchronousScans bool `json:"asynchronousScans"`
+
+	// MaxActiveScans How many scans may be pending or running at once.
+	MaxActiveScans int32 `json:"maxActiveScans"`
+
+	// Mode Always `EffectAggregation`: holders at a round are computed by aggregating token effects, there are no snapshots.
+	Mode string `json:"mode"`
+
+	// SynchronousTimeoutSeconds The smaller of the request timeout (answered with 504) and the storage read timeout (answered with 503). On Cassandra the read timeout bounds a whole read; on PostgreSQL it bounds each statement, so a request can run until the request timeout. A query that needs longer belongs in an asynchronous scan.
+	SynchronousTimeoutSeconds int32 `json:"synchronousTimeoutSeconds"`
+}
+
 // HistoryResponse defines model for HistoryResponse.
 type HistoryResponse struct {
 	Account      string      `json:"account"`
@@ -165,13 +180,35 @@ type ScanResponse struct {
 
 // StatusResponse Indexed round, target round, lag and ingestion state of the chain this deployment serves.
 type StatusResponse struct {
-	Chain        string     `json:"chain"`
-	IndexedRound *uint64    `json:"indexedRound"`
-	Lag          *uint64    `json:"lag"`
-	Provider     string     `json:"provider"`
-	State        string     `json:"state"`
-	TargetRound  *uint64    `json:"targetRound"`
-	UpdatedAt    *time.Time `json:"updatedAt"`
+	// Chain The chain this deployment serves.
+	Chain string `json:"chain"`
+
+	// Health The API's view of ingestion: `NotStarted`, `Healthy`, or `Stalled` when the writer has not updated the status for longer than `Api:StalledAfterSeconds`.
+	Health *string `json:"health,omitempty"`
+
+	// HistoricalQueries How holders at a round are computed, and the limits a synchronous request runs into.
+	HistoricalQueries *HistoricalQueriesInfo `json:"historicalQueries,omitempty"`
+
+	// IndexedRound The newest round the API serves; null before the first round.
+	IndexedRound *uint64 `json:"indexedRound"`
+
+	// Lag Rounds between the target round and the indexed round.
+	Lag *uint64 `json:"lag"`
+
+	// Provider The storage provider (`PostgreSql` or `Cassandra`).
+	Provider string `json:"provider"`
+
+	// State What the writer published (for example `Backfilling` or `Following`), or `NotStarted` before the first round.
+	State string `json:"state"`
+
+	// StatusAgeSeconds Whole seconds since the writer last updated the status; never negative, null before the first round.
+	StatusAgeSeconds *int64 `json:"statusAgeSeconds,omitempty"`
+
+	// TargetRound The newest round of the chain as last seen by the writer.
+	TargetRound *uint64 `json:"targetRound"`
+
+	// UpdatedAt When the writer last updated the status.
+	UpdatedAt *time.Time `json:"updatedAt"`
 }
 
 // TokenKind algo (native, token id 0), asa (Algorand Standard Asset, also ARC-20 Smart ASAs) or arc200 (application token).

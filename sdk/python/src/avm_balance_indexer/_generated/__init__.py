@@ -37,6 +37,7 @@ __all__ = [
     "ChainId",
     "EffectDto",
     "ErrorResponse",
+    "HistoricalQueriesInfo",
     "HistoryResponse",
     "HolderDto",
     "HoldersResponse",
@@ -75,6 +76,7 @@ from avm_balance_indexer._generated.models.balance_response import BalanceRespon
 from avm_balance_indexer._generated.models.chain_id import ChainId as ChainId
 from avm_balance_indexer._generated.models.effect_dto import EffectDto as EffectDto
 from avm_balance_indexer._generated.models.error_response import ErrorResponse as ErrorResponse
+from avm_balance_indexer._generated.models.historical_queries_info import HistoricalQueriesInfo as HistoricalQueriesInfo
 from avm_balance_indexer._generated.models.history_response import HistoryResponse as HistoryResponse
 from avm_balance_indexer._generated.models.holder_dto import HolderDto as HolderDto
 from avm_balance_indexer._generated.models.holders_response import HoldersResponse as HoldersResponse

@@ -92,6 +92,8 @@ api:
   # Requests per client IP and minute on the data endpoints (0 = off) and the longest a data request may take.
   rateLimitPerMinute: 600
   requestTimeoutSeconds: 60
+  # The status reports health "Stalled" when the writer has not updated it for longer than this (10 to 86400).
+  stalledAfterSeconds: 120
   # Take the client address from X-Forwarded-For. Only when the API is reachable exclusively through your ingress.
   trustForwardedHeaders: false
   # Proxies to believe (CIDR list, for example ["10.0.0.0/8"]) and how many hops to peel off X-Forwarded-For (CDN + ingress = 2).
