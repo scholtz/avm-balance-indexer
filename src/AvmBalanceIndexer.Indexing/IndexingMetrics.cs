@@ -46,6 +46,14 @@ public sealed class IndexingMetrics : IDisposable
 {
     public const string MeterName = "AvmBalanceIndexer.Indexing";
 
+    /// <summary>
+    /// Bucket boundaries in seconds, from a fast block download to a long holder scan. Without them the exporter would use its default
+    /// boundaries, which are meant for milliseconds (0, 5, 10, 25, ...), and every percentile would be meaningless.
+    /// </summary>
+    public static IReadOnlyList<double> SecondsBucketBoundaries { get; } = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 300, 1800];
+
+    private static readonly InstrumentAdvice<double> SecondsBuckets = new() { HistogramBucketBoundaries = SecondsBucketBoundaries };
+
     private readonly Meter _meter;
     private readonly Histogram<double> _commitDuration;
     private readonly Counter<long> _commitEffects;
@@ -58,12 +66,12 @@ public sealed class IndexingMetrics : IDisposable
     public IndexingMetrics(string meterName = MeterName)
     {
         _meter = new Meter(meterName);
-        _commitDuration = _meter.CreateHistogram<double>("avm.indexer.commit.duration", "s", "Time to write and publish one batch of rounds");
+        _commitDuration = _meter.CreateHistogram("avm.indexer.commit.duration", "s", "Time to write and publish one batch of rounds", advice: SecondsBuckets);
         _commitEffects = _meter.CreateCounter<long>("avm.indexer.commit.effects", description: "Effects written with published rounds");
-        _fetchDuration = _meter.CreateHistogram<double>("avm.fetch.block.duration", "s", "Download and validation of a block that was served, by source (archival, relay); failed requests are in avm.fetch.block.failures");
+        _fetchDuration = _meter.CreateHistogram("avm.fetch.block.duration", "s", "Download and validation of a block that was served, by source (archival, relay); failed requests are in avm.fetch.block.failures", advice: SecondsBuckets);
         _fetchFailures = _meter.CreateCounter<long>("avm.fetch.block.failures", description: "Failed block requests to one host, by source and reason");
         _decoderErrors = _meter.CreateCounter<long>("avm.indexer.decoder_errors", description: "Fetches that failed because no node served a block that validates, and malformed ARC-200 transfer logs of committed rounds");
-        _scanDuration = _meter.CreateHistogram<double>("avm.scan.duration", "s", "Holder scans from claim to end, by outcome");
+        _scanDuration = _meter.CreateHistogram("avm.scan.duration", "s", "Holder scans from claim to end, by outcome", advice: SecondsBuckets);
     }
 
     /// <summary>

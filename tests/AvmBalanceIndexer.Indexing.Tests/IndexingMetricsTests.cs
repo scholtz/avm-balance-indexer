@@ -64,21 +64,40 @@ public sealed class IndexingMetricsTests : IDisposable
         Assert.Equal(tag, measurement.Tags["outcome"]);
     }
 
-    [Fact]
-    public void The_Unwired_Instance_Is_Not_On_The_Exported_Meter()
+    [Theory]
+    [InlineData("avm.indexer.commit.duration")]
+    [InlineData("avm.fetch.block.duration")]
+    [InlineData("avm.scan.duration")]
+    public void Duration_Histograms_Advise_Second_Scale_Buckets(string name)
     {
-        var seen = false;
+        // The exporter's defaults are for milliseconds (0, 5, 10, ...): with them, a 50 ms fetch and a 4 s commit share one bucket.
+        System.Diagnostics.Metrics.Histogram<double>? histogram = null;
         using var listener = new System.Diagnostics.Metrics.MeterListener
         {
-            InstrumentPublished = (instrument, _) => seen |= instrument.Meter.Name == IndexingMetrics.MeterName && ReferenceEquals(instrument.Meter, UnwiredMeter()),
+            InstrumentPublished = (instrument, _) =>
+            {
+                if (instrument.Name == name && instrument is System.Diagnostics.Metrics.Histogram<double> found && ReferenceEquals(found.Meter, MeterOf(_capture.Metrics)))
+                {
+                    histogram = found;
+                }
+            },
         };
         listener.Start();
 
-        IndexingMetrics.None.CommitRecorded(TimeSpan.FromSeconds(1), 1);
-
-        Assert.False(seen);
+        Assert.NotNull(histogram);
+        Assert.Equal(IndexingMetrics.SecondsBucketBoundaries, histogram.Advice?.HistogramBucketBoundaries);
+        Assert.Contains(0.05, histogram.Advice!.HistogramBucketBoundaries!);
     }
 
-    private static System.Diagnostics.Metrics.Meter? UnwiredMeter() =>
-        typeof(IndexingMetrics).GetField("_meter", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)?.GetValue(IndexingMetrics.None) as System.Diagnostics.Metrics.Meter;
+    private static System.Diagnostics.Metrics.Meter? MeterOf(IndexingMetrics metrics) =>
+        typeof(IndexingMetrics).GetField("_meter", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)?.GetValue(metrics) as System.Diagnostics.Metrics.Meter;
+
+    [Fact]
+    public void The_Unwired_Instance_Is_Not_On_The_Exported_Meter()
+    {
+        var unwired = MeterOf(IndexingMetrics.None);
+
+        Assert.NotNull(unwired);
+        Assert.NotEqual(IndexingMetrics.MeterName, unwired.Name);
+    }
 }

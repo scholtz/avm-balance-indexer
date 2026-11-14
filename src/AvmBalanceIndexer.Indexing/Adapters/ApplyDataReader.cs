@@ -171,7 +171,7 @@ public static class ApplyDataReader
         {
             // Only 100-byte logs can be ARC-200 transfers; keeping the others would allocate for nothing. Logs that start with the
             // transfer selector are kept whatever their length, so that the normalizer can count malformed transfer events.
-            if (reader.ReadBytes() is { } log && (log.Length == Arc200TransferLogLength || new System.Buffers.SequenceReader<byte>(log).IsNext(TransferSelector)))
+            if (reader.ReadBytes() is { } log && (log.Length == Arc200TransferLogLength || new System.Buffers.SequenceReader<byte>(log).IsNext(Normalization.Arc200Events.TransferSelector)))
             {
                 logs.Add(log.ToArray());
             }
@@ -179,7 +179,4 @@ public static class ApplyDataReader
 
         return logs;
     }
-
-    /// <summary>The first 4 bytes of SHA-512/256 of <c>arc200_Transfer(address,address,uint256)</c> (ARC-28 event selector).</summary>
-    private static ReadOnlySpan<byte> TransferSelector => Normalization.Arc200Events.TransferSelector;
 }
