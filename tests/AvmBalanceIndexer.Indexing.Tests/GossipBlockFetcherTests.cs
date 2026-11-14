@@ -639,13 +639,9 @@ public class GossipBlockFetcherTests
     [InlineData(30, 300)] // ten times the cooldown
     [InlineData(360, 3600)] // capped at an hour
     [InlineData(600, 3600)]
-    [InlineData(7200, 7200)] // never shorter than the cooldown itself
+    [InlineData(3600, 3600)] // the longest cooldown the options allow
     public void An_Invalid_Relay_Rests_Ten_Cooldowns_Capped_At_An_Hour_But_Not_Below_The_Cooldown(int cooldownSeconds, int restSeconds) =>
         Assert.Equal(TimeSpan.FromSeconds(restSeconds), GossipBlockFetcher.InvalidRelayRest(TimeSpan.FromSeconds(cooldownSeconds)));
-
-    [Fact]
-    public void An_Extreme_Cooldown_Does_Not_Overflow_The_Rest() =>
-        Assert.Equal(TimeSpan.MaxValue, GossipBlockFetcher.InvalidRelayRest(TimeSpan.MaxValue));
 
     [Fact]
     public async Task A_Relay_That_Later_Serves_The_Valid_Block_Itself_Is_Not_Blamed()

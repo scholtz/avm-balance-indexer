@@ -263,19 +263,15 @@ public sealed partial class RoundIndexer(
             seed = await adapter.FetchBlockAsync(seedRound, cancellationToken).ConfigureAwait(false);
         }
 
-        if (status.IndexedRound == 0)
+        if (!LinksToCursor(status, seed))
         {
-            // Block 1 links back to the genesis block hash that was stored as the round 0 cursor.
-            return seed.PreviousHash.AsSpan().SequenceEqual(status.IndexedBlockHash.Span)
-                ? GenesisRewardsState(seed)
-                : throw new ChainDivergenceException(
-                    "The archival source serves a different first block than the one the database was started from. The database must be rebuilt.");
+            throw new ChainDivergenceException(status.IndexedRound == 0
+                ? "The archival source serves a different first block than the one the database was started from. The database must be rebuilt."
+                : $"The archival source serves a different block {status.IndexedRound} than the one published. The database must be rebuilt.");
         }
 
-        return seed.Hash.AsSpan().SequenceEqual(status.IndexedBlockHash.Span)
-            ? RewardsState.FromHeader(seed.Block)
-            : throw new ChainDivergenceException(
-                $"The archival source serves a different block {status.IndexedRound} than the one published. The database must be rebuilt.");
+        // Block 1 links back to the genesis block hash that was stored as the round 0 cursor; its rewards state starts at genesis.
+        return status.IndexedRound == 0 ? GenesisRewardsState(seed) : RewardsState.FromHeader(seed.Block);
     }
 
     /// <summary>Whether the seed block is the published one (for round 0: whether block 1 links back to the stored genesis hash).</summary>

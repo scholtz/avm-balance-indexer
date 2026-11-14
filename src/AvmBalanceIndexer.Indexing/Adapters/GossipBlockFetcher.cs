@@ -250,6 +250,14 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
                 }
             }
 
+            foreach (var (relay, reported) in _invalidRelayReported)
+            {
+                if (now - reported >= TimeSpan.FromHours(1))
+                {
+                    _invalidRelayReported.TryRemove(new KeyValuePair<string, DateTimeOffset>(relay, reported));
+                }
+            }
+
             return new HashSet<string>(
                 relays.Except(archival, StringComparer.OrdinalIgnoreCase).Where(relay => !_relayRestUntil.ContainsKey(relay)),
                 StringComparer.OrdinalIgnoreCase);
@@ -477,7 +485,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
         }
     }
 
-    /// <summary>Ten times the host cooldown, capped at an hour, but never shorter than the cooldown itself (no overflow).</summary>
+    /// <summary>Ten times the host cooldown, capped at an hour, but never shorter than the cooldown itself (at most an hour by validation).</summary>
     internal static TimeSpan InvalidRelayRest(TimeSpan cooldown)
     {
         var hour = TimeSpan.FromHours(1);
@@ -501,7 +509,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
 
     /// <summary>
     /// A relay served a block that fails validation while a node served one of the same round that validates: it serves corrupt or foreign data.
-    /// It is left out of relay lists for ten times the host cooldown (at least the cooldown, at most an hour) and reported at Error at
+    /// It is left out of relay lists for ten times the host cooldown (at least the cooldown, at most an hour) and reported as a Warning at
     /// most once an hour.
     /// </summary>
     private void ReportInvalidRelay(string host, ulong round, BlockValidationException error)
