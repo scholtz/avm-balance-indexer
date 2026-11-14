@@ -143,20 +143,22 @@ jobs:
           # delete it when they switch it off again (a missing delete right would fail the upgrade half way).
           hpa=no
           if [ "$(yq '.api.autoscaling.enabled // false' "deploy/helm/values/$VALUES")" = true ]; then
-            # Delete too: the --atomic rollback of the upgrade that creates the autoscaler has to remove it again.
-            resources+=(horizontalpodautoscalers.autoscaling); hpa=yes
-            can delete horizontalpodautoscalers.autoscaling || missing+=("delete horizontalpodautoscalers.autoscaling")
+            hpa=yes
           elif can get horizontalpodautoscalers.autoscaling; then
-            # Switched off (or never on): an autoscaler left from earlier is removed by this upgrade, and recreated by its rollback, so
-            # then all its rights are needed. Only "not found" means there is none; any other failure of the lookup is not an answer.
-            # An account that may not even read autoscalers never created one: nothing to check.
+            # Switched off (or never on): an autoscaler left from earlier is removed by this upgrade and recreated by its rollback.
+            # Only "not found" means there is none; any other failure of the lookup is not an answer. An account that may not even read
+            # autoscalers never created one (after a switch to such an account, remove a leftover autoscaler by hand).
             if probe="$(kubectl -n "$NAMESPACE" get horizontalpodautoscaler "${RELEASE}-${CHAIN}-api" -o name 2>&1)"; then
-              for verb in get list watch create update patch delete; do
-                can "$verb" horizontalpodautoscalers.autoscaling || missing+=("$verb horizontalpodautoscalers.autoscaling (to remove the API autoscaler)")
-              done
+              hpa="yes (to remove it)"
             elif ! grep -q "NotFound" <<< "$probe"; then
               echo "::error::Could not tell whether the release has an API autoscaler to remove: $probe"; exit 1
             fi
+          fi
+          if [ "$hpa" != no ]; then
+            # All rights including delete: the --atomic rollback removes or recreates the autoscaler.
+            for verb in get list watch create update patch delete; do
+              can "$verb" horizontalpodautoscalers.autoscaling || missing+=("$verb horizontalpodautoscalers.autoscaling")
+            done
           fi
           for resource in "${resources[@]}"; do
             for verb in get list watch create update patch; do
