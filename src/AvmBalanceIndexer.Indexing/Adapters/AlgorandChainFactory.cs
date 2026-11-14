@@ -41,12 +41,16 @@ public static class AlgorandChainFactory
     }
 
     /// <summary>Creates the adapter for the configured chain; the adapter owns and disposes its HTTP clients.</summary>
-    public static AlgorandChainAdapter Create(AlgorandChainOptions options, ILoggerFactory loggerFactory)
+    public static AlgorandChainAdapter Create(AlgorandChainOptions options, ILoggerFactory loggerFactory) =>
+        Create(options, loggerFactory, IndexingMetrics.None);
+
+    /// <summary>Creates the adapter for the configured chain, recording block fetches in <paramref name="metrics"/>.</summary>
+    public static AlgorandChainAdapter Create(AlgorandChainOptions options, ILoggerFactory loggerFactory, IndexingMetrics metrics)
     {
         var blockHttpClient = CreateBlockHttpClient();
         try
         {
-            return Create(options, blockHttpClient, loggerFactory, blockHttpClient);
+            return CreateCore(options, blockHttpClient, loggerFactory, metrics, [blockHttpClient]);
         }
         catch
         {
@@ -60,9 +64,13 @@ public static class AlgorandChainFactory
     /// <param name="blockHttpClient">HTTP client used for block downloads.</param>
     /// <param name="loggerFactory">Logger source.</param>
     /// <param name="owned">Resources the adapter disposes together with itself.</param>
-    public static AlgorandChainAdapter Create(AlgorandChainOptions options, HttpClient blockHttpClient, ILoggerFactory loggerFactory, params IDisposable[] owned)
+    public static AlgorandChainAdapter Create(AlgorandChainOptions options, HttpClient blockHttpClient, ILoggerFactory loggerFactory, params IDisposable[] owned) =>
+        CreateCore(options, blockHttpClient, loggerFactory, IndexingMetrics.None, owned);
+
+    private static AlgorandChainAdapter CreateCore(AlgorandChainOptions options, HttpClient blockHttpClient, ILoggerFactory loggerFactory, IndexingMetrics metrics, IDisposable[] owned)
     {
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(metrics);
         ArgumentNullException.ThrowIfNull(blockHttpClient);
         ArgumentNullException.ThrowIfNull(loggerFactory);
 
@@ -81,7 +89,8 @@ public static class AlgorandChainFactory
                 profile,
                 options,
                 genesisHash,
-                loggerFactory.CreateLogger<GossipBlockFetcher>());
+                loggerFactory.CreateLogger<GossipBlockFetcher>(),
+                metrics: metrics);
 
             algodHttp = HttpClientConfigurator.ConfigureHttpClient(
                 string.IsNullOrWhiteSpace(options.AlgodUrl) ? profile.DefaultAlgodUrl : options.AlgodUrl,

@@ -74,7 +74,7 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
             round.Add(proposerAddress, payout, EffectType.ProposerPayout, feeSink, []);
         }
 
-        return new NormalizedBlock(round.Deltas, round.TokenChanges);
+        return new NormalizedBlock(round.Deltas, round.TokenChanges) { MalformedArc200Logs = round.MalformedArc200Logs };
     }
 
     /// <summary>
@@ -189,6 +189,8 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
 
     private static void ApplyApplicationLogs(RoundBuilder round, RawTransaction raw, TxnApplyData apply, int[] path)
     {
+        // Logs with the transfer selector but the wrong length are dropped by the reader and only counted (a decoder error metric).
+        round.MalformedArc200Logs += apply.MalformedArc200Logs;
         if (apply.Logs is not { Count: > 0 } logs)
         {
             return;
@@ -320,6 +322,8 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
         private string _transactionId = string.Empty;
 
         public ulong Round { get; } = round;
+
+        public int MalformedArc200Logs { get; set; }
 
         public DomainAddress FeeSink { get; } = feeSink;
 

@@ -15,8 +15,11 @@ public sealed partial class ScanExecutor(
     IStorageFailureClassifier failures,
     IOptions<ScanOptions> options,
     TimeProvider clock,
-    ILogger<ScanExecutor> logger) : BackgroundService
+    ILogger<ScanExecutor> logger,
+    AvmBalanceIndexer.Indexing.IndexingMetrics? metrics = null) : BackgroundService
 {
+    private readonly AvmBalanceIndexer.Indexing.IndexingMetrics _metrics = metrics ?? AvmBalanceIndexer.Indexing.IndexingMetrics.None;
+
     private static readonly TimeSpan CleanupEvery = TimeSpan.FromMinutes(5);
 
     private readonly string _owner = $"{Environment.MachineName}:{Guid.NewGuid():N}";
@@ -83,6 +86,8 @@ public sealed partial class ScanExecutor(
         var cursor = job.Cursor;
         var retries = 0;
         var resync = false;
+        var started = clock.GetTimestamp();
+        var outcome = AvmBalanceIndexer.Indexing.ScanOutcome.Abandoned; // released, expired, taken over, paused or shut down
         try
         {
             while (true)
@@ -134,6 +139,7 @@ public sealed partial class ScanExecutor(
 
                     if (await jobs.CompleteAsync(job.Id, _owner, clock.GetUtcNow(), stoppingToken).ConfigureAwait(false))
                     {
+                        outcome = AvmBalanceIndexer.Indexing.ScanOutcome.Completed;
                         LogCompleted(logger, job.Id);
                     }
                     else
@@ -170,6 +176,7 @@ public sealed partial class ScanExecutor(
         }
         catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
         {
+            outcome = AvmBalanceIndexer.Indexing.ScanOutcome.Failed;
             LogFailed(logger, ex, job.Id);
             try
             {
@@ -180,6 +187,10 @@ public sealed partial class ScanExecutor(
                 // The job stays running and is picked up again after StaleAfter.
                 LogUnavailable(logger, failure);
             }
+        }
+        finally
+        {
+            _metrics.ScanEnded(clock.GetElapsedTime(started), outcome);
         }
     }
 

@@ -84,6 +84,7 @@ public static class ApplyDataReader
         bool hgh = false, hgi = false;
         IReadOnlyList<TxnApplyData> inner = [];
         IReadOnlyList<ReadOnlyMemory<byte>> logs = [];
+        var malformed = 0;
 
         var entries = reader.ReadMapHeader();
         for (var i = 0; i < entries; i++)
@@ -123,7 +124,7 @@ public static class ApplyDataReader
                     hgi = reader.ReadBoolean();
                     break;
                 case "dt":
-                    (inner, logs) = ReadDetail(ref reader);
+                    (inner, logs, malformed) = ReadDetail(ref reader);
                     break;
                 default:
                     reader.Skip();
@@ -131,13 +132,14 @@ public static class ApplyDataReader
             }
         }
 
-        return new TxnApplyData(rawTxn, rs, rr, rc, ca, aca, caid, hgh, hgi, inner, apid, logs);
+        return new TxnApplyData(rawTxn, rs, rr, rc, ca, aca, caid, hgh, hgi, inner, apid, logs, malformed);
     }
 
-    private static (IReadOnlyList<TxnApplyData> Inner, IReadOnlyList<ReadOnlyMemory<byte>> Logs) ReadDetail(ref MessagePackReader reader)
+    private static (IReadOnlyList<TxnApplyData> Inner, IReadOnlyList<ReadOnlyMemory<byte>> Logs, int Malformed) ReadDetail(ref MessagePackReader reader)
     {
         IReadOnlyList<TxnApplyData> inner = [];
         IReadOnlyList<ReadOnlyMemory<byte>> logs = [];
+        var malformed = 0;
         var entries = reader.ReadMapHeader();
         for (var i = 0; i < entries; i++)
         {
@@ -147,7 +149,7 @@ public static class ApplyDataReader
                     inner = ReadTransactions(ref reader);
                     break;
                 case "lg":
-                    logs = ReadLogs(ref reader);
+                    (logs, malformed) = ReadLogs(ref reader);
                     break;
                 default:
                     reader.Skip();
@@ -155,27 +157,51 @@ public static class ApplyDataReader
             }
         }
 
-        return (inner, logs);
+        return (inner, logs, malformed);
     }
 
-    private static List<ReadOnlyMemory<byte>> ReadLogs(ref MessagePackReader reader)
+    private static (List<ReadOnlyMemory<byte>> Logs, int Malformed) ReadLogs(ref MessagePackReader reader)
     {
         var logs = new List<ReadOnlyMemory<byte>>();
+        var malformed = 0;
         if (reader.TryReadNil())
         {
-            return logs;
+            return (logs, malformed);
         }
 
         var count = reader.ReadArrayHeader();
         for (var i = 0; i < count; i++)
         {
-            // Only 100-byte logs can be ARC-200 transfers; keeping the others would allocate for nothing.
-            if (reader.ReadBytes() is { Length: Arc200TransferLogLength } log)
+            // Only 100-byte logs can be ARC-200 transfers; keeping the others would allocate for nothing. A log that starts with the
+            // transfer selector but has another length is a non-standard event: counted (a decoder error metric), not kept.
+            if (reader.ReadBytes() is not { } log)
+            {
+                continue;
+            }
+
+            if (log.Length == Arc200TransferLogLength)
             {
                 logs.Add(log.ToArray());
             }
+            else if (StartsWithTransferSelector(log))
+            {
+                malformed++;
+            }
         }
 
-        return logs;
+        return (logs, malformed);
+    }
+
+    private static bool StartsWithTransferSelector(System.Buffers.ReadOnlySequence<byte> log)
+    {
+        var selector = Normalization.Arc200Events.TransferSelector;
+        if (log.Length < selector.Length)
+        {
+            return false;
+        }
+
+        Span<byte> head = stackalloc byte[selector.Length];
+        log.Slice(0, selector.Length).CopyTo(head);
+        return head.SequenceEqual(selector);
     }
 }

@@ -15,6 +15,7 @@ namespace AvmBalanceIndexer.Indexing.Adapters;
 /// <param name="InnerTxns">Apply data of inner transactions in execution order.</param>
 /// <param name="CreatedApplicationId">Id of the application created by this application call (<c>apid</c> in the apply data), else zero.</param>
 /// <param name="Logs">Log messages the transaction emitted (<c>dt.lg</c>), in order.</param>
+/// <param name="MalformedArc200Logs">Logs that start with the ARC-200 transfer selector but are not 100 bytes long (not kept in <paramref name="Logs"/>).</param>
 public sealed record TxnApplyData(
     ReadOnlyMemory<byte> RawTxn,
     ulong SenderRewards,
@@ -27,4 +28,5 @@ public sealed record TxnApplyData(
     bool HasGenesisId,
     IReadOnlyList<TxnApplyData> InnerTxns,
     ulong CreatedApplicationId = 0,
-    IReadOnlyList<ReadOnlyMemory<byte>>? Logs = null);
+    IReadOnlyList<ReadOnlyMemory<byte>>? Logs = null,
+    int MalformedArc200Logs = 0);

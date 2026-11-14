@@ -22,6 +22,10 @@ their monitoring system.
   worker replica (`StatusSampler`), not computed in the hot path. A rising `avm.indexer.status_age_seconds` or `lag_rounds` is the
   signal to alert on; `avm.worker.is_leader` summed over replicas should be 1.
 - The Helm chart sets the endpoint and protocol from `telemetry.*`.
+- Work that happens in the hot path is measured where it happens, on the meter `AvmBalanceIndexer.Indexing` (`IndexingMetrics`, #170):
+  commit duration, rounds and effects per batch, block fetch duration and failures by source (`archival`, `relay`) and reason,
+  decoder errors (blocks that fail validation, malformed ARC-200 transfer logs), round failures (`transient`, `fatal`) and holder
+  scan duration by outcome. Tags take a few fixed values only: no hosts, rounds, token ids or messages.
 
 ## Consequences
 

@@ -74,6 +74,23 @@ public class IndexerWorkerTests : IDisposable
     }
 
     [Fact]
+    public async Task Retried_And_Fatal_Failures_Are_Counted_As_Round_Failures()
+    {
+        using var capture = new MetricsCapture();
+        var storage = NewStorage();
+        var adapter = new FlakyAdapter(Scenario.Adapter(), failuresBeforeSuccess: int.MaxValue);
+
+        var (worker, lifetime) = Create(storage, adapter, maxFailures: 3, metrics: capture.Metrics);
+        await worker.StartAsync(CancellationToken.None);
+        await lifetime.WaitForStopAsync();
+        await worker.StopAsync(CancellationToken.None);
+
+        // Two failures are retried, the third reaches the limit and stops the worker.
+        Assert.Equal(2, capture.Sum("avm.indexer.round_failures", ("reason", "transient")));
+        Assert.Equal(1, capture.Sum("avm.indexer.round_failures", ("reason", "fatal")));
+    }
+
+    [Fact]
     public async Task A_Run_Of_Failures_Without_Progress_Stops_The_Application()
     {
         var storage = NewStorage();
@@ -405,7 +422,7 @@ public class IndexerWorkerTests : IDisposable
 
     private static InMemoryChainStorage NewStorage() => new(new ChainContext(ChainId.AlgorandTestnet));
 
-    private static (IndexerWorker Worker, FakeLifetime Lifetime) Create(InMemoryChainStorage storage, IChainAdapter adapter, int maxFailures, WorkerHealth? health = null, ILogger<IndexerWorker>? logger = null)
+    private static (IndexerWorker Worker, FakeLifetime Lifetime) Create(InMemoryChainStorage storage, IChainAdapter adapter, int maxFailures, WorkerHealth? health = null, ILogger<IndexerWorker>? logger = null, AvmBalanceIndexer.Indexing.IndexingMetrics? metrics = null)
     {
         var options = Options.Create(new IndexerOptions
         {
@@ -418,7 +435,7 @@ public class IndexerWorkerTests : IDisposable
         });
         var indexer = new RoundIndexer(adapter, new AlgoEffectNormalizer(), storage, options, NullLogger<RoundIndexer>.Instance);
         var lifetime = new FakeLifetime();
-        return (new IndexerWorker(indexer, storage, new ChainContext(ChainId.AlgorandTestnet), options, lifetime, storage, storage, health ?? new WorkerHealth(), logger ?? NullLogger<IndexerWorker>.Instance), lifetime);
+        return (new IndexerWorker(indexer, storage, new ChainContext(ChainId.AlgorandTestnet), options, lifetime, storage, storage, health ?? new WorkerHealth(), logger ?? NullLogger<IndexerWorker>.Instance, metrics), lifetime);
     }
 
     private static async Task WaitForRoundAsync(InMemoryChainStorage storage, ulong round)

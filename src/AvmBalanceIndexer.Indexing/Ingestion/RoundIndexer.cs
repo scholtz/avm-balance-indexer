@@ -24,9 +24,11 @@ public sealed partial class RoundIndexer(
     IChainStorage storage,
     IOptions<IndexerOptions> options,
     ILogger<RoundIndexer> logger,
-    TimeProvider? timeProvider = null)
+    TimeProvider? timeProvider = null,
+    IndexingMetrics? metrics = null)
 {
     private readonly IndexerOptions _options = options.Value;
+    private readonly IndexingMetrics _metrics = metrics ?? IndexingMetrics.None;
     private readonly HashSet<ulong> _knownArc200 = [];
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
     private static readonly TimeSpan FlushGracePeriod = TimeSpan.FromSeconds(10);
@@ -302,6 +304,7 @@ public sealed partial class RoundIndexer(
         }
 
         var normalized = normalizer.NormalizeBlock(block, previousRewards, await LoadReferencedAssetsAsync(block, cancellationToken).ConfigureAwait(false));
+        _metrics.DecoderError(DecoderErrorKind.Arc200Log, normalized.MalformedArc200Logs);
         var round = await tracker.ApplyAsync(normalized.Deltas, cancellationToken).ConfigureAwait(false);
 
         // Token records are written before the round is published: a crash in between only leaves rows that replaying the
@@ -349,6 +352,7 @@ public sealed partial class RoundIndexer(
         }
 
         bool applied;
+        var started = _time.GetTimestamp();
         try
         {
             applied = await storage.WriteRoundsAsync(pending, cancellationToken).ConfigureAwait(false);
@@ -368,6 +372,7 @@ public sealed partial class RoundIndexer(
         }
 
         tracker.CommitStaged();
+        _metrics.CommitRecorded(_time.GetElapsedTime(started), pending.Count, pending.Sum(static round => round.Effects.Count));
         Interlocked.Add(ref _roundsCommitted, pending.Count);
         pending.Clear();
     }

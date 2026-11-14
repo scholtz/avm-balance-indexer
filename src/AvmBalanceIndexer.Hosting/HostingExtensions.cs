@@ -1,5 +1,6 @@
 using AvmBalanceIndexer.Domain.Chains;
 using AvmBalanceIndexer.Domain.Storage;
+using AvmBalanceIndexer.Indexing;
 using AvmBalanceIndexer.Indexing.Adapters;
 using AvmBalanceIndexer.Indexing.Ingestion;
 using AvmBalanceIndexer.Indexing.Normalization;
@@ -74,9 +75,11 @@ public static class HostingExtensions
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
+        services.TryAddSingleton<IndexingMetrics>();
         services.AddSingleton<IChainAdapter>(static provider => AlgorandChainFactory.Create(
             provider.GetRequiredService<IOptions<AlgorandChainOptions>>().Value,
-            provider.GetRequiredService<ILoggerFactory>()));
+            provider.GetRequiredService<ILoggerFactory>(),
+            provider.GetRequiredService<IndexingMetrics>()));
         services.AddSingleton<IEffectNormalizer, AlgoEffectNormalizer>();
         services.AddSingleton<RoundIndexer>();
         return services;
