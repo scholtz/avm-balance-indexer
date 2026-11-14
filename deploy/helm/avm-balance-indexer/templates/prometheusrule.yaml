@@ -10,6 +10,9 @@
 {{- if le (float64 $value) 0.0 }}
 {{- fail (printf "alerts.%s must be greater than zero" $name) }}
 {{- end }}
+{{- if and (has $name (list "lagRounds" "statusAgeSeconds")) (lt (float64 $value) 1.0) }}
+{{- fail (printf "alerts.%s counts whole rounds or seconds and must be at least 1" $name) }}
+{{- end }}
 {{- end }}
 {{- if ge (float64 .api5xxRatio) 1.0 }}
 {{- fail "alerts.api5xxRatio is a share of requests and must be below 1 (0.05 is 5 percent)" }}
@@ -54,10 +57,11 @@ spec:
           # Not while it catches up: a backfill or reindex starts millions of rounds behind and shrinks the lag for days. Catching up
           # means the lag is below its lowest value in the 30 minutes before the last 30, whatever the speed; a flat lag that only moves
           # up and down is not. Needs that history (the last line), so a release that has just started is not judged yet.
+          # Every replica reads the same published status; min takes the freshest, as a replica whose reads fail keeps its last value.
           expr: |
-            (max(avm_indexer_lag_rounds{ {{- $sel -}} }) > {{ $lag }}
-              unless max(avm_indexer_lag_rounds{ {{- $sel -}} }) < min(min_over_time(avm_indexer_lag_rounds{ {{- $sel -}} }[30m] offset 30m)))
-              and max(avm_indexer_lag_rounds{ {{- $sel -}} } offset 30m) >= 0
+            (min(avm_indexer_lag_rounds{ {{- $sel -}} }) > {{ $lag }}
+              unless min(avm_indexer_lag_rounds{ {{- $sel -}} }) < min(min_over_time(avm_indexer_lag_rounds{ {{- $sel -}} }[30m] offset 30m)))
+              and min(avm_indexer_lag_rounds{ {{- $sel -}} } offset 30m) >= 0
           for: 15m
           labels: { severity: warning, chain: {{ $.Values.chain | quote }} }
           annotations:
@@ -114,9 +118,11 @@ spec:
             description: "A bad node fleet, or blocks this indexer cannot read (a new protocol version)."
             runbook_url: {{ $runbook | quote }}
         - alert: AvmApiErrors
+          # Only with at least 6 requests a minute: on a quiet API one client's timeouts would be a large share.
           expr: |
-            sum(rate(http_server_request_duration_seconds_count{ {{- $api -}} ,http_response_status_code=~"5.."}[5m]))
-              / sum(rate(http_server_request_duration_seconds_count{ {{- $api -}} }[5m])) > {{ $ratio }}
+            (sum(rate(http_server_request_duration_seconds_count{ {{- $api -}} ,http_response_status_code=~"5.."}[5m]))
+              / sum(rate(http_server_request_duration_seconds_count{ {{- $api -}} }[5m])) > {{ $ratio }})
+              and sum(rate(http_server_request_duration_seconds_count{ {{- $api -}} }[5m])) > 0.1
           for: 10m
           labels: { severity: warning, chain: {{ $.Values.chain | quote }} }
           annotations:

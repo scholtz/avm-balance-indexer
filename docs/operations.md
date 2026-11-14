@@ -144,7 +144,7 @@ The lag alert needs 30 minutes of history, so a release that has just started is
 
 | Metric | Alert |
 |---|---|
-| `avm.indexer.lag_rounds` | Warn when it stays above a few hundred rounds and does not shrink (`AvmIndexerLagHigh`: above `alerts.lagRounds` for 15 minutes while not below its lowest value of the half hour before, so a backfill that keeps catching up, at any speed, does not alert). |
+| `avm.indexer.lag_rounds` | Warn when it stays above a few hundred rounds and does not shrink (`AvmIndexerLagHigh`: the freshest replica's value above `alerts.lagRounds` for 15 minutes while not below its lowest value of the half hour before, so a backfill that keeps catching up, at any speed, does not alert). |
 | `avm.indexer.status_age_seconds` | Critical above a few minutes: the writer has not updated the status (stuck, no leader, database away). |
 | `avm.indexer.indexed_round` | Should rise by about one round per few seconds on MainNet; flat means stuck. |
 | `avm.indexer.status_sample_failures` | Rises while a replica cannot read the database; the other `avm.indexer.*` gauges are then stale. |

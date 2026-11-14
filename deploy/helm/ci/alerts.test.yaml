@@ -143,6 +143,63 @@ tests:
     alert_rule_test:
       - { eval_time: 20m, alertname: AvmApiErrors, exp_alerts: [] }
 
+  - name: a replica whose status reads fail keeps its old lag; the freshest replica decides
+    interval: 1m
+    input_series:
+      - series: 'avm_indexer_lag_rounds{avm_chain="algorand-testnet",instance="stale"}'
+        values: '2000x60'
+      - series: 'avm_indexer_lag_rounds{avm_chain="algorand-testnet",instance="leader"}'
+        values: '5x60'
+    alert_rule_test:
+      - { eval_time: 50m, alertname: AvmIndexerLagHigh, exp_alerts: [] }
+
+  - name: a failover of 2 minutes is not "no writer"
+    interval: 1m
+    input_series:
+      - series: 'avm_worker_is_leader{avm_chain="algorand-testnet",instance="a"}'
+        values: '1x9 0x10'
+      - series: 'avm_worker_is_leader{avm_chain="algorand-testnet",instance="b"}'
+        values: '0x11 1x8'
+    alert_rule_test:
+      - { eval_time: 12m, alertname: AvmIndexerNoWriter, exp_alerts: [] }
+      - { eval_time: 20m, alertname: AvmIndexerNoWriter, exp_alerts: [] }
+
+  - name: 5 failed status reads in 10 minutes are not "more than 5"
+    interval: 1m
+    input_series:
+      - series: 'avm_indexer_status_sample_failures_total{avm_chain="algorand-testnet"}'
+        values: '0+0.5x30'
+    alert_rule_test:
+      - { eval_time: 25m, alertname: AvmIndexerStatusUnreadable, exp_alerts: [] }
+
+  - name: failures on a quiet API (under 6 requests a minute) are not an error rate
+    interval: 1m
+    input_series:
+      - series: 'http_server_request_duration_seconds_count{avm_chain="algorand-testnet",http_response_status_code="200"}'
+        values: '0+2x30'
+      - series: 'http_server_request_duration_seconds_count{avm_chain="algorand-testnet",http_response_status_code="503"}'
+        values: '0+1x30'
+    alert_rule_test:
+      - { eval_time: 20m, alertname: AvmApiErrors, exp_alerts: [] }
+
+  - name: slow health probes do not make the API slow
+    interval: 1m
+    input_series:
+      - series: 'http_server_request_duration_seconds_bucket{avm_chain="algorand-testnet",http_route="/v1/{chain}/status",le="1"}'
+        values: '0+100x30'
+      - series: 'http_server_request_duration_seconds_bucket{avm_chain="algorand-testnet",http_route="/v1/{chain}/status",le="10"}'
+        values: '0+100x30'
+      - series: 'http_server_request_duration_seconds_bucket{avm_chain="algorand-testnet",http_route="/v1/{chain}/status",le="+Inf"}'
+        values: '0+100x30'
+      - series: 'http_server_request_duration_seconds_bucket{avm_chain="algorand-testnet",http_route="/healthz/ready",le="1"}'
+        values: '0x30'
+      - series: 'http_server_request_duration_seconds_bucket{avm_chain="algorand-testnet",http_route="/healthz/ready",le="10"}'
+        values: '0+500x30'
+      - series: 'http_server_request_duration_seconds_bucket{avm_chain="algorand-testnet",http_route="/healthz/ready",le="+Inf"}'
+        values: '0+500x30'
+    alert_rule_test:
+      - { eval_time: 25m, alertname: AvmApiSlow, exp_alerts: [] }
+
   - name: a slow backfill is still catching up (the speed does not matter, only that the lag keeps falling)
     interval: 1m
     input_series:
