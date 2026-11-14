@@ -38,9 +38,19 @@ public sealed class MetricsCapture : IDisposable
     /// <summary>The current value of an observable instrument's series whose tags include all of <paramref name="tags"/> (0 when not reported).</summary>
     public double Observe(string instrument, params (string Key, string Value)[] tags)
     {
-        while (_measurements.TryDequeue(out _))
+        // Only this collection counts for the observed instrument (it reports its total every time); other instruments' measurements stay.
+        var others = new List<(string Name, double Value, IReadOnlyDictionary<string, object?> Tags)>();
+        while (_measurements.TryDequeue(out var measurement))
         {
-            // Only this collection counts: an observable instrument reports its total every time.
+            if (measurement.Name != instrument)
+            {
+                others.Add(measurement);
+            }
+        }
+
+        foreach (var measurement in others)
+        {
+            _measurements.Enqueue(measurement);
         }
 
         _listener.RecordObservableInstruments();

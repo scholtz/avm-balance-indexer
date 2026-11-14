@@ -158,10 +158,13 @@ jobs:
           # switch them off while the release still has its rule, the upgrade deletes it (and a rollback recreates it): same rights.
           rules=no
           if [ "$(yq '.alerts.enabled // false' "deploy/helm/values/$VALUES")" = true ]; then
-            if ! crds="$(kubectl api-resources --api-group=monitoring.coreos.com -o name 2>&1)"; then
-              echo "::error::Could not ask the cluster for the PrometheusRule CRD: $crds"; exit 1
+            # Discovery exits non-zero when any aggregated API group (metrics-server, ...) is down: the listing decides, the exit code only
+            # explains a missing entry.
+            crds="$(kubectl api-resources --api-group=monitoring.coreos.com -o name 2>&1)" && discovered=yes || discovered=no
+            if ! grep -q '^prometheusrules' <<< "$crds"; then
+              if [ "$discovered" = no ]; then echo "::error::Could not ask the cluster for the PrometheusRule CRD: $crds"; exit 1; fi
+              echo "::error::alerts.enabled needs the PrometheusRule CRD of the Prometheus Operator in the cluster"; exit 1
             fi
-            grep -q '^prometheusrules' <<< "$crds" || { echo "::error::alerts.enabled needs the PrometheusRule CRD of the Prometheus Operator in the cluster"; exit 1; }
             rules=yes
           elif can get prometheusrules.monitoring.coreos.com; then
             if probe="$(kubectl -n "$NAMESPACE" get prometheusrule "${RELEASE}-${CHAIN}-alerts" -o name 2>&1)"; then

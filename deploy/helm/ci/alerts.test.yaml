@@ -24,18 +24,18 @@ tests:
       - { eval_time: 30m, alertname: AvmIndexerNoWriter, exp_alerts: [] }
       - { eval_time: 30m, alertname: AvmIndexerTwoWriters, exp_alerts: [] }
 
-  - name: lag above the threshold for 15 minutes is a warning; another chain's lag is ignored
+  - name: lag above the threshold for 15 minutes (after 30 minutes of history) is a warning; another chain's lag is ignored
     interval: 1m
     input_series:
       - series: 'avm_indexer_lag_rounds{avm_chain="algorand-testnet"}'
-        values: '600x30'
+        values: '600x60'
       - series: 'avm_indexer_lag_rounds{avm_chain="voi"}'
-        values: '9000x30'
+        values: '9000x60'
       - series: 'avm_worker_is_leader{avm_chain="algorand-testnet"}'
-        values: '1x30'
+        values: '1x60'
     alert_rule_test:
-      - { eval_time: 10m, alertname: AvmIndexerLagHigh, exp_alerts: [] }
-      - eval_time: 20m
+      - { eval_time: 40m, alertname: AvmIndexerLagHigh, exp_alerts: [] }
+      - eval_time: 50m
         alertname: AvmIndexerLagHigh
         exp_alerts:
           - exp_labels: { severity: warning, chain: algorand-testnet }
@@ -52,7 +52,7 @@ tests:
         exp_alerts:
           - exp_labels: { severity: critical, chain: algorand-testnet }
 
-  - name: no leader, and no worker series at all, are both "no writer"
+  - name: no leader is "no writer"; another chain's leader does not count
     interval: 1m
     input_series:
       - series: 'avm_worker_is_leader{avm_chain="algorand-testnet"}'
@@ -116,6 +116,32 @@ tests:
         alertname: AvmIndexerNoWriter
         exp_alerts:
           - exp_labels: { severity: critical, chain: algorand-testnet }
+
+  - name: a release that has just started its backfill is not judged before it has 30 minutes of history
+    interval: 1m
+    input_series:
+      - series: 'avm_indexer_lag_rounds{avm_chain="algorand-testnet"}'
+        values: '5000000-1000x40'
+    alert_rule_test:
+      - { eval_time: 25m, alertname: AvmIndexerLagHigh, exp_alerts: [] }
+
+  - name: exactly 3 lost leases in an hour are not "more than 3"
+    interval: 1m
+    input_series:
+      - series: 'avm_worker_leases_lost_total{avm_chain="algorand-testnet"}'
+        values: '0 1 2 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3'
+    alert_rule_test:
+      - { eval_time: 60m, alertname: AvmIndexerLeaseFlapping, exp_alerts: [] }
+
+  - name: health probe failures alone are not API errors
+    interval: 1m
+    input_series:
+      - series: 'http_server_request_duration_seconds_count{avm_chain="algorand-testnet",http_route="/v1/{chain}/status",http_response_status_code="200"}'
+        values: '0+90x30'
+      - series: 'http_server_request_duration_seconds_count{avm_chain="algorand-testnet",http_route="/healthz/ready",http_response_status_code="503"}'
+        values: '0+50x30'
+    alert_rule_test:
+      - { eval_time: 20m, alertname: AvmApiErrors, exp_alerts: [] }
 
   - name: a backfill far behind but catching up is not a lag alert
     interval: 1m

@@ -139,7 +139,8 @@ to the matcher that identifies the release's series. The rules: `AvmIndexerLagHi
 `AvmIndexerTwoWriters`, `AvmIndexerLeaseFlapping`, `AvmIndexerStatusUnreadable`, `AvmIndexerDecoderErrors`, `AvmApiErrors`, `AvmApiSlow`
 (tested with `promtool` in CI, `deploy/helm/ci/alerts.test.yaml`). It needs exported metrics (`telemetry.otlpEndpoint` or `otlpMetricsEndpoint`;
 the chart refuses `alerts.enabled` without). Metrics ingested over OTLP carry no staleness markers, so a dead pod's last sample stays
-visible for Prometheus's lookback (5 minutes by default): a no-writer page can come up to that much later than its `for` delay. The metrics:
+visible for Prometheus's lookback (5 minutes by default): a no-writer or stalled page can come up to that much later than its `for` delay.
+The lag alert needs 30 minutes of history, so a release that has just started is not judged yet; the API rules leave out the `/healthz` probes. The metrics:
 
 | Metric | Alert |
 |---|---|
