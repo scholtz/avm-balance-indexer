@@ -67,7 +67,7 @@ public sealed class IndexingMetricsWiringTests : IDisposable
         await Assert.ThrowsAnyAsync<BlockFetchException>(() => fetcher.FetchBlockAsync(4, CancellationToken.None));
 
         Assert.Equal(2, _capture.Sum("avm.fetch.block.failures", ("reason", "invalid")));
-        Assert.Equal(1, _capture.Sum("avm.indexer.decoder_errors", ("kind", "block"))); // once for the failed fetch
+        Assert.Equal(1, _capture.Observe("avm.indexer.decoder_errors", ("kind", "block"))); // once for the failed fetch
     }
 
     [Fact]
@@ -125,7 +125,7 @@ public sealed class IndexingMetricsWiringTests : IDisposable
 
         await indexer.RunAsync(LastRound + 1, CancellationToken.None);
 
-        Assert.Equal(1, _capture.Sum("avm.indexer.decoder_errors", ("kind", "arc200_log")));
+        Assert.Equal(1, _capture.Observe("avm.indexer.decoder_errors", ("kind", "arc200_log")));
     }
 
     [Fact]

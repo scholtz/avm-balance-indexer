@@ -59,7 +59,8 @@ public sealed class IndexingMetrics : IDisposable
     private readonly Counter<long> _commitEffects;
     private readonly Histogram<double> _fetchDuration;
     private readonly Counter<long> _fetchFailures;
-    private readonly Counter<long> _decoderErrors;
+    private long _blockDecoderErrors;
+    private long _arc200LogDecoderErrors;
     private readonly Histogram<double> _scanDuration;
 
     /// <param name="meterName">Only tests pass another name, to observe one instance without the others running in parallel.</param>
@@ -70,7 +71,16 @@ public sealed class IndexingMetrics : IDisposable
         _commitEffects = _meter.CreateCounter<long>("avm.indexer.commit.effects", description: "Effects written with published rounds");
         _fetchDuration = _meter.CreateHistogram("avm.fetch.block.duration", "s", "Download and validation of a block that was served, by source (archival, relay); failed requests are in avm.fetch.block.failures", advice: SecondsBuckets);
         _fetchFailures = _meter.CreateCounter<long>("avm.fetch.block.failures", description: "Failed block requests to one host, by source and reason");
-        _decoderErrors = _meter.CreateCounter<long>("avm.indexer.decoder_errors", description: "Fetches that failed because no node served a block that validates, and malformed ARC-200 transfer logs of committed rounds");
+        // Observable, like the worker's counters: both series report their total (0 from the start) at every collection, so the first
+        // error is an increase an alert sees. A measurement of a plain counter made before the exporter starts listening would be lost.
+        _meter.CreateObservableCounter(
+            "avm.indexer.decoder_errors",
+            () => (IEnumerable<Measurement<long>>)
+            [
+                new(Interlocked.Read(ref _blockDecoderErrors), new KeyValuePair<string, object?>("kind", "block")),
+                new(Interlocked.Read(ref _arc200LogDecoderErrors), new KeyValuePair<string, object?>("kind", "arc200_log")),
+            ],
+            description: "Fetches that failed because no node served a block that validates, and malformed ARC-200 transfer logs of committed rounds");
         _scanDuration = _meter.CreateHistogram("avm.scan.duration", "s", "Holder scans from claim to end, by outcome", advice: SecondsBuckets);
     }
 
@@ -103,7 +113,7 @@ public sealed class IndexingMetrics : IDisposable
     {
         if (count > 0)
         {
-            _decoderErrors.Add(count, new KeyValuePair<string, object?>("kind", kind == DecoderErrorKind.Block ? "block" : "arc200_log"));
+            Interlocked.Add(ref kind == DecoderErrorKind.Block ? ref _blockDecoderErrors : ref _arc200LogDecoderErrors, count);
         }
     }
 

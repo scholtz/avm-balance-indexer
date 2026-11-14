@@ -131,15 +131,24 @@ is expected to be unaffected; this was not verified.
 
 ## Monitoring and alerts
 
-Set `telemetry.otlpEndpoint` (ADR 0011). The metrics:
+Set `telemetry.otlpEndpoint` (ADR 0011). With the Prometheus Operator, `alerts.enabled` in the release values installs the alerts below as a
+`PrometheusRule` (thresholds `alerts.lagRounds`, `statusAgeSeconds`, `api5xxRatio`, `apiP95Seconds`; extra labels for your Prometheus's rule
+selector in `alerts.labels`). Every rule selects its release by `avm_chain="<chain>"`: promote the OTLP resource attribute **avm.chain** to a
+label (Prometheus `otlp.promote_resource_attributes: [avm.chain]`, or the collector's resource-to-label processor), or set `alerts.selector`
+to the matcher that identifies the release's series. The rules: `AvmIndexerLagHigh`, `AvmIndexerStalled`, `AvmIndexerNoWriter`,
+`AvmIndexerTwoWriters`, `AvmIndexerLeaseFlapping`, `AvmIndexerStatusUnreadable`, `AvmIndexerDecoderErrors`, `AvmApiErrors`, `AvmApiSlow`
+(tested with `promtool` in CI, `deploy/helm/ci/alerts.test.yaml`). It needs exported metrics (`telemetry.otlpEndpoint` or `otlpMetricsEndpoint`;
+the chart refuses `alerts.enabled` without). Metrics ingested over OTLP carry no staleness markers, so a dead pod's last sample stays
+visible for Prometheus's lookback (5 minutes by default): a no-writer or stalled page can come up to that much later than its `for` delay.
+The lag alert needs 30 minutes of history, so a release that has just started is not judged yet; the API rules leave out the `/healthz` probes. The metrics:
 
 | Metric | Alert |
 |---|---|
-| `avm.indexer.lag_rounds` | Warn when it stays above a few hundred rounds at the tip; critical when it only grows. |
+| `avm.indexer.lag_rounds` | Warn when it stays above a few hundred rounds and does not shrink (`AvmIndexerLagHigh`: the freshest replica's value above `alerts.lagRounds` for 15 minutes while not below its lowest value of the half hour before, so a backfill that keeps catching up, at any speed, does not alert). |
 | `avm.indexer.status_age_seconds` | Critical above a few minutes: the writer has not updated the status (stuck, no leader, database away). |
 | `avm.indexer.indexed_round` | Should rise by about one round per few seconds on MainNet; flat means stuck. |
 | `avm.indexer.status_sample_failures` | Rises while a replica cannot read the database; the other `avm.indexer.*` gauges are then stale. |
-| `avm.worker.is_leader` | The sum over live replicas should be 1. Alert when it is 0 for longer than the lease time plus a minute. A sum of 2 can appear for a moment while an old pod's last sample is still visible: alert only when it lasts several minutes (`for: 5m`). |
+| `avm.worker.is_leader` | The sum over live replicas should be 1. Alert when it is 0 for longer than the lease time plus a minute (`AvmIndexerNoWriter`: at least 3 minutes, Cassandra lease TTL plus 60 s when longer; also when no worker exports at all). A sum of 2 can appear for a moment while an old pod's last sample is still visible: alert only when it lasts (`AvmIndexerTwoWriters`: 10 minutes). |
 | `avm.worker.leases_lost` | Alert on a rate above a few per hour (flapping connection or Cassandra timeouts). |
 | `avm.worker.leases_acquired` | A step of 1 is a failover; many in a short time is flapping. |
 | `avm.worker.transient_failures` | Sustained growth means the archive, algod or the database is unhealthy. |

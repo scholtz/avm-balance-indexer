@@ -156,6 +156,20 @@ telemetry:
   #   http://prometheus:9090/api/v1/otlp/v1/metrics
   otlpMetricsEndpoint: ""
 
+# Alert rules for the Prometheus Operator (a PrometheusRule; needs its CRD). Metrics reach Prometheus over OTLP
+# (telemetry.otlpMetricsEndpoint); promote the resource attribute avm.chain to a label (Prometheus: otlp.promote_resource_attributes)
+# so that the rules of each chain see only their release, or set selector to the label matcher that does.
+alerts:
+  enabled: false
+  # Extra labels so that your Prometheus selects the rule (for example release: kube-prometheus-stack).
+  labels: {}
+  # Label matcher of this release's series; empty means avm_chain="<chain>".
+  selector: ""
+  lagRounds: 500          # warning when the lag stays above this for 15 minutes
+  statusAgeSeconds: 300   # critical when the published status is older than this for 5 minutes
+  api5xxRatio: 0.05       # warning when more than this share of API requests fails for 10 minutes
+  apiP95Seconds: 5        # warning when the API p95 stays above this for 10 minutes
+
 algorand:
   # Algod node used for the latest round and the genesis allocations. Empty uses the chain public endpoint.
   algodUrl: ""

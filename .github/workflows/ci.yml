@@ -192,6 +192,8 @@ jobs:
           if t --set cassandra.embedded.autoSnapshotTtl= | grep -q 'auto_snapshot_ttl'; then
             echo "an empty autoSnapshotTtl must leave the Cassandra start command alone"; exit 1
           fi
+      - name: Alert rules render, are valid and fire as tested
+        run: deploy/helm/ci/alerts.sh
       - name: API autoscaling renders (opt-in, no replica count on the Deployment, invalid combinations refused)
         run: |
           t() { helm template ci deploy/helm/avm-balance-indexer -f deploy/helm/values/stage-testnet.yaml --set cassandra.embedded.node=ci-node "$@"; }

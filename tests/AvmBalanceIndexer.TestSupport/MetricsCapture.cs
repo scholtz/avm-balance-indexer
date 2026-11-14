@@ -35,6 +35,28 @@ public sealed class MetricsCapture : IDisposable
     public IReadOnlyList<(double Value, IReadOnlyDictionary<string, object?> Tags)> Of(string instrument) =>
         [.. _measurements.Where(m => m.Name == instrument).Select(static m => (m.Value, m.Tags))];
 
+    /// <summary>The current value of an observable instrument's series whose tags include all of <paramref name="tags"/> (0 when not reported).</summary>
+    public double Observe(string instrument, params (string Key, string Value)[] tags)
+    {
+        // Only this collection counts for the observed instrument (it reports its total every time); other instruments' measurements stay.
+        var others = new List<(string Name, double Value, IReadOnlyDictionary<string, object?> Tags)>();
+        while (_measurements.TryDequeue(out var measurement))
+        {
+            if (measurement.Name != instrument)
+            {
+                others.Add(measurement);
+            }
+        }
+
+        foreach (var measurement in others)
+        {
+            _measurements.Enqueue(measurement);
+        }
+
+        _listener.RecordObservableInstruments();
+        return Sum(instrument, tags);
+    }
+
     /// <summary>The sum of one instrument's measurements whose tags include all of <paramref name="tags"/>.</summary>
     public double Sum(string instrument, params (string Key, string Value)[] tags) =>
         Of(instrument).Where(m => tags.All(t => m.Tags.TryGetValue(t.Key, out var v) && (string?)v == t.Value)).Sum(static m => m.Value);
