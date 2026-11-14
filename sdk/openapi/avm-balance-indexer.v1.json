@@ -1224,7 +1224,7 @@
           },
           "synchronousTimeoutSeconds": {
             "type": "integer",
-            "description": "Longest a data request may take before it is answered with 504.",
+            "description": "Longest a synchronous query can run: the smaller of the request timeout (answered with 504) and the storage read timeout (answered with\r\n503). A query that needs longer belongs in an asynchronous scan.",
             "format": "int32"
           },
           "asynchronousScans": {
@@ -1236,7 +1236,8 @@
             "description": "How many scans may be pending or running at once.",
             "format": "int32"
           }
-        }
+        },
+        "description": "How holders at a round are computed, and the limits a synchronous request runs into."
       },
       "HistoryResponse": {
         "required": [
@@ -1496,10 +1497,7 @@
           "indexedRound",
           "targetRound",
           "lag",
-          "updatedAt",
-          "health",
-          "statusAgeSeconds",
-          "historicalQueries"
+          "updatedAt"
         ],
         "type": "object",
         "properties": {

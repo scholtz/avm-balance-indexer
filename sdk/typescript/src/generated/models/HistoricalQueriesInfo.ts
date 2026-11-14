@@ -14,7 +14,7 @@
 
 import { mapValues } from '../runtime.js';
 /**
- * 
+ * How holders at a round are computed, and the limits a synchronous request runs into.
  * @export
  * @interface HistoricalQueriesInfo
  */
@@ -24,7 +24,8 @@ export interface HistoricalQueriesInfo {
      */
     mode: string;
     /**
-     * Longest a data request may take before it is answered with 504.
+     * Longest a synchronous query can run: the smaller of the request timeout (answered with 504) and the storage read timeout (answered with
+     * 503). A query that needs longer belongs in an asynchronous scan.
      */
     synchronousTimeoutSeconds: number;
     /**

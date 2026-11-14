@@ -1776,6 +1776,9 @@ namespace AvmBalanceIndexer.Client.Generated
 
     }
 
+    /// <summary>
+    /// How holders at a round are computed, and the limits a synchronous request runs into.
+    /// </summary>
     [System.CodeDom.Compiler.GeneratedCode("NJsonSchema", "14.7.1.0 (NJsonSchema v11.6.1.0 (Newtonsoft.Json v13.0.0.0))")]
     public partial class HistoricalQueriesInfo
     {
@@ -1788,7 +1791,8 @@ namespace AvmBalanceIndexer.Client.Generated
         public string Mode { get; set; } = default!;
 
         /// <summary>
-        /// Longest a data request may take before it is answered with 504.
+        /// Longest a synchronous query can run: the smaller of the request timeout (answered with 504) and the storage read timeout (answered with
+        /// <br/>503). A query that needs longer belongs in an asynchronous scan.
         /// </summary>
         [System.Text.Json.Serialization.JsonPropertyName("synchronousTimeoutSeconds")]
         public int SynchronousTimeoutSeconds { get; set; } = default!;
@@ -2135,7 +2139,6 @@ namespace AvmBalanceIndexer.Client.Generated
         /// The API's view of ingestion: `NotStarted`, `Healthy`, or `Stalled` when the writer has not updated the status for longer than `Api:StalledAfterSeconds`.
         /// </summary>
         [System.Text.Json.Serialization.JsonPropertyName("health")]
-        [System.ComponentModel.DataAnnotations.Required(AllowEmptyStrings = true)]
         public string Health { get; set; } = default!;
 
         /// <summary>
@@ -2145,8 +2148,7 @@ namespace AvmBalanceIndexer.Client.Generated
         public long? StatusAgeSeconds { get; set; } = default!;
 
         [System.Text.Json.Serialization.JsonPropertyName("historicalQueries")]
-        [System.ComponentModel.DataAnnotations.Required]
-        public HistoricalQueriesInfo HistoricalQueries { get; set; } = new HistoricalQueriesInfo();
+        public HistoricalQueriesInfo HistoricalQueries { get; set; } = default!;
 
         private System.Collections.Generic.IDictionary<string, object>? _additionalProperties;
 

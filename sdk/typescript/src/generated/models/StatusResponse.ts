@@ -58,15 +58,15 @@ export interface StatusResponse {
     /**
      * The API's view of ingestion: `NotStarted`, `Healthy`, or `Stalled` when the writer has not updated the status for longer than `Api:StalledAfterSeconds`.
      */
-    health: string;
+    health?: string;
     /**
      * Whole seconds since the writer last updated the status; never negative, null before the first round.
      */
-    statusAgeSeconds: number | null;
+    statusAgeSeconds?: number | null;
     /**
      * 
      */
-    historicalQueries: HistoricalQueriesInfo;
+    historicalQueries?: HistoricalQueriesInfo;
 }
 
 /**
@@ -80,9 +80,6 @@ export function instanceOfStatusResponse(value: object): value is StatusResponse
     if (!('targetRound' in value) || value['targetRound'] === undefined) return false;
     if (!('lag' in value) || value['lag'] === undefined) return false;
     if (!('updatedAt' in value) || value['updatedAt'] === undefined) return false;
-    if (!('health' in value) || value['health'] === undefined) return false;
-    if (!('statusAgeSeconds' in value) || value['statusAgeSeconds'] === undefined) return false;
-    if (!('historicalQueries' in value) || value['historicalQueries'] === undefined) return false;
     return true;
 }
 
@@ -103,9 +100,9 @@ export function StatusResponseFromJSONTyped(json: any, ignoreDiscriminator: bool
         'targetRound': json['targetRound'],
         'lag': json['lag'],
         'updatedAt': (json['updatedAt'] == null ? null : parseDateTime(json['updatedAt'])),
-        'health': json['health'],
-        'statusAgeSeconds': json['statusAgeSeconds'],
-        'historicalQueries': HistoricalQueriesInfoFromJSON(json['historicalQueries']),
+        'health': json['health'] == null ? undefined : json['health'],
+        'statusAgeSeconds': json['statusAgeSeconds'] === undefined ? undefined : json['statusAgeSeconds'] === null ? null : json['statusAgeSeconds'],
+        'historicalQueries': json['historicalQueries'] == null ? undefined : HistoricalQueriesInfoFromJSON(json['historicalQueries']),
     };
 }
 

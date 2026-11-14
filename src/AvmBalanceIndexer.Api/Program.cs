@@ -244,7 +244,11 @@ v1.MapGet(
     {
         var status = await storage.GetAsync(chain.Chain, cancellationToken);
         // ApiOptions is read and validated once at start (the `api` local above), like the rate limit and the timeout it reports.
-        var queries = new HistoricalQueriesInfo("EffectAggregation", api.RequestTimeoutSeconds, true, scanOptions.Value.MaxActive);
+        // A synchronous query also ends when the storage read times out (503), which by default comes first.
+        var readTimeout = options.Value.Provider == StorageProvider.Cassandra
+            ? options.Value.Cassandra.ReadTimeoutSeconds
+            : options.Value.PostgreSql.ReadTimeoutSeconds;
+        var queries = new HistoricalQueriesInfo("EffectAggregation", Math.Min(api.RequestTimeoutSeconds, readTimeout), true, scanOptions.Value.MaxActive);
         if (status is null)
         {
             return Results.Ok(new StatusResponse(chain.Chain, options.Value.Provider.ToString(), "NotStarted", null, null, null, null, "NotStarted", null, queries));

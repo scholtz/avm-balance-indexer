@@ -124,6 +124,7 @@ def test_chain_is_bound_into_the_path_and_headers_are_sent(server):
     assert status.indexed_round == 10
     assert status.health == "Healthy"
     assert status.historical_queries.mode == "EffectAggregation"
+
     request = server.requests[0]
     assert request["path"] == "/v1/voi/status"
     assert request["headers"]["X-Api-Key"] == "k"
@@ -448,3 +449,10 @@ def test_retry_after_is_found_whatever_the_header_case():
         error = ApiException(status=429, reason="Too Many Requests", body='{"error": "slow down"}')
         error.headers = {name: "7"}  # a plain dict, as a mocked transport or another generator version may hand over
         assert _to_api_error(error).retry_after_seconds == 7
+
+
+def test_status_of_a_server_without_health_fields_is_still_read(server):
+    server.handler = lambda r: (200, {"chain": "voi", "provider": "Cassandra", "state": "Following", "indexedRound": 10, "targetRound": 11, "lag": 1, "updatedAt": "2026-10-14T10:00:00Z"}, {})
+    status = AvmBalanceIndexer.voi(base_url=server.url).status()
+    assert status.indexed_round == 10
+    assert status.health is None

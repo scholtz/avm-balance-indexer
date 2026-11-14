@@ -144,7 +144,11 @@ public sealed partial class RoundIndexer(
 
                 // At the tip the archival nodes may not have the newest block yet; wait and ask again. A block far behind the
                 // tip that nobody serves is a stall, not a wait.
-                await WaitIfJustMissingAsync(ex, cancellationToken).ConfigureAwait(false);
+                var tip = await WaitIfJustMissingAsync(ex, cancellationToken).ConfigureAwait(false);
+
+                // A writer that waits is alive: keep the published timestamp moving like an idle one, or the status reads as stalled.
+                status = status with { TargetRound = tip, UpdatedAt = _time.GetUtcNow() };
+                await storage.UpdateProgressAsync(status, cancellationToken).ConfigureAwait(false);
             }
 
             await FlushAsync(tracker, pending, cancellationToken).ConfigureAwait(false);
@@ -167,7 +171,8 @@ public sealed partial class RoundIndexer(
     /// Waits one poll interval when the missing block is within propagation distance of the chain tip; otherwise rethrows so
     /// that the worker backs off, logs and eventually stops instead of polling a hole in the archive forever.
     /// </summary>
-    private async Task WaitIfJustMissingAsync(BlockNotAvailableException missing, CancellationToken cancellationToken)
+    /// <summary>Waits when the missing block is just behind the tip (and rethrows otherwise); returns the latest round it saw.</summary>
+    private async Task<ulong> WaitIfJustMissingAsync(BlockNotAvailableException missing, CancellationToken cancellationToken)
     {
         var latest = await adapter.GetLatestRoundAsync(cancellationToken).ConfigureAwait(false);
         if (missing.Round + (ulong)_options.FollowingThresholdRounds <= latest)
@@ -177,6 +182,7 @@ public sealed partial class RoundIndexer(
 
         LogWaitingForBlock(logger, missing.Round);
         await Task.Delay(_options.FollowPollInterval, _time, cancellationToken).ConfigureAwait(false);
+        return latest;
     }
 
     private async Task<(ChainStatus Status, RewardsState Rewards)> BootstrapGenesisAsync(ulong? stopAfterRound, CancellationToken cancellationToken)

@@ -91,7 +91,7 @@ describe("requests", () => {
 
     assert.equal(status.indexedRound, 10);
     assert.equal(status.health, "Healthy");
-    assert.equal(status.historicalQueries.mode, "EffectAggregation");
+    assert.equal(status.historicalQueries?.mode, "EffectAggregation");
     assert.equal(requests[0]?.url, "/v1/voi/status");
     assert.equal(requests[0]?.headers["x-api-key"], "k");
   });

@@ -121,7 +121,8 @@ pub mod types {
         }
     }
 
-    ///`HistoricalQueriesInfo`
+    ///How holders at a round are computed, and the limits a synchronous
+    /// request runs into.
     #[derive(:: serde :: Deserialize, :: serde :: Serialize, Clone, Debug)]
     pub struct HistoricalQueriesInfo {
         ///Whether holder scans can be started (`POST .../holders/scans`) for
@@ -134,7 +135,10 @@ pub mod types {
         ///Always `EffectAggregation`: holders at a round are computed by
         /// aggregating token effects, there are no snapshots.
         pub mode: ::std::string::String,
-        ///Longest a data request may take before it is answered with 504.
+        ///Longest a synchronous query can run: the smaller of the request
+        /// timeout (answered with 504) and the storage read timeout (answered
+        /// with 503). A query that needs longer belongs in an
+        /// asynchronous scan.
         #[serde(rename = "synchronousTimeoutSeconds")]
         pub synchronous_timeout_seconds: i32,
     }
@@ -317,9 +321,13 @@ pub mod types {
         ///The API's view of ingestion: `NotStarted`, `Healthy`, or `Stalled`
         /// when the writer has not updated the status for longer than
         /// `Api:StalledAfterSeconds`.
-        pub health: ::std::string::String,
-        #[serde(rename = "historicalQueries")]
-        pub historical_queries: HistoricalQueriesInfo,
+        #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+        pub health: ::std::option::Option<::std::string::String>,
+        #[serde(
+            rename = "historicalQueries",
+            skip_serializing_if = "::std::option::Option::is_none"
+        )]
+        pub historical_queries: ::std::option::Option<HistoricalQueriesInfo>,
         ///The newest round the API serves; null before the first round.
         #[serde(
             rename = "indexedRound",
@@ -338,7 +346,7 @@ pub mod types {
         /// negative, null before the first round.
         #[serde(
             rename = "statusAgeSeconds",
-            deserialize_with = "::std::option::Option::deserialize"
+            skip_serializing_if = "::std::option::Option::is_none"
         )]
         pub status_age_seconds: ::std::option::Option<i64>,
         ///The newest round of the chain as last seen by the writer.
@@ -1720,9 +1728,14 @@ pub mod types {
         #[derive(Clone, Debug)]
         pub struct StatusResponse {
             chain: ::std::result::Result<::std::string::String, ::std::string::String>,
-            health: ::std::result::Result<::std::string::String, ::std::string::String>,
-            historical_queries:
-                ::std::result::Result<super::HistoricalQueriesInfo, ::std::string::String>,
+            health: ::std::result::Result<
+                ::std::option::Option<::std::string::String>,
+                ::std::string::String,
+            >,
+            historical_queries: ::std::result::Result<
+                ::std::option::Option<super::HistoricalQueriesInfo>,
+                ::std::string::String,
+            >,
             indexed_round: ::std::result::Result<::std::option::Option<u64>, ::std::string::String>,
             lag: ::std::result::Result<::std::option::Option<u64>, ::std::string::String>,
             provider: ::std::result::Result<::std::string::String, ::std::string::String>,
@@ -1740,13 +1753,13 @@ pub mod types {
             fn default() -> Self {
                 Self {
                     chain: Err("no value supplied for chain".to_string()),
-                    health: Err("no value supplied for health".to_string()),
-                    historical_queries: Err("no value supplied for historical_queries".to_string()),
+                    health: Ok(Default::default()),
+                    historical_queries: Ok(Default::default()),
                     indexed_round: Err("no value supplied for indexed_round".to_string()),
                     lag: Err("no value supplied for lag".to_string()),
                     provider: Err("no value supplied for provider".to_string()),
                     state: Err("no value supplied for state".to_string()),
-                    status_age_seconds: Err("no value supplied for status_age_seconds".to_string()),
+                    status_age_seconds: Ok(Default::default()),
                     target_round: Err("no value supplied for target_round".to_string()),
                     updated_at: Err("no value supplied for updated_at".to_string()),
                 }
@@ -1766,7 +1779,7 @@ pub mod types {
             }
             pub fn health<T>(mut self, value: T) -> Self
             where
-                T: ::std::convert::TryInto<::std::string::String>,
+                T: ::std::convert::TryInto<::std::option::Option<::std::string::String>>,
                 T::Error: ::std::fmt::Display,
             {
                 self.health = value
@@ -1776,7 +1789,7 @@ pub mod types {
             }
             pub fn historical_queries<T>(mut self, value: T) -> Self
             where
-                T: ::std::convert::TryInto<super::HistoricalQueriesInfo>,
+                T: ::std::convert::TryInto<::std::option::Option<super::HistoricalQueriesInfo>>,
                 T::Error: ::std::fmt::Display,
             {
                 self.historical_queries = value.try_into().map_err(|e| {

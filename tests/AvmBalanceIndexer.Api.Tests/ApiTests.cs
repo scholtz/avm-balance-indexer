@@ -115,16 +115,26 @@ public sealed class ApiTests : IDisposable
             new ChainStatus(ChainId.AlgorandTestnet, 0, TestChain.FakeHash(0), 0, IngestionState.Following, Now.AddSeconds(-30)),
             [],
             CancellationToken.None);
-        using var client = CreateClient(null, ("Api:StalledAfterSeconds", "20"), ("Api:RequestTimeoutSeconds", "45"), ("Scans:MaxActive", "7"));
+        using var client = CreateClient(null, ("Api:StalledAfterSeconds", "20"), ("Api:RequestTimeoutSeconds", "45"), ("Storage:PostgreSql:ReadTimeoutSeconds", "50"), ("Scans:MaxActive", "7"));
 
         var status = await client.GetFromJsonAsync<JsonElement>(new Uri("/v1/algorand-testnet/status", UriKind.Relative));
 
         Assert.Equal("Stalled", status.GetProperty("health").GetString());
         var queries = status.GetProperty("historicalQueries");
         Assert.Equal("EffectAggregation", queries.GetProperty("mode").GetString());
-        Assert.Equal(45, queries.GetProperty("synchronousTimeoutSeconds").GetInt32());
+        Assert.Equal(45, queries.GetProperty("synchronousTimeoutSeconds").GetInt32()); // the request timeout ends it before the read timeout
         Assert.True(queries.GetProperty("asynchronousScans").GetBoolean());
         Assert.Equal(7, queries.GetProperty("maxActiveScans").GetInt32());
+    }
+
+    [Fact]
+    public async Task The_Synchronous_Limit_Is_The_Storage_Read_Timeout_When_That_Comes_First()
+    {
+        using var client = CreateClient(null, ("Api:RequestTimeoutSeconds", "60"), ("Storage:PostgreSql:ReadTimeoutSeconds", "30"));
+
+        var status = await client.GetFromJsonAsync<JsonElement>(new Uri("/v1/algorand-testnet/status", UriKind.Relative));
+
+        Assert.Equal(30, status.GetProperty("historicalQueries").GetProperty("synchronousTimeoutSeconds").GetInt32());
     }
 
     [Theory]

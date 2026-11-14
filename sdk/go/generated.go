@@ -90,7 +90,7 @@ type ErrorResponse struct {
 	Error string `json:"error"`
 }
 
-// HistoricalQueriesInfo defines model for HistoricalQueriesInfo.
+// HistoricalQueriesInfo How holders at a round are computed, and the limits a synchronous request runs into.
 type HistoricalQueriesInfo struct {
 	// AsynchronousScans Whether holder scans can be started (`POST .../holders/scans`) for queries too large to answer synchronously.
 	AsynchronousScans bool `json:"asynchronousScans"`
@@ -101,7 +101,8 @@ type HistoricalQueriesInfo struct {
 	// Mode Always `EffectAggregation`: holders at a round are computed by aggregating token effects, there are no snapshots.
 	Mode string `json:"mode"`
 
-	// SynchronousTimeoutSeconds Longest a data request may take before it is answered with 504.
+	// SynchronousTimeoutSeconds Longest a synchronous query can run: the smaller of the request timeout (answered with 504) and the storage read timeout (answered with
+	// 503). A query that needs longer belongs in an asynchronous scan.
 	SynchronousTimeoutSeconds int32 `json:"synchronousTimeoutSeconds"`
 }
 
@@ -184,8 +185,10 @@ type StatusResponse struct {
 	Chain string `json:"chain"`
 
 	// Health The API's view of ingestion: `NotStarted`, `Healthy`, or `Stalled` when the writer has not updated the status for longer than `Api:StalledAfterSeconds`.
-	Health            string                `json:"health"`
-	HistoricalQueries HistoricalQueriesInfo `json:"historicalQueries"`
+	Health *string `json:"health,omitempty"`
+
+	// HistoricalQueries How holders at a round are computed, and the limits a synchronous request runs into.
+	HistoricalQueries *HistoricalQueriesInfo `json:"historicalQueries,omitempty"`
 
 	// IndexedRound The newest round the API serves; null before the first round.
 	IndexedRound *uint64 `json:"indexedRound"`
@@ -200,7 +203,7 @@ type StatusResponse struct {
 	State string `json:"state"`
 
 	// StatusAgeSeconds Whole seconds since the writer last updated the status; never negative, null before the first round.
-	StatusAgeSeconds *int64 `json:"statusAgeSeconds"`
+	StatusAgeSeconds *int64 `json:"statusAgeSeconds,omitempty"`
 
 	// TargetRound The newest round of the chain as last seen by the writer.
 	TargetRound *uint64 `json:"targetRound"`

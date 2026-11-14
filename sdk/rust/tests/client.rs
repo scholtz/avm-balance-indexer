@@ -90,8 +90,8 @@ async fn the_chain_is_in_the_path_and_headers_are_sent() {
     let status = indexer.status().await.unwrap();
 
     assert_eq!(status.indexed_round, Some(10));
-    assert_eq!(status.health, "Healthy");
-    assert_eq!(status.historical_queries.mode, "EffectAggregation");
+    assert_eq!(status.health.as_deref(), Some("Healthy"));
+    assert_eq!(status.historical_queries.as_ref().map(|q| q.mode.as_str()), Some("EffectAggregation"));
 }
 
 #[tokio::test]

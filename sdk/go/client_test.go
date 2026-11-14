@@ -98,7 +98,7 @@ func TestCustomBaseURLKeepsItsPrefix(t *testing.T) {
 	if status.IndexedRound == nil || *status.IndexedRound != 10 {
 		t.Errorf("unexpected status %+v", status)
 	}
-	if status.Health != "Healthy" || status.HistoricalQueries.Mode != "EffectAggregation" {
+	if status.Health == nil || *status.Health != "Healthy" || status.HistoricalQueries == nil || status.HistoricalQueries.Mode != "EffectAggregation" {
 		t.Errorf("unexpected health or historical queries %+v", status)
 	}
 	got := (*requests)[0]

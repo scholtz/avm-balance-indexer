@@ -19,12 +19,19 @@ public sealed record StatusResponse(
     ulong? TargetRound,
     ulong? Lag,
     DateTimeOffset? UpdatedAt,
-    string Health,
-    long? StatusAgeSeconds,
-    HistoricalQueriesInfo HistoricalQueries);
+    string Health = null!,
+    long? StatusAgeSeconds = null,
+    HistoricalQueriesInfo HistoricalQueries = null!);
 
+// The three fields added in #168 have defaults so that they are optional in the OpenAPI document: a client generated from it must
+// still read the status of a server that predates them. This server always sends them.
+
+/// <summary>How holders at a round are computed, and the limits a synchronous request runs into.</summary>
 /// <param name="Mode">Always <c>EffectAggregation</c>: holders at a round are computed by aggregating token effects, there are no snapshots.</param>
-/// <param name="SynchronousTimeoutSeconds">Longest a data request may take before it is answered with 504.</param>
+/// <param name="SynchronousTimeoutSeconds">
+/// Longest a synchronous query can run: the smaller of the request timeout (answered with 504) and the storage read timeout (answered with
+/// 503). A query that needs longer belongs in an asynchronous scan.
+/// </param>
 /// <param name="AsynchronousScans">Whether holder scans can be started (<c>POST .../holders/scans</c>) for queries too large to answer synchronously.</param>
 /// <param name="MaxActiveScans">How many scans may be pending or running at once.</param>
 public sealed record HistoricalQueriesInfo(string Mode, int SynchronousTimeoutSeconds, bool AsynchronousScans, int MaxActiveScans);

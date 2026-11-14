@@ -36,9 +36,9 @@ class StatusResponse(BaseModel):
     target_round: Optional[StrictInt] = Field(description="The newest round of the chain as last seen by the writer.", alias="targetRound")
     lag: Optional[StrictInt] = Field(description="Rounds between the target round and the indexed round.")
     updated_at: Optional[datetime] = Field(description="When the writer last updated the status.", alias="updatedAt")
-    health: StrictStr = Field(description="The API's view of ingestion: `NotStarted`, `Healthy`, or `Stalled` when the writer has not updated the status for longer than `Api:StalledAfterSeconds`.")
-    status_age_seconds: Optional[StrictInt] = Field(description="Whole seconds since the writer last updated the status; never negative, null before the first round.", alias="statusAgeSeconds")
-    historical_queries: HistoricalQueriesInfo = Field(alias="historicalQueries")
+    health: Optional[StrictStr] = Field(default=None, description="The API's view of ingestion: `NotStarted`, `Healthy`, or `Stalled` when the writer has not updated the status for longer than `Api:StalledAfterSeconds`.")
+    status_age_seconds: Optional[StrictInt] = Field(default=None, description="Whole seconds since the writer last updated the status; never negative, null before the first round.", alias="statusAgeSeconds")
+    historical_queries: Optional[HistoricalQueriesInfo] = Field(default=None, alias="historicalQueries")
     __properties: ClassVar[List[str]] = ["chain", "provider", "state", "indexedRound", "targetRound", "lag", "updatedAt", "health", "statusAgeSeconds", "historicalQueries"]
 
     model_config = ConfigDict(

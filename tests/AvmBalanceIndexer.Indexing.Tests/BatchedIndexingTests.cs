@@ -58,6 +58,35 @@ public class BatchedIndexingTests
     }
 
     [Fact]
+    public async Task Waiting_For_A_Block_The_Nodes_Do_Not_Serve_Yet_Keeps_The_Published_Timestamp_Moving()
+    {
+        // The API reports a status that stops moving as stalled (#168); a writer waiting at the tip is alive and must say so.
+        var storage = new RecordingStorage(new ChainContext(ChainId.AlgorandTestnet));
+        var adapter = Adapter();
+        adapter.Latest = LastRound + 1; // the chain is one round ahead of what any node serves
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+
+        var run = Indexer(storage, adapter, new IndexerOptions { FetchConcurrency = 2, FollowPollInterval = TimeSpan.FromMilliseconds(10) }).RunAsync(null, stop.Token);
+        while ((await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!.IndexedRound < LastRound)
+        {
+            await Task.Delay(10, stop.Token);
+        }
+
+        var caughtUp = (await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!;
+        while ((await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!.UpdatedAt <= caughtUp.UpdatedAt)
+        {
+            await Task.Delay(10, stop.Token);
+        }
+
+        var waiting = (await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!;
+        await stop.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+
+        Assert.Equal(LastRound, waiting.IndexedRound);
+        Assert.Equal(LastRound + 1, waiting.TargetRound);
+    }
+
+    [Fact]
     public async Task A_Backfill_Pass_Gives_The_Fetcher_No_Tip_Because_The_Tip_Moves_On_During_It()
     {
         var storage = new RecordingStorage(new ChainContext(ChainId.AlgorandTestnet));
