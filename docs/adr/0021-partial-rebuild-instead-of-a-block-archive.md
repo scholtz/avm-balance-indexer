@@ -9,7 +9,7 @@ A fix in the normalizer or the balance tracker only changes rounds indexed after
 in Cassandra (ADR 0003), so until now a fix meant a rebuild from genesis into a new keyspace: TestNet took a month after #115.
 The product description asked for an own archive of raw blocks to make such rebuilds cheaper (#174). The owner rejected that:
 the chain's archival nodes already are the immutable source, and a second copy next to them is storage and operations for
-nothing. What is wanted is that a fix rarely needs a rebuild, and never one from genesis.
+nothing. What is wanted is that a fix rarely needs a rebuild, and then only of the rounds from the first bad one.
 
 Two facts make that possible:
 
@@ -30,6 +30,9 @@ Two facts make that possible:
     recomputed for the accounts and tokens those rows touched, touched-account rows first seen after R are deleted (and
     `last_round` recomputed), token records created after R are deleted and a destruction after R undone, scan jobs for
     rounds after R are deleted, the status is set to R. Each request carries an id and runs once.
+- **A request that was carried out does nothing.** The request stays in the values across restarts, so the first check is
+  whether the target already has a published round (Cassandra) or the request id is recorded (PostgreSQL); then nothing is
+  read or written, also when the source no longer exists.
 - **Preconditions, checked before anything is written.** The source holds this chain; R is not beyond the source's published
   round (rows of an unpublished round can exist, ADR 0003, and must never be taken over); the target is empty, or is the
   unfinished copy of the same source and the same R (the request is stored in the target; a copy started with another R is
@@ -38,8 +41,11 @@ Two facts make that possible:
   comes from a fetch. Block R + 1 is fetched as well and must name that hash as its previous block; only then is the status row
   written. The first indexed round checks its previous hash against the stored one as always.
 - **Readers.** The copy is invisible until its status row exists, and reads of a keyspace without one fail. Therefore the API
-  does not move with the worker: the values give the API its own keyspace setting, which stays on the old keyspace (frozen at
-  its last round, consistent, with a growing lag) until the new one follows the chain, and is switched in a second change. In
+  does not move with the worker: the values give the API its own keyspace setting, which stays on the old keyspace until the
+  new one follows the chain, and is switched in a second change. The old keyspace is frozen: consistent up to its last round,
+  but its status row is no longer updated, so the status keeps its last round and lag while `updatedAt` ages (the status
+  reports that as stalled, #168). Holder scans are executed by the worker, which is on the new keyspace: while the API is on
+  the old one it refuses to create scans instead of accepting jobs nobody runs. In
   PostgreSQL readers see the state before the rewind until the transaction commits; afterwards `indexedRound` is R and
   requests for later rounds are refused as not indexed until the replay passes them.
 - **The writer's memory.** The rewind or copy runs after the writer lease is taken and before the indexer is seeded for that
@@ -51,8 +57,11 @@ Two facts make that possible:
     every round while following the tip, and a sample of rounds during backfill and during the replay after a partial rebuild,
     as far as the node serves deltas for them. The audit runs after publication: it detects, it does not prevent. A node that
     is unavailable, rate-limited or answers something unreadable is a skipped round, never a failure. A disagreement stops the
-    writer at that round (configurable per release), because every further round would have to be rebuilt.
+    writer at that round (configurable per release), because every further round would have to be rebuilt. The stop is
+    recorded in the database, so a restarted worker does not index past it until an operator acknowledges that round or
+    rebuilds. Native and ASA balances are audited; ARC-200 balances are not ledger state and are not.
   - The database records which build indexed which round range, so "everything indexed by a build before the fix" is a lookup.
+    A partial rebuild takes the records up to R over, so the history of the kept rounds is not lost with the old keyspace.
 
 ## Consequences
 - A fix whose first affected round is recent costs a copy (a full read of the old effect tables, hours) plus the rounds after
@@ -64,7 +73,13 @@ Two facts make that possible:
   concerns token records themselves needs R before the creation of the affected tokens.
 - Choosing R is a human decision; an R later than the first bad round keeps bad rows. The audit and the build record help.
 - PostgreSQL has no undo window: the rows after R are gone at commit. Take a backup or note the PITR position before the
-  request. Cassandra keeps the old keyspace until it is retired.
+  request. Cassandra keeps the old keyspace until it is retired. The rewind deletes by round from a table that is keyed and
+  partitioned by account, so it reads every partition; a rewind over many rounds is one long transaction (WAL, bloat, vacuum
+  held back). Its cost has to be measured before PostgreSQL is used for a large chain (#180).
+- This mechanism is for fixes of the indexer's own logic. A database built from a wrong history (a hash divergence) has no
+  stored per-round hashes to find a good round by; that case stops the writer and is decided by an operator.
+- A rebuild still reads the replayed rounds from the archival nodes. Voi's archival hosts are patchy and Voi has no ledger
+  audit, so on Voi the protection is weaker: tests and the build record only.
 - Asynchronous holder scans (ADR 0012) are not carried over to a new keyspace: a scan that is polled across the API switch
   ends with "not found" and has to be started again.
 - The copy doubles the disk use of the kept range until the old keyspace is retired.
