@@ -131,10 +131,62 @@ public class BatchedIndexingTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
     }
 
-    /// <summary>Serves <paramref name="relayBlock"/> for fetches with a tip hint (as a relay could), the real chain otherwise.</summary>
-    private sealed class RelayServes(FakeChainAdapter archive, Adapters.BlockData relayBlock) : Adapters.IChainAdapter
+    [Fact]
+    public async Task A_Block_From_A_Relay_That_Does_Not_Link_Is_Replaced_By_The_Archival_One_While_Following_The_Tip()
     {
+        // At the tip blocks may come from public relays, whose certificates are not checked (ADR 0004). A block of another history
+        // must not stop the writer with "chain divergence, rebuild the database": the archival block of that round is indexed.
+        var storage = new RecordingStorage(new ChainContext(ChainId.AlgorandTestnet));
+        await Indexer(storage, Adapter()).RunAsync(LastRound - 1, CancellationToken.None);
+        var foreign = Blocks(new TestChain { TxnCounterBefore = 1_000 }).Single(static b => b.Round == LastRound);
+        var published = await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None);
+        Assert.False(foreign.PreviousHash.AsSpan().SequenceEqual(published!.IndexedBlockHash.Span)); // the relay's block does not link
+        var following = new RelayServes(Adapter(), foreign) { Latest = LastRound };
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+
+        var run = Indexer(storage, following, new IndexerOptions { FetchConcurrency = 2, FollowPollInterval = TimeSpan.FromMilliseconds(10) }).RunAsync(null, stop.Token);
+        while ((await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!.IndexedRound < LastRound && !run.IsCompleted)
+        {
+            await Task.Delay(10, stop.Token);
+        }
+
+        Assert.False(run.IsCompleted, run.Exception?.ToString()); // still following, not stopped by a divergence
+        var status = await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None);
+        Assert.Equal(LastRound, status!.IndexedRound);
+        Assert.False(foreign.Hash.AsSpan().SequenceEqual(status.IndexedBlockHash.Span)); // the archival block, not the relay's
+        Assert.Same(foreign, Assert.Single(following.Reported)); // the fetcher learns which block was wrong
+        await stop.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+    }
+
+    [Fact]
+    public async Task A_Block_That_Does_Not_Link_Is_A_Divergence_When_The_Archival_Nodes_Serve_It_Too()
+    {
+        var storage = new RecordingStorage(new ChainContext(ChainId.AlgorandTestnet));
+        await Indexer(storage, Adapter()).RunAsync(LastRound - 1, CancellationToken.None);
+        var foreign = Blocks(new TestChain { TxnCounterBefore = 1_000 }).Single(static b => b.Round == LastRound);
+        var following = new RelayServes(Adapter(), foreign, archivalToo: true) { Latest = LastRound };
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+
+        await Assert.ThrowsAsync<ChainDivergenceException>(
+            () => Indexer(storage, following, new IndexerOptions { FetchConcurrency = 2, FollowPollInterval = TimeSpan.FromMilliseconds(10) }).RunAsync(null, stop.Token));
+
+        Assert.Equal(LastRound - 1, (await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!.IndexedRound);
+        Assert.Empty(following.Reported);
+    }
+
+    /// <summary>
+    /// Serves <paramref name="relayBlock"/> for fetches with a tip hint (as a relay could), the real chain otherwise; with
+    /// <paramref name="archivalToo"/> the archival fetch of that round serves it as well.
+    /// </summary>
+    private sealed class RelayServes(FakeChainAdapter archive, Adapters.BlockData relayBlock, bool archivalToo = false) : Adapters.IChainAdapter
+    {
+        private readonly System.Collections.Concurrent.ConcurrentQueue<Adapters.BlockData> _reported = new();
         private int _archivalFetches;
+
+        public IReadOnlyCollection<Adapters.BlockData> Reported => _reported;
+
+        public void ReportWrongBlock(Adapters.BlockData block) => _reported.Enqueue(block);
 
         public ulong? Latest { get => archive.Latest; set => archive.Latest = value; }
 
@@ -154,7 +206,7 @@ public class BatchedIndexingTests
         public Task<Adapters.BlockData> FetchBlockAsync(ulong round, CancellationToken cancellationToken)
         {
             Interlocked.Increment(ref _archivalFetches);
-            return archive.FetchBlockAsync(round, cancellationToken);
+            return archivalToo && round == relayBlock.Round ? Task.FromResult(relayBlock) : archive.FetchBlockAsync(round, cancellationToken);
         }
     }
 

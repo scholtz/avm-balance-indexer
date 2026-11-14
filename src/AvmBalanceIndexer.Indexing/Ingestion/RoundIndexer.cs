@@ -105,11 +105,13 @@ public sealed partial class RoundIndexer(
 
             var pending = new List<RoundWrite>();
             var pendingEffects = 0;
+            var hinted = Hinted(stopAfterRound, next, target);
             try
             {
-                await foreach (var block in OrderedPrefetch.StreamAsync(
-                    next, target, _options.FetchConcurrency, FetchFor(stopAfterRound, next, target), cancellationToken).ConfigureAwait(false))
+                await foreach (var fetched in OrderedPrefetch.StreamAsync(
+                    next, target, _options.FetchConcurrency, FetchFor(hinted, target), cancellationToken).ConfigureAwait(false))
                 {
+                    var block = hinted ? await ArchivalIfForeignAsync(status, fetched, cancellationToken).ConfigureAwait(false) : fetched;
                     var queued = await QueueBlockAsync(chain, tracker, status, rewards, block, target, cancellationToken).ConfigureAwait(false);
                     status = queued.Status;
                     pending.Add(queued);
@@ -164,10 +166,35 @@ public sealed partial class RoundIndexer(
     /// fetcher which blocks relays may hold. A bounded run's target can be far behind the tip, and a backfill pass lasts so long
     /// that the tip leaves its target behind, where relays would only answer 404: both give no hint.
     /// </summary>
-    private Func<ulong, CancellationToken, Task<BlockData>> FetchFor(ulong? stopAfterRound, ulong first, ulong target) =>
-        stopAfterRound is null && target - first <= (ulong)_options.FollowingThresholdRounds
-            ? (round, token) => adapter.FetchBlockAsync(round, target, token)
-            : adapter.FetchBlockAsync;
+    private bool Hinted(ulong? stopAfterRound, ulong first, ulong target) =>
+        stopAfterRound is null && target - first <= (ulong)_options.FollowingThresholdRounds;
+
+    private Func<ulong, CancellationToken, Task<BlockData>> FetchFor(bool hinted, ulong target) =>
+        hinted ? (round, token) => adapter.FetchBlockAsync(round, target, token) : adapter.FetchBlockAsync;
+
+    /// <summary>
+    /// A block fetched with the tip hint may come from a public relay, and certificate votes are not checked (ADR 0004): one that does
+    /// not link to the previous round is fetched again from the archival nodes alone, whose answer decides a divergence. When theirs
+    /// links, the fetcher learns that the first one was wrong (it rests and reports the relay).
+    /// </summary>
+    private async Task<BlockData> ArchivalIfForeignAsync(ChainStatus previous, BlockData block, CancellationToken cancellationToken)
+    {
+        if (block.Round != previous.IndexedRound + 1 || LinksTo(previous, block))
+        {
+            return block;
+        }
+
+        var archival = await adapter.FetchBlockAsync(block.Round, cancellationToken).ConfigureAwait(false);
+        if (LinksTo(previous, archival))
+        {
+            adapter.ReportWrongBlock(block);
+        }
+
+        return archival;
+    }
+
+    private static bool LinksTo(ChainStatus previous, BlockData block) =>
+        block.PreviousHash.AsSpan().SequenceEqual(previous.IndexedBlockHash.Span);
 
     /// <summary>
     /// A writer that has caught up with the tip is alive: it republishes the status with the latest round and a fresh timestamp, so that
@@ -266,7 +293,12 @@ public sealed partial class RoundIndexer(
         {
             // The block may have come from a public relay, and certificate votes are not checked (ADR 0004): before telling the
             // operator to rebuild, ask the archival nodes alone. Only their answer decides a divergence.
+            var hinted = seed;
             seed = await adapter.FetchBlockAsync(seedRound, cancellationToken).ConfigureAwait(false);
+            if (LinksToCursor(status, seed))
+            {
+                adapter.ReportWrongBlock(hinted);
+            }
         }
 
         if (!LinksToCursor(status, seed))
@@ -301,7 +333,7 @@ public sealed partial class RoundIndexer(
             throw new ChainDivergenceException($"Expected round {previous.IndexedRound + 1} but received {block.Round}.");
         }
 
-        if (!block.PreviousHash.AsSpan().SequenceEqual(previous.IndexedBlockHash.Span))
+        if (!LinksTo(previous, block))
         {
             throw new ChainDivergenceException(
                 $"Round {block.Round} does not link to the published round {previous.IndexedRound}. The database must be rebuilt.");

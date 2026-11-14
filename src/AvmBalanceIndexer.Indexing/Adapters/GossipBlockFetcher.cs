@@ -120,7 +120,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
                     }
                 }
 
-                return block;
+                return relays.Contains(host) ? block with { Relay = host } : block;
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -501,6 +501,18 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
         }
     }
 
+    /// <summary>
+    /// A relay's block validated but belongs to another history: the archival block of its round links to the published chain. The relay is
+    /// rested and reported like one that served an invalid block. A block from an archival node is left alone (its answer is the reference).
+    /// </summary>
+    public void ReportWrongBlock(BlockData block)
+    {
+        if (block.Relay is { } relay)
+        {
+            ReportInvalidRelay(relay, block.Round, error: null);
+        }
+    }
+
     /// <summary>Ten times the host cooldown, capped at an hour, but never shorter than the cooldown itself (at most an hour by validation).</summary>
     internal static TimeSpan InvalidRelayRest(TimeSpan cooldown)
     {
@@ -528,7 +540,10 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
     /// It is left out of relay lists for ten times the host cooldown (at least the cooldown, at most an hour) and reported as a Warning at
     /// most once an hour.
     /// </summary>
-    private void ReportInvalidRelay(string host, ulong round, BlockValidationException error)
+    /// <param name="host">The relay.</param>
+    /// <param name="round">The round it served wrongly.</param>
+    /// <param name="error">Why the block failed validation; null for a valid block of another history (<see cref="ReportWrongBlock"/>).</param>
+    private void ReportInvalidRelay(string host, ulong round, BlockValidationException? error)
     {
         var now = _time.GetUtcNow();
         var hour = TimeSpan.FromHours(1);
@@ -557,7 +572,14 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
             }
         }
 
-        LogInvalidRelay(_logger, error, host, round, rest);
+        if (error is null)
+        {
+            LogForeignRelay(_logger, host, round, rest);
+        }
+        else
+        {
+            LogInvalidRelay(_logger, error, host, round, rest);
+        }
     }
 
     private TimeSpan BackoffDelay(int attempt)
@@ -666,6 +688,9 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
 
     [LoggerMessage(EventId = 1116, Level = LogLevel.Warning, Message = "Relay {Host} served block {Round} that failed validation while another node served a valid one; it is not asked for {Rest}. Indexing is not affected. If it repeats for this relay, report it; if it happens for many relays at once, check whether they run a newer node release this indexer cannot read")]
     private static partial void LogInvalidRelay(ILogger logger, Exception exception, string host, ulong round, TimeSpan rest);
+
+    [LoggerMessage(EventId = 1117, Level = LogLevel.Warning, Message = "Relay {Host} served a block {Round} that does not link to the chain the archival nodes serve (another history or a fork); the archival block was indexed and the relay is not asked for {Rest}. If it repeats for this relay, report it")]
+    private static partial void LogForeignRelay(ILogger logger, string host, ulong round, TimeSpan rest);
 
     [LoggerMessage(EventId = 1115, Level = LogLevel.Debug, Message = "Relays could not be looked up; fetching from the archival nodes only")]
     private static partial void LogRelaysSkipped(ILogger logger, Exception exception);

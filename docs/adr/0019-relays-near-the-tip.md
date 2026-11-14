@@ -20,6 +20,9 @@ old ones and answer 404 for them.
   block (the last published round) with the tip as well, so a restart at the tip costs no archival request (#169); the fetcher
   asks relays only when that block is within its recent-rounds window. Certificate votes are not checked (ADR 0004), so a seed
   block that does not match the stored cursor is fetched again from the archival nodes alone before a divergence is declared.
+  The same holds for every block fetched with the tip hint (#187): one that does not link to the previous round is replaced by the
+  archival block of its round, and only a non-linking archival block is a divergence. When the archival block links, the relay that
+  served the other one is rested and reported like a relay that served an invalid block.
 - Operator-configured `Algorand:GossipHosts` are used as given; relay discovery is skipped for them.
 - Relays are optional capacity and never decide the health of a fetch. Within one fetch a relay is asked at most once;
   a relay that lacks the block, fails or rate limits is left out for the rest of that fetch without using up an attempt

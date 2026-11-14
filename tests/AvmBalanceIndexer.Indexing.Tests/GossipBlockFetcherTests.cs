@@ -611,6 +611,64 @@ public class GossipBlockFetcherTests
     }
 
     [Fact]
+    public async Task A_Relay_Whose_Block_Does_Not_Link_Is_Reported_And_Rested_But_An_Archival_Node_Is_Not()
+    {
+        // The indexer finds out that a valid block belongs to another history (it does not link) and tells the fetcher which one.
+        var logger = new CapturingLogger();
+        var clock = new ManualClock();
+        var relayCalls = 0;
+        var fetcher = CreateFetcher(
+            (request, _) =>
+            {
+                if (request.RequestUri!.Host.StartsWith("relay", StringComparison.Ordinal))
+                {
+                    Interlocked.Increment(ref relayCalls);
+                }
+
+                clock.Advance(TimeSpan.FromMilliseconds(250)); // neither host learns to win every pick
+                return Task.FromResult(Ok(Chain.Encode(1000, [])));
+            },
+            time: clock,
+            logger: logger,
+            provider: new TieredHosts(["http://archive.test:4160"], ["http://relay.test:4160"]));
+
+        BlockData? fromRelay = null;
+        BlockData? fromArchive = null;
+        for (var i = 0; i < 200 && (fromRelay is null || fromArchive is null); i++)
+        {
+            var block = await fetcher.FetchBlockAsync(1000, 1000, CancellationToken.None);
+            if (block.Relay is null)
+            {
+                fromArchive ??= block;
+            }
+            else
+            {
+                fromRelay ??= block;
+            }
+        }
+
+        Assert.NotNull(fromArchive);
+        Assert.NotNull(fromRelay);
+        Assert.Contains("relay.test", fromRelay.Relay, StringComparison.Ordinal);
+
+        fetcher.ReportWrongBlock(fromArchive);
+        Assert.DoesNotContain(logger.Entries, static e => e.Level == LogLevel.Warning);
+
+        fetcher.ReportWrongBlock(fromRelay);
+        var reported = Assert.Single(logger.Entries, static e => e.Level == LogLevel.Warning);
+        Assert.Contains("relay.test", reported.Message, StringComparison.Ordinal);
+        Assert.Contains("does not link", reported.Message, StringComparison.Ordinal); // not "failed validation": the block was valid
+
+        var calls = Volatile.Read(ref relayCalls);
+        for (var i = 0; i < 40; i++)
+        {
+            Assert.Null((await fetcher.FetchBlockAsync(1000, 1000, CancellationToken.None)).Relay);
+        }
+
+        Assert.Equal(calls, Volatile.Read(ref relayCalls)); // rested
+    }
+
+    [Fact]
     public async Task A_Relay_Is_Blamed_When_A_Later_Fetch_Of_The_Same_Round_Gets_A_Valid_Block()
     {
         // At the tip the archival nodes often do not have the block yet: the fetch that met the bad relay fails as "not available",
