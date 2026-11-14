@@ -154,7 +154,7 @@ public class BatchedIndexingTests
         var status = await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None);
         Assert.Equal(LastRound, status!.IndexedRound);
         Assert.False(foreign.Hash.AsSpan().SequenceEqual(status.IndexedBlockHash.Span)); // the archival block, not the relay's
-        Assert.Same(foreign, Assert.Single(following.Reported)); // the fetcher learns which block was wrong
+        Assert.Equal(foreign.Hash, Assert.Single(following.Reported).Hash); // the fetcher learns which block was wrong
         await stop.CancelAsync();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
     }
@@ -175,13 +175,29 @@ public class BatchedIndexingTests
         Assert.Empty(following.Reported);
     }
 
+    [Fact]
+    public async Task A_Block_That_Does_Not_Link_And_Came_From_No_Relay_Is_Not_Fetched_Again()
+    {
+        var storage = new RecordingStorage(new ChainContext(ChainId.AlgorandTestnet));
+        await Indexer(storage, Adapter()).RunAsync(LastRound - 1, CancellationToken.None);
+        var foreign = Blocks(new TestChain { TxnCounterBefore = 1_000 }).Single(static b => b.Round == LastRound);
+        var following = new RelayServes(Adapter(), foreign, fromRelay: false) { Latest = LastRound };
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+
+        await Assert.ThrowsAsync<ChainDivergenceException>(
+            () => Indexer(storage, following, new IndexerOptions { FetchConcurrency = 2, FollowPollInterval = TimeSpan.FromMilliseconds(10) }).RunAsync(null, stop.Token));
+
+        Assert.Equal(0, following.ArchivalFetches); // the same nodes would answer the same: no second request
+    }
+
     /// <summary>
     /// Serves <paramref name="relayBlock"/> for fetches with a tip hint (as a relay could), the real chain otherwise; with
     /// <paramref name="archivalToo"/> the archival fetch of that round serves it as well.
     /// </summary>
-    private sealed class RelayServes(FakeChainAdapter archive, Adapters.BlockData relayBlock, bool archivalToo = false) : Adapters.IChainAdapter
+    private sealed class RelayServes(FakeChainAdapter archive, Adapters.BlockData relayBlock, bool archivalToo = false, bool fromRelay = true) : Adapters.IChainAdapter
     {
         private readonly System.Collections.Concurrent.ConcurrentQueue<Adapters.BlockData> _reported = new();
+        private readonly Adapters.BlockData _served = fromRelay ? relayBlock with { Relay = "http://relay.test:4160" } : relayBlock;
         private int _archivalFetches;
 
         public IReadOnlyCollection<Adapters.BlockData> Reported => _reported;
@@ -201,7 +217,7 @@ public class BatchedIndexingTests
         public Task<Adapters.GenesisDocument> GetGenesisAsync(CancellationToken cancellationToken) => archive.GetGenesisAsync(cancellationToken);
 
         public Task<Adapters.BlockData> FetchBlockAsync(ulong round, ulong latestRound, CancellationToken cancellationToken) =>
-            round == relayBlock.Round ? Task.FromResult(relayBlock) : archive.FetchBlockAsync(round, latestRound, cancellationToken);
+            round == _served.Round ? Task.FromResult(_served) : archive.FetchBlockAsync(round, latestRound, cancellationToken);
 
         public Task<Adapters.BlockData> FetchBlockAsync(ulong round, CancellationToken cancellationToken)
         {

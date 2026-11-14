@@ -111,7 +111,8 @@ public sealed partial class RoundIndexer(
                 await foreach (var fetched in OrderedPrefetch.StreamAsync(
                     next, target, _options.FetchConcurrency, FetchFor(hinted, target), cancellationToken).ConfigureAwait(false))
                 {
-                    var block = hinted ? await ArchivalIfForeignAsync(fetched, b => b.Round != status.IndexedRound + 1 || LinksTo(status, b), cancellationToken).ConfigureAwait(false) : fetched;
+                    var previous = status;
+                    var block = hinted ? await ArchivalIfForeignAsync(fetched, b => LinksTo(previous, b), cancellationToken).ConfigureAwait(false) : fetched;
                     var queued = await QueueBlockAsync(chain, tracker, status, rewards, block, target, cancellationToken).ConfigureAwait(false);
                     status = queued.Status;
                     pending.Add(queued);
@@ -169,17 +170,19 @@ public sealed partial class RoundIndexer(
     private bool Hinted(ulong? stopAfterRound, ulong first, ulong target) =>
         stopAfterRound is null && target - first <= (ulong)_options.FollowingThresholdRounds;
 
+    /// <summary>The fetch of a pass: with the tip as hint when <paramref name="hinted"/> (see <see cref="Hinted"/>), without otherwise.</summary>
     private Func<ulong, CancellationToken, Task<BlockData>> FetchFor(bool hinted, ulong target) =>
         hinted ? (round, token) => adapter.FetchBlockAsync(round, target, token) : adapter.FetchBlockAsync;
 
     /// <summary>
     /// A block fetched with the tip hint may come from a public relay, and certificate votes are not checked (ADR 0004): one that does
-    /// not link to the previous round is fetched again from the archival nodes alone, whose answer decides a divergence. When theirs
-    /// links, the fetcher learns that the first one was wrong (it rests and reports the relay).
+    /// not link to the previous round is fetched again from the archival nodes alone (without the hint), whose answer decides a
+    /// divergence. When theirs links, the fetcher learns that the first one was wrong (it rests and reports the relay). A block that
+    /// did not come from a relay is not asked for again: the same nodes would answer the same.
     /// </summary>
     private async Task<BlockData> ArchivalIfForeignAsync(BlockData hinted, Func<BlockData, bool> belongs, CancellationToken cancellationToken)
     {
-        if (belongs(hinted))
+        if (hinted.Relay is null || belongs(hinted))
         {
             return hinted;
         }
