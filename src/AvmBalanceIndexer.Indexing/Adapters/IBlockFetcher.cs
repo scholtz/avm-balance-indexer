@@ -15,4 +15,12 @@ public interface IBlockFetcher
     /// <exception cref="BlockFetchException">The block could not be fetched or validated.</exception>
     Task<BlockData> FetchBlockAsync(ulong round, ulong latestRound, CancellationToken cancellationToken) =>
         FetchBlockAsync(round, cancellationToken);
+
+    /// <summary>
+    /// Tells the fetcher that <paramref name="block"/> validated but does not belong to the chain: the archival nodes serve another block
+    /// of its round that links to the published one. A fetcher that took it from a relay rests and reports that relay; the default ignores it.
+    /// </summary>
+    void ReportWrongBlock(BlockData block)
+    {
+    }
 }

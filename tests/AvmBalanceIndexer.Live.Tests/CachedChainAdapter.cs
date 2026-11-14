@@ -19,6 +19,8 @@ public sealed class CachedChainAdapter(IChainAdapter inner) : IChainAdapter
 
     public Task<GenesisDocument> GetGenesisAsync(CancellationToken cancellationToken) => inner.GetGenesisAsync(cancellationToken);
 
+    public void ReportWrongBlock(BlockData block) => inner.ReportWrongBlock(block);
+
     public Task<BlockData> FetchBlockAsync(ulong round, CancellationToken cancellationToken)
     {
         var task = _blocks.GetOrAdd(round, r => inner.FetchBlockAsync(r, CancellationToken.None));

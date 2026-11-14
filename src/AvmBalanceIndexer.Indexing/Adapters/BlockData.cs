@@ -12,6 +12,7 @@ namespace AvmBalanceIndexer.Indexing.Adapters;
 /// <param name="GenesisId">Genesis id from the header.</param>
 /// <param name="Block">Block header decoded by the Algorand5 SDK; its transaction list is empty, the transactions are in <paramref name="ApplyData"/>.</param>
 /// <param name="ApplyData">The transactions in block order: raw transaction map, apply data (rewards, closing amounts, logs) and inner transactions.</param>
+/// <param name="Relay">The public relay that served the block; null when it came from an archival node (or the source is unknown).</param>
 public sealed record BlockData(
     ulong Round,
     byte[] Hash,
@@ -19,4 +20,5 @@ public sealed record BlockData(
     byte[] GenesisHash,
     string GenesisId,
     Block Block,
-    IReadOnlyList<TxnApplyData> ApplyData);
+    IReadOnlyList<TxnApplyData> ApplyData,
+    string? Relay = null);
