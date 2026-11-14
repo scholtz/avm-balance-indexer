@@ -48,6 +48,17 @@ data:
   Storage__Cassandra__Port: {{ .Values.storage.cassandra.port | quote }}
   Storage__Cassandra__CreateKeyspace: {{ .Values.storage.cassandra.createKeyspace | quote }}
   Storage__Cassandra__ReplicationFactor: {{ .Values.storage.cassandra.replicationFactor | quote }}
+  {{- /* The same rules as the options validator (CassandraOptionsValidator), which only checks a Cassandra release: a wrong value
+         must fail here, not in a pod that cannot start. Go's $ anchors at the end of the text, like \z in .NET. */}}
+  {{- $keyspacePattern := "^[A-Za-z][A-Za-z0-9_]{0,47}$" }}
+  {{- if eq .Values.storage.provider "Cassandra" }}
+  {{- if not (regexMatch $keyspacePattern (toString .Values.storage.cassandra.keyspace)) }}
+  {{- fail (printf "storage.cassandra.keyspace %q is not a keyspace name (a letter, then letters, digits and underscores, at most 48 characters)" (toString .Values.storage.cassandra.keyspace)) }}
+  {{- end }}
+  {{- if not (regexMatch "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$" (toString .Values.storage.cassandra.localDatacenter)) }}
+  {{- fail (printf "storage.cassandra.localDatacenter %q is not a datacenter name" (toString .Values.storage.cassandra.localDatacenter)) }}
+  {{- end }}
+  {{- end }}
   Storage__Cassandra__Keyspace: {{ .Values.storage.cassandra.keyspace | quote }}
   Storage__Cassandra__LocalDatacenter: {{ .Values.storage.cassandra.localDatacenter | quote }}
   Storage__Cassandra__RetiredKeyspaceQuietMinutes: {{ .Values.storage.cassandra.retiredKeyspaceQuietMinutes | quote }}
@@ -56,7 +67,7 @@ data:
   {{- end }}
   {{- range $i, $retired := .Values.storage.cassandra.retiredKeyspaces }}
   {{- /* The same rules as the options validator: a wrong entry must fail here, not in a pod that then cannot start. */}}
-  {{- if not (regexMatch "^[A-Za-z][A-Za-z0-9_]{0,47}$" (toString $retired)) }}
+  {{- if not (regexMatch $keyspacePattern (toString $retired)) }}
   {{- fail (printf "storage.cassandra.retiredKeyspaces holds %q, which is not a keyspace name (a letter, then letters, digits and underscores, at most 48 characters)" (toString $retired)) }}
   {{- end }}
   {{- if hasPrefix "system" (lower $retired) }}

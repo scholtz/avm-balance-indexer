@@ -32,7 +32,8 @@ public sealed partial class CassandraChainStorage
         }
     }
 
-    private async Task<bool> SchemaExistsAsync(ISession session, CancellationToken cancellationToken)
+    /// <summary>Whether every table and column of the embedded scripts exists, so that no DDL is sent at start.</summary>
+    internal async Task<bool> SchemaExistsAsync(ISession session, CancellationToken cancellationToken)
     {
         var existing = await TablesOfAsync(session, _keyspace, cancellationToken).ConfigureAwait(false);
         var statements = ReadEmbeddedStatements().ToArray();

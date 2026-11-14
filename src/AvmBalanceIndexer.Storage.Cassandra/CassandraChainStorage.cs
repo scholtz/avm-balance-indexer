@@ -56,8 +56,9 @@ public sealed partial class CassandraChainStorage : IChainStorage
             : throw new ArgumentOutOfRangeException(nameof(readDeadline), "The read deadline must not be negative.");
         _source = source ?? throw new ArgumentNullException(nameof(source));
         _chain = chain?.Chain ?? throw new ArgumentNullException(nameof(chain));
+        // CQL folds an unquoted identifier to lower case, and system_schema stores it that way: the schema lookup needs that spelling.
         _keyspace = CassandraOptionsValidator.IsValidIdentifier(options.Keyspace)
-            ? options.Keyspace
+            ? options.Keyspace.ToLowerInvariant()
             : throw new ArgumentException("Invalid Cassandra keyspace name.", nameof(options));
         _localDatacenter = CassandraOptionsValidator.IsValidDatacenter(options.LocalDatacenter)
             ? options.LocalDatacenter

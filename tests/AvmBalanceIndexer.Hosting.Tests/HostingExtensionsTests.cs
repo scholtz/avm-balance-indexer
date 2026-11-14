@@ -95,7 +95,9 @@ public class HostingExtensionsTests
     [Theory]
     [InlineData("Keyspace", "bad-name; DROP")]
     [InlineData("Keyspace", "1leading_digit")]
+    [InlineData("Keyspace", "avm\n")]
     [InlineData("LocalDatacenter", "dc'1")]
+    [InlineData("LocalDatacenter", "dc1\n")]
     [InlineData("ReplicationFactor", "0")]
     [InlineData("Port", "70000")]
     [InlineData("WriteConcurrency", "0")]
@@ -108,7 +110,8 @@ public class HostingExtensionsTests
             ("Storage:Cassandra:ContactPoints:0", "cassandra-0"),
             ($"Storage:Cassandra:{key}", value)));
 
-        Assert.Throws<OptionsValidationException>(() => provider.GetRequiredService<IOptions<StorageOptions>>().Value);
+        var error = Assert.Throws<OptionsValidationException>(() => provider.GetRequiredService<IOptions<StorageOptions>>().Value);
+        Assert.Contains($"Storage:Cassandra:{key}", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
