@@ -346,6 +346,8 @@ public class BatchedIndexingTests
 
         public Task<Adapters.GenesisDocument> GetGenesisAsync(CancellationToken cancellationToken) => inner.GetGenesisAsync(cancellationToken);
 
+        public void ReportWrongBlock(Adapters.BlockData block) => inner.ReportWrongBlock(block);
+
         public Task<Adapters.BlockData> FetchBlockAsync(ulong round, CancellationToken cancellationToken) =>
             round == failingRound ? Task.FromException<Adapters.BlockData>(failure ?? new TimeoutException("host timed out")) : inner.FetchBlockAsync(round, cancellationToken);
     }

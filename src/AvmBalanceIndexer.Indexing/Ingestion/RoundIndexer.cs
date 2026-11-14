@@ -111,7 +111,7 @@ public sealed partial class RoundIndexer(
                 await foreach (var fetched in OrderedPrefetch.StreamAsync(
                     next, target, _options.FetchConcurrency, FetchFor(hinted, target), cancellationToken).ConfigureAwait(false))
                 {
-                    var block = hinted ? await ArchivalIfForeignAsync(status, fetched, cancellationToken).ConfigureAwait(false) : fetched;
+                    var block = hinted ? await ArchivalIfForeignAsync(fetched, b => b.Round != status.IndexedRound + 1 || LinksTo(status, b), cancellationToken).ConfigureAwait(false) : fetched;
                     var queued = await QueueBlockAsync(chain, tracker, status, rewards, block, target, cancellationToken).ConfigureAwait(false);
                     status = queued.Status;
                     pending.Add(queued);
@@ -177,17 +177,17 @@ public sealed partial class RoundIndexer(
     /// not link to the previous round is fetched again from the archival nodes alone, whose answer decides a divergence. When theirs
     /// links, the fetcher learns that the first one was wrong (it rests and reports the relay).
     /// </summary>
-    private async Task<BlockData> ArchivalIfForeignAsync(ChainStatus previous, BlockData block, CancellationToken cancellationToken)
+    private async Task<BlockData> ArchivalIfForeignAsync(BlockData hinted, Func<BlockData, bool> belongs, CancellationToken cancellationToken)
     {
-        if (block.Round != previous.IndexedRound + 1 || LinksTo(previous, block))
+        if (belongs(hinted))
         {
-            return block;
+            return hinted;
         }
 
-        var archival = await adapter.FetchBlockAsync(block.Round, cancellationToken).ConfigureAwait(false);
-        if (LinksTo(previous, archival))
+        var archival = await adapter.FetchBlockAsync(hinted.Round, cancellationToken).ConfigureAwait(false);
+        if (belongs(archival))
         {
-            adapter.ReportWrongBlock(block);
+            adapter.ReportWrongBlock(hinted);
         }
 
         return archival;
@@ -293,12 +293,7 @@ public sealed partial class RoundIndexer(
         {
             // The block may have come from a public relay, and certificate votes are not checked (ADR 0004): before telling the
             // operator to rebuild, ask the archival nodes alone. Only their answer decides a divergence.
-            var hinted = seed;
-            seed = await adapter.FetchBlockAsync(seedRound, cancellationToken).ConfigureAwait(false);
-            if (LinksToCursor(status, seed))
-            {
-                adapter.ReportWrongBlock(hinted);
-            }
+            seed = await ArchivalIfForeignAsync(seed, s => LinksToCursor(status, s), cancellationToken).ConfigureAwait(false);
         }
 
         if (!LinksToCursor(status, seed))
