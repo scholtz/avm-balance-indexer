@@ -82,8 +82,31 @@ public class BatchedIndexingTests
         await stop.CancelAsync();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
 
-        Assert.Equal(LastRound, waiting.IndexedRound);
-        Assert.Equal(LastRound + 1, waiting.TargetRound);
+        Assert.Equal((LastRound, LastRound + 1, IngestionState.Following), (waiting.IndexedRound, waiting.TargetRound, waiting.State));
+    }
+
+    [Fact]
+    public async Task A_Restarted_Writer_Waiting_For_Its_Cursor_Block_Keeps_The_Published_Timestamp_Moving()
+    {
+        var storage = new RecordingStorage(new ChainContext(ChainId.AlgorandTestnet));
+        await Indexer(storage, Adapter()).RunAsync(LastRound, CancellationToken.None);
+        var before = (await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!;
+
+        // After a restart the cursor block is needed again (rewards seed), and the nodes do not serve it yet.
+        var lagging = Adapter(Blocks().Where(static b => b.Round != LastRound));
+        lagging.Latest = LastRound + 1;
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var run = Indexer(storage, lagging, new IndexerOptions { FetchConcurrency = 2, FollowPollInterval = TimeSpan.FromMilliseconds(10) }).RunAsync(null, stop.Token);
+        while ((await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!.UpdatedAt <= before.UpdatedAt)
+        {
+            await Task.Delay(10, stop.Token);
+        }
+
+        var waiting = (await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!;
+        await stop.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+
+        Assert.Equal((LastRound, LastRound + 1, IngestionState.Following), (waiting.IndexedRound, waiting.TargetRound, waiting.State));
     }
 
     [Fact]

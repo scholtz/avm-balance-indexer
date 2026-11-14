@@ -137,6 +137,23 @@ public sealed class ApiTests : IDisposable
         Assert.Equal(30, status.GetProperty("historicalQueries").GetProperty("synchronousTimeoutSeconds").GetInt32());
     }
 
+    [Fact]
+    public async Task The_Synchronous_Limit_Uses_The_Read_Timeout_Of_The_Configured_Provider()
+    {
+        // The PostgreSQL value differs on purpose: a Cassandra deployment must report its own read timeout.
+        using var client = CreateClient(
+            null,
+            ("Storage:Provider", "Cassandra"),
+            ("Storage:Cassandra:ContactPoints:0", "localhost"),
+            ("Storage:Cassandra:ReadTimeoutSeconds", "20"),
+            ("Storage:PostgreSql:ReadTimeoutSeconds", "40"));
+
+        var status = await client.GetFromJsonAsync<JsonElement>(new Uri("/v1/algorand-testnet/status", UriKind.Relative));
+
+        Assert.Equal("Cassandra", status.GetProperty("provider").GetString());
+        Assert.Equal(20, status.GetProperty("historicalQueries").GetProperty("synchronousTimeoutSeconds").GetInt32());
+    }
+
     [Theory]
     [InlineData("9")]
     [InlineData("86401")]
