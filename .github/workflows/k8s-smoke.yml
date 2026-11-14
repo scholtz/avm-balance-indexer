@@ -1,0 +1,84 @@
+# Kubernetes smoke test of the chart (PRODUCT-DESCRIPTION.md, dual storage support): the same API and worker images run once with
+# PostgreSQL and once with Cassandra in a kind cluster; only Helm values differ between the legs. Not a required check: it needs
+# the public TestNet nodes, like the live job.
+name: Kubernetes smoke test
+
+on:
+  pull_request:
+    paths: &paths
+      - deploy/**
+      - docker/**
+      - src/**
+      - Directory.*.props
+      - global.json
+      - AvmBalanceIndexer.slnx
+      - .dockerignore
+      - .github/workflows/k8s-smoke.yml
+  push:
+    branches: [main]
+    paths: *paths
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # A newer push to a PR replaces its run; every commit on main gets its own group and is tested to the end.
+  group: k8s-smoke-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  smoke:
+    name: Smoke (${{ matrix.provider }})
+    runs-on: ubuntu-latest
+    # Image builds (a few minutes), database (at most 5), install (at most 10), checks (at most about 13), diagnostics.
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        provider: [PostgreSql, Cassandra]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: azure/setup-helm@v5
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: chart-testing
+          # kindnet enforces NetworkPolicy from kind 0.24 on; the Cassandra leg checks the policy.
+          version: v0.27.0
+      - name: Build the images and load them into kind
+        run: |
+          for c in api worker; do
+            docker build -q -f "docker/Dockerfile.$c" -t "smoke/avm-balance-indexer-$c:ci" .
+            kind load docker-image "smoke/avm-balance-indexer-$c:ci" --name chart-testing
+          done
+      - name: Install the database and the chart
+        run: |
+          kubectl create namespace smoke
+          if [ "${{ matrix.provider }}" = PostgreSql ]; then
+            kubectl -n smoke apply -f deploy/helm/ci/postgres.yaml
+            kubectl -n smoke rollout status deploy/postgres --timeout 5m
+            flags=(--set storage.provider=PostgreSql --set storage.postgreSql.existingSecret=smoke-postgres)
+          else
+            # The chart's embedded single-node Cassandra; autoSnapshotTtl exercises its start command override.
+            flags=(--set storage.provider=Cassandra --set storage.cassandra.replicationFactor=1
+              --set cassandra.embedded.enabled=true --set cassandra.embedded.node=chart-testing-control-plane
+              --set cassandra.embedded.hostPath=/var/lib/avm-smoke --set cassandra.embedded.maxHeapSize=1G
+              --set cassandra.embedded.heapNewSize=200M --set cassandra.embedded.autoSnapshotTtl=1d
+              --set cassandra.embedded.resources.requests.cpu=500m --set cassandra.embedded.resources.requests.memory=2Gi
+              --set cassandra.embedded.resources.limits.memory=3Gi)
+          fi
+          helm install smoke deploy/helm/avm-balance-indexer -n smoke -f deploy/helm/ci/smoke.yaml "${flags[@]}" --wait --timeout 10m
+      - name: The API serves the configured provider and the worker indexes TestNet
+        run: deploy/helm/ci/smoke-check.sh "${{ matrix.provider }}"
+      - name: Diagnostics
+        if: failure() || cancelled()
+        run: |
+          kubectl -n smoke get pods -o wide || true
+          kubectl -n smoke describe pods || true
+          kubectl -n smoke get events --sort-by=.lastTimestamp || true
+          for d in api worker cassandra; do
+            kubectl -n smoke logs "deploy/smoke-algorand-testnet-$d" --all-containers --tail=200 || true
+            # A crash-looping container: the start that failed, not the newest attempt.
+            kubectl -n smoke logs "deploy/smoke-algorand-testnet-$d" --all-containers --previous --tail=200 || true
+          done
+          kubectl -n smoke logs deploy/postgres --tail=100 || true
