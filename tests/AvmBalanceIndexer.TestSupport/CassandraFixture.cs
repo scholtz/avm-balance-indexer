@@ -102,11 +102,17 @@ public sealed class CassandraFixture : IAsyncLifetime
     };
 
     /// <summary>Creates a fresh keyspace, applies the schema (unless told not to) and returns the storage bound to it.</summary>
-    public async Task<CassandraChainStorage> CreateStorageAsync(string chain = ChainId.AlgorandTestnet, bool applySchema = true, TimeSpan? readDeadline = null, TimeSpan? leaseTtl = null, int? writeConcurrency = null, string[]? retiredKeyspaces = null, int retiredQuietMinutes = 0)
+    public async Task<CassandraChainStorage> CreateStorageAsync(string chain = ChainId.AlgorandTestnet, bool applySchema = true, TimeSpan? readDeadline = null, TimeSpan? leaseTtl = null, int? writeConcurrency = null, string[]? retiredKeyspaces = null, int retiredQuietMinutes = 0, bool upperCaseKeyspace = false)
     {
         await EnsureStartedAsync().ConfigureAwait(false);
         await RetireOldKeyspacesAsync().ConfigureAwait(false);
         var options = NewOptions();
+        if (upperCaseKeyspace)
+        {
+            // CQL folds an unquoted name to lower case; the configured spelling must still find the schema.
+            options.Keyspace = options.Keyspace.ToUpperInvariant();
+        }
+
         options.RetiredKeyspaces = retiredKeyspaces ?? [];
         options.RetiredKeyspaceQuietMinutes = retiredQuietMinutes;
         if (writeConcurrency is { } concurrency)

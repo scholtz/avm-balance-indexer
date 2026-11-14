@@ -41,6 +41,19 @@ public class CassandraSpecificTests(CassandraFixture cassandra)
     }
 
     [Fact]
+    public async Task A_Keyspace_Configured_In_Upper_Case_Is_Found_After_The_Schema_Was_Applied()
+    {
+        var storage = await cassandra.CreateStorageAsync(upperCaseKeyspace: true);
+
+        // Otherwise every start of every replica re-sends all DDL, the concurrent schema change EnsureSchemaAsync avoids.
+        Assert.True(await storage.SchemaExistsAsync(CancellationToken.None));
+
+        await storage.EnsureSchemaAsync(CancellationToken.None);
+        await storage.WriteRoundAsync(Status(0, IngestionState.Bootstrapping), [Effect(0, 0, TestChain.Account(1), 100, 100, EffectType.Genesis)], CancellationToken.None);
+        Assert.Equal(0UL, (await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!.IndexedRound);
+    }
+
+    [Fact]
     public async Task Holdings_Written_By_A_Round_That_Was_Never_Published_Are_Not_Visible()
     {
         var storage = await cassandra.CreateStorageAsync();
