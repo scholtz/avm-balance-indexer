@@ -232,26 +232,30 @@ v1.AddEndpointFilter(async (context, next) =>
             : Results.NotFound(new { error = "This deployment does not serve that chain.", requested, served });
     });
 
+// The historical-query limits are fixed at start: ApiOptions is read once (the `api` local above), storage and scan options are validated
+// on start. A synchronous query also ends when the storage read times out (503), which by default comes before the request timeout.
+var storageSettings = app.Services.GetRequiredService<IOptions<StorageOptions>>().Value;
+var historicalQueries = new HistoricalQueriesInfo(
+    "EffectAggregation",
+    Math.Min(
+        api.RequestTimeoutSeconds,
+        storageSettings.Provider == StorageProvider.Cassandra ? storageSettings.Cassandra.ReadTimeoutSeconds : storageSettings.PostgreSql.ReadTimeoutSeconds),
+    true,
+    app.Services.GetRequiredService<IOptions<ScanOptions>>().Value.MaxActive);
+
 v1.MapGet(
     "/status",
     async (
         ChainContext chain,
         IChainStorage storage,
         IOptions<StorageOptions> options,
-        IOptions<ScanOptions> scanOptions,
         TimeProvider clock,
         CancellationToken cancellationToken) =>
     {
         var status = await storage.GetAsync(chain.Chain, cancellationToken);
-        // ApiOptions is read and validated once at start (the `api` local above), like the rate limit and the timeout it reports.
-        // A synchronous query also ends when the storage read times out (503), which by default comes first.
-        var readTimeout = options.Value.Provider == StorageProvider.Cassandra
-            ? options.Value.Cassandra.ReadTimeoutSeconds
-            : options.Value.PostgreSql.ReadTimeoutSeconds;
-        var queries = new HistoricalQueriesInfo("EffectAggregation", Math.Min(api.RequestTimeoutSeconds, readTimeout), true, scanOptions.Value.MaxActive);
         if (status is null)
         {
-            return Results.Ok(new StatusResponse(chain.Chain, options.Value.Provider.ToString(), "NotStarted", null, null, null, null, "NotStarted", null, queries));
+            return Results.Ok(new StatusResponse(chain.Chain, options.Value.Provider.ToString(), "NotStarted", null, null, null, null, "NotStarted", null, historicalQueries));
         }
 
         // A writer clock ahead of the API's would give a negative age; that is not a stall.
@@ -266,7 +270,7 @@ v1.MapGet(
             status.UpdatedAt,
             age > api.StalledAfterSeconds ? "Stalled" : "Healthy",
             age,
-            queries));
+            historicalQueries));
     })
     .WithName("GetChainStatus")
     .Produces<StatusResponse>()

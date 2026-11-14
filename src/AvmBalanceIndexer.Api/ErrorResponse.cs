@@ -19,12 +19,9 @@ public sealed record StatusResponse(
     ulong? TargetRound,
     ulong? Lag,
     DateTimeOffset? UpdatedAt,
-    string Health = null!,
-    long? StatusAgeSeconds = null,
-    HistoricalQueriesInfo HistoricalQueries = null!);
-
-// The three fields added in #168 have defaults so that they are optional in the OpenAPI document: a client generated from it must
-// still read the status of a server that predates them. This server always sends them.
+    string Health,
+    long? StatusAgeSeconds,
+    HistoricalQueriesInfo HistoricalQueries);
 
 /// <summary>How holders at a round are computed, and the limits a synchronous request runs into.</summary>
 /// <param name="Mode">Always <c>EffectAggregation</c>: holders at a round are computed by aggregating token effects, there are no snapshots.</param>

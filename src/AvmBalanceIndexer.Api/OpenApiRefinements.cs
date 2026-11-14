@@ -51,6 +51,16 @@ internal static class OpenApiRefinements
             scanRequestSchema.Required.Clear();
         }
 
+        // The status fields added in #168 are optional in the contract, so that a client generated from it still reads the status of a
+        // server that predates them. This server always sends them.
+        if (document.Components.Schemas.TryGetValue("StatusResponse", out var status) && status is OpenApiSchema { Required: not null } statusSchema)
+        {
+            foreach (var added in (string[])["health", "statusAgeSeconds", "historicalQueries"])
+            {
+                statusSchema.Required.Remove(added);
+            }
+        }
+
         foreach (var schema in document.Components.Schemas.Values)
         {
             Normalize(schema);

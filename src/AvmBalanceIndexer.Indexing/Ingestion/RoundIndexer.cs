@@ -69,11 +69,7 @@ public sealed partial class RoundIndexer(
             {
                 // A very young network or a fleet that lags the tip: block 1 or the cursor block is not served yet. If algod
                 // is well ahead, the archive is missing the block for good and the supervisor must hear about it.
-                var tip = await WaitIfJustMissingAsync(ex, cancellationToken).ConfigureAwait(false);
-                if (status is not null)
-                {
-                    status = await HeartbeatAsync(status, tip, cancellationToken).ConfigureAwait(false);
-                }
+                await WaitIfJustMissingAsync(ex, cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -146,8 +142,9 @@ public sealed partial class RoundIndexer(
 
                 // At the tip the archival nodes may not have the newest block yet; wait and ask again. A block far behind the
                 // tip that nobody serves is a stall, not a wait.
-                var tip = await WaitIfJustMissingAsync(ex, cancellationToken).ConfigureAwait(false);
-                status = await HeartbeatAsync(status, tip, cancellationToken).ConfigureAwait(false);
+                // No heartbeat here on purpose: at the tip a block comes every few seconds, so a writer that cannot get one for
+                // longer than the stall threshold is stalled, and the status must show it (#168).
+                await WaitIfJustMissingAsync(ex, cancellationToken).ConfigureAwait(false);
             }
 
             await FlushAsync(tracker, pending, cancellationToken).ConfigureAwait(false);
@@ -167,8 +164,8 @@ public sealed partial class RoundIndexer(
             : adapter.FetchBlockAsync;
 
     /// <summary>
-    /// A writer at the tip, idle or waiting for a block the nodes do not serve yet, is alive: it republishes the status with the
-    /// latest round and a fresh timestamp, so that it is distinguishable from a stalled one (the API reports an old status as stalled).
+    /// A writer that has caught up with the tip is alive: it republishes the status with the latest round and a fresh timestamp, so that
+    /// it is distinguishable from a stalled one (the API reports an old status as stalled).
     /// </summary>
     private async Task<ChainStatus> HeartbeatAsync(ChainStatus status, ulong latest, CancellationToken cancellationToken)
     {
@@ -181,8 +178,7 @@ public sealed partial class RoundIndexer(
     /// Waits one poll interval when the missing block is within propagation distance of the chain tip; otherwise rethrows so
     /// that the worker backs off, logs and eventually stops instead of polling a hole in the archive forever.
     /// </summary>
-    /// <returns>The latest round of the chain it compared against.</returns>
-    private async Task<ulong> WaitIfJustMissingAsync(BlockNotAvailableException missing, CancellationToken cancellationToken)
+    private async Task WaitIfJustMissingAsync(BlockNotAvailableException missing, CancellationToken cancellationToken)
     {
         var latest = await adapter.GetLatestRoundAsync(cancellationToken).ConfigureAwait(false);
         if (missing.Round + (ulong)_options.FollowingThresholdRounds <= latest)
@@ -192,7 +188,6 @@ public sealed partial class RoundIndexer(
 
         LogWaitingForBlock(logger, missing.Round);
         await Task.Delay(_options.FollowPollInterval, _time, cancellationToken).ConfigureAwait(false);
-        return latest;
     }
 
     private async Task<(ChainStatus Status, RewardsState Rewards)> BootstrapGenesisAsync(ulong? stopAfterRound, CancellationToken cancellationToken)
