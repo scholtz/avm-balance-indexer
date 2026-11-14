@@ -5,7 +5,9 @@
 1. Open or pick a GitHub issue; every change references one.
 2. Branch from `main`: `feature/<issue>-<slug>` or `fix/<issue>-<slug>`.
 3. Keep PRs focused. CI must be green: build, unit tests, the storage contract suite (in-memory reference and
-   PostgreSQL), the live-network job, Docker builds and Helm lint.
+   PostgreSQL), the live-network job, Docker builds and Helm lint. Changes to the chart, the Dockerfiles or the start-up code
+   also run the Kubernetes smoke test (`k8s-smoke.yml`, not required): both images in a kind cluster, once with PostgreSQL and
+   once with the embedded Cassandra, checked through the API (provider, 20 indexed TestNet rounds, a balance at round 10).
 4. Squash-merge into `main`.
 
 ## Code

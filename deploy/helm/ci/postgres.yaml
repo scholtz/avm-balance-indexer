@@ -1,0 +1,52 @@
+# Throw-away PostgreSQL for the Kubernetes smoke test (.github/workflows/k8s-smoke.yml): no volume, no tuning, a fixed password.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: smoke-postgres
+type: Opaque
+stringData:
+  password: smoke
+  # The key the chart reads (templates/_storage-env.tpl).
+  connectionString: Host=postgres;Username=postgres;Password=smoke;Database=postgres
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+spec:
+  selector: { app: postgres }
+  ports:
+    - { name: postgres, port: 5432, targetPort: 5432 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: postgres }
+  template:
+    metadata:
+      labels: { app: postgres }
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:17
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: smoke-postgres, key: password }
+          ports:
+            - containerPort: 5432
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres"]
+            periodSeconds: 3
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+      volumes:
+        - name: data
+          emptyDir: {}

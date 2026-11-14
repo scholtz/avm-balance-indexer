@@ -7,6 +7,7 @@ How the code reaches the Kubernetes cluster, and every secret that has to exist 
 |---|---|---|
 | [`deploy-testnet.yml`](../.github/workflows/deploy-testnet.yml) | CI succeeded on a push to `main` (or by hand) | pushes the images `<version>-abi-<date>-<sha7>` and `testnet`, upgrades release `testnet` |
 | [`deploy-production.yml`](../.github/workflows/deploy-production.yml) | a tag `vX.Y.Z` on a commit of `main` (or by hand with an existing image tag) | pushes `<version>-abi-<date>-<sha7>`, `vX.Y.Z` and `latest`, upgrades release `mainnet`, then `voi` |
+| [`k8s-smoke.yml`](../.github/workflows/k8s-smoke.yml) | a pull request or push to `main` that changes `deploy/`, `docker/` or the start-up code (or by hand) | installs the chart in a kind cluster with the images built from the commit, once per storage provider (only Helm values differ), and checks through the API that the provider serves and TestNet is indexed; not a required check |
 | [`docker-publish.yml`](../.github/workflows/docker-publish.yml), [`helm-deploy.yml`](../.github/workflows/helm-deploy.yml) | called by the two above | build and push to Docker Hub; `helm upgrade --install --wait` in the namespace `avm-balance-indexer`, then a smoke test of `https://<host>/v1/<chain>/status` |
 
 What ends up where (one namespace, `avm-balance-indexer`, three releases):

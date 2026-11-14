@@ -1,0 +1,29 @@
+# Values of the Kubernetes smoke test (.github/workflows/k8s-smoke.yml): one small API and worker on a kind node.
+# The storage provider is chosen by the workflow with --set; nothing else differs between the PostgreSQL and the Cassandra leg.
+chain: algorand-testnet
+
+image:
+  repository: smoke/avm-balance-indexer
+  tag: ci
+  pullPolicy: Never   # loaded into kind with `kind load docker-image`
+
+api:
+  replicaCount: 1
+  podDisruptionBudget:
+    enabled: false
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { cpu: "1", memory: 512Mi }
+
+worker:
+  replicaCount: 1
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "2", memory: 2Gi }
+
+logging:
+  format: text
+
+# kind's default CNI does not enforce policies; leaving them out keeps the test about the configuration path.
+networkPolicy:
+  enabled: false
