@@ -11,6 +11,9 @@ on:
       - src/**
       - Directory.*.props
       - global.json
+      - AvmBalanceIndexer.slnx
+      - .dockerignore
+      - .editorconfig
       - .github/workflows/k8s-smoke.yml
   push:
     branches: [main]
@@ -28,7 +31,7 @@ jobs:
   smoke:
     name: Smoke (${{ matrix.provider }})
     runs-on: ubuntu-latest
-    # Image builds (~1 min), install (at most 10), API checks (at most about 12), diagnostics.
+    # Image builds (a few minutes), install (at most 10), checks (at most about 12), diagnostics.
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -70,7 +73,10 @@ jobs:
         run: |
           kubectl -n smoke get pods -o wide || true
           kubectl -n smoke describe pods || true
+          kubectl -n smoke get events --sort-by=.lastTimestamp || true
           for d in api worker cassandra; do
             kubectl -n smoke logs "deploy/smoke-algorand-testnet-$d" --all-containers --tail=200 || true
+            # A crash-looping container: the start that failed, not the newest attempt.
+            kubectl -n smoke logs "deploy/smoke-algorand-testnet-$d" --all-containers --previous --tail=200 || true
           done
           kubectl -n smoke logs deploy/postgres --tail=100 || true

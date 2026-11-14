@@ -93,7 +93,8 @@ PR comments when #18 (normalizer) needs storage contract members that #14/#22 ch
    change. A finding you reject gets a short PR comment explaining why and counts as resolved. If round 4 still
    produces only speculative or style findings, stop and note it in the PR; real bugs are never skipped.
 7. **Merge**: if main moved and conflicts with you, rebase and force-push (CI restarts); otherwise just wait for green CI
-   (all five checks exist and none is pending or failing; `gh pr checks <n> --watch` can return before they are registered, see Lessons), then
+   (all five checks exist and none is pending or failing; `gh pr checks <n> --watch` can return before they are registered, see Lessons;
+   when the path-filtered `Smoke (...)` legs of `k8s-smoke.yml` run, wait for them too and fix a failure unless it is a TestNet outage), then
    `gh pr merge <n> --squash --delete-branch`. Confirm the issue is closed (`gh issue view <n>`); if not, close it with
    a comment linking the PR.
 8. **Retrospective**: note what cost time (CI failures, review findings, merge conflicts, tooling quirks, wrong
