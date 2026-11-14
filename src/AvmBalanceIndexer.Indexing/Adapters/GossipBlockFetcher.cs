@@ -23,6 +23,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
     private readonly TimeProvider _time;
     private readonly ConcurrentDictionary<string, DateTimeOffset> _cooldownUntil = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, DateTimeOffset> _invalidRelayReported = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, DateTimeOffset> _relayRestUntil = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, HostLatency> _latency = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, HostGate> _gates = new(StringComparer.OrdinalIgnoreCase);
     private readonly ThrottleReport _throttleReport;
@@ -83,6 +84,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
         var errors = 0;
         var badData = 0;
         var throttling = new ThrottleState();
+        List<(string Host, BlockValidationException Error)>? invalidRelays = null;
 
         // A rate-limited answer is not an attempt: the node is paused and the request goes to the next one, or waits.
         for (var attempt = 0; attempt < _options.MaxAttempts;)
@@ -95,6 +97,16 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
                 var block = BlockDecoder.Decode(payload, round, _profile, _expectedGenesisHash);
                 _cooldownUntil.TryRemove(host, out _);
                 ReportThrottling(_throttleReport.Flush(_time.GetUtcNow()));
+                if (invalidRelays is not null)
+                {
+                    // Another node served a block that validates: the relays that failed validation served wrong data. (When no node
+                    // does, the cause may be this decoder, and no relay is blamed.)
+                    foreach (var (relay, error) in invalidRelays)
+                    {
+                        ReportInvalidRelay(relay, round, error);
+                    }
+                }
+
                 return block;
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -158,16 +170,12 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
                     // Relays are optional extra capacity: a failing one is cooled down and left out of this fetch without using up an
                     // attempt, and says nothing about the archival fleet.
                     missedRelays.Add(host);
+                    _cooldownUntil[host] = _time.GetUtcNow() + _options.HostCooldown;
+                    LogAttemptFailed(_logger, ex, round, host, attempt + 1, _options.MaxAttempts);
                     if (ex is BlockValidationException invalid)
                     {
-                        // A relay that answers with a block that fails validation serves corrupt or foreign data: rest it much longer,
-                        // and report it at Error at most once an hour, so that a persistently bad relay is visible.
-                        ReportInvalidRelay(host, round, invalid);
-                    }
-                    else
-                    {
-                        _cooldownUntil[host] = _time.GetUtcNow() + _options.HostCooldown;
-                        LogAttemptFailed(_logger, ex, round, host, attempt + 1, _options.MaxAttempts);
+                        // Judged once the fetch knows whether another node serves a block that validates.
+                        (invalidRelays ??= []).Add((host, invalid));
                     }
                     if (++relayFailures >= MaxRelayFailuresPerFetch)
                     {
@@ -224,7 +232,12 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
         try
         {
             var relays = await _hosts.GetRelayHostsAsync(cancellationToken).ConfigureAwait(false);
-            return new HashSet<string>(relays.Except(archival, StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase);
+            // A relay resting after serving an invalid block is left out entirely, not just ordered last.
+            var now = _time.GetUtcNow();
+            return new HashSet<string>(
+                relays.Except(archival, StringComparer.OrdinalIgnoreCase)
+                    .Where(relay => !(_relayRestUntil.TryGetValue(relay, out var until) && until > now)),
+                StringComparer.OrdinalIgnoreCase);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -449,17 +462,41 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
         }
     }
 
-    /// <summary>Rests a relay that served an invalid block ten times the normal cooldown (at most an hour) and reports it at most hourly.</summary>
+    /// <summary>
+    /// A relay served a block that fails validation while another node served one that validates: it serves corrupt or foreign data.
+    /// It is left out of relay lists for ten times the host cooldown (at least the cooldown, at most an hour) and reported at Error at
+    /// most once an hour.
+    /// </summary>
     private void ReportInvalidRelay(string host, ulong round, BlockValidationException error)
     {
         var now = _time.GetUtcNow();
-        var rest = TimeSpan.FromTicks(Math.Min(_options.HostCooldown.Ticks * 10, TimeSpan.FromHours(1).Ticks));
-        _cooldownUntil[host] = now + rest;
-        if (!_invalidRelayReported.TryGetValue(host, out var last) || now - last >= TimeSpan.FromHours(1))
+        var hour = TimeSpan.FromHours(1);
+        var cooldown = _options.HostCooldown;
+        var rest = cooldown >= hour / 10 ? (cooldown > hour ? cooldown : hour) : cooldown * 10;
+        _relayRestUntil[host] = now + rest;
+
+        // One report per hour even when concurrent fetches hit the same relay at once: only the caller that installs the new time logs.
+        while (true)
         {
-            _invalidRelayReported[host] = now;
-            LogInvalidRelay(_logger, error, host, round, rest);
+            if (_invalidRelayReported.TryGetValue(host, out var last))
+            {
+                if (now - last < hour)
+                {
+                    return;
+                }
+
+                if (_invalidRelayReported.TryUpdate(host, now, last))
+                {
+                    break;
+                }
+            }
+            else if (_invalidRelayReported.TryAdd(host, now))
+            {
+                break;
+            }
         }
+
+        LogInvalidRelay(_logger, error, host, round, rest);
     }
 
     private TimeSpan BackoffDelay(int attempt)

@@ -551,6 +551,7 @@ public class GossipBlockFetcherTests
         var logger = new CapturingLogger();
         var clock = new ManualClock();
         var relayCalls = 0;
+        var archiveHasBlock = true;
         var fetcher = CreateFetcher(
             (request, _) =>
             {
@@ -561,7 +562,7 @@ public class GossipBlockFetcherTests
                 }
 
                 // The relay answers with another round's block: it fails validation. The archival node is right.
-                return Task.FromResult(Ok(Chain.Encode(relay ? 1001UL : 1000UL, [])));
+                return Task.FromResult(relay ? Ok(Chain.Encode(1001, [])) : Volatile.Read(ref archiveHasBlock) ? Ok(Chain.Encode(1000, [])) : new HttpResponseMessage(HttpStatusCode.NotFound));
             },
             time: clock,
             logger: logger,
@@ -592,10 +593,35 @@ public class GossipBlockFetcherTests
 
         Assert.Equal(calls, Volatile.Read(ref relayCalls));
 
+        // Left out, not merely ordered last: also when the archival node does not have the block, the relay is not asked.
+        Volatile.Write(ref archiveHasBlock, false);
+        await Assert.ThrowsAsync<BlockNotAvailableException>(() => fetcher.FetchBlockAsync(1000, 1000, CancellationToken.None));
+        Assert.Equal(calls, Volatile.Read(ref relayCalls));
+        Volatile.Write(ref archiveHasBlock, true);
+
         // After the long rest it is asked again; a second invalid answer within the hour is not reported again.
         clock.Advance(TimeSpan.FromMinutes(9));
         await FetchUntilTheRelayWasAskedAsync();
         Assert.Single(logger.Entries, static e => e.Level == LogLevel.Error);
+    }
+
+    [Fact]
+    public async Task No_Relay_Is_Blamed_When_No_Node_Serves_A_Block_That_Validates()
+    {
+        // Every node's answer fails validation, for example a block this decoder cannot handle: not the relay's fault.
+        var logger = new CapturingLogger();
+        var fetcher = CreateFetcher(
+            (_, _) => Task.FromResult(Ok(Chain.Encode(1001, []))),
+            maxAttempts: 3,
+            logger: logger,
+            provider: new TieredHosts(["http://archive.test:4160"], ["http://relay.test:4160"]));
+
+        for (var i = 0; i < 10; i++)
+        {
+            await Assert.ThrowsAsync<BlockFetchException>(() => fetcher.FetchBlockAsync(1000, 1000, CancellationToken.None));
+        }
+
+        Assert.DoesNotContain(logger.Entries, static e => e.Level == LogLevel.Error);
     }
 
     [Fact]

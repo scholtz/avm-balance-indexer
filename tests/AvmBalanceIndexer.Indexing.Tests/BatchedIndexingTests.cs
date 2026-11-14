@@ -109,6 +109,28 @@ public class BatchedIndexingTests
     }
 
     [Fact]
+    public async Task A_Writer_Resuming_Right_After_Genesis_Fetches_Block_1_Without_A_Tip_Hint()
+    {
+        // Block 1 is old on any but a brand-new chain, and relays prune old blocks.
+        var storage = new RecordingStorage(new ChainContext(ChainId.AlgorandTestnet));
+        await Indexer(storage, Adapter()).RunAsync(0, CancellationToken.None);
+        var restarted = Adapter();
+        restarted.Latest = LastRound;
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+
+        var run = Indexer(storage, restarted, new IndexerOptions { FetchConcurrency = 1, FollowingThresholdRounds = 0, FollowPollInterval = TimeSpan.FromMilliseconds(10) }).RunAsync(null, stop.Token);
+        while ((await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!.IndexedRound < LastRound)
+        {
+            await Task.Delay(10, stop.Token);
+        }
+
+        await stop.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+
+        Assert.Empty(restarted.TipHints); // the seed (block 1) without a hint, and the backfill pass gives none either
+    }
+
+    [Fact]
     public async Task A_Bounded_Resume_Fetches_Its_Seed_Block_Without_A_Tip_Hint()
     {
         var storage = new RecordingStorage(new ChainContext(ChainId.AlgorandTestnet));
