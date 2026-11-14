@@ -16,13 +16,20 @@ old ones and answer 404 for them.
   the same latency-weighted selection; older rounds, and calls without a tip, use archival nodes only.
 - `RoundIndexer` passes the tip (the algod latest round) only for unbounded passes that start within
   `Indexer:FollowingThresholdRounds` of it. A bounded run's target may be far behind the real tip, and a long backfill pass
-  outlives its target, where a relay would only answer 404.
+  outlives its target, where a relay would only answer 404. A writer resuming while following the chain re-fetches its seed
+  block (the last published round) with the tip as well, so a restart at the tip costs no archival request (#169); the fetcher
+  asks relays only when that block is within its recent-rounds window. Certificate votes are not checked (ADR 0004), so a seed
+  block that does not match the stored cursor is fetched again from the archival nodes alone before a divergence is declared.
 - Operator-configured `Algorand:GossipHosts` are used as given; relay discovery is skipped for them.
 - Relays are optional capacity and never decide the health of a fetch. Within one fetch a relay is asked at most once;
   a relay that lacks the block, fails or rate limits is left out for the rest of that fetch without using up an attempt
   (after two failing relays all of them are), is not counted towards the throttle timeout and does not count towards the
   "block not out yet" decision, which only archival answers make. Failures cool the relay down and a miss lowers its
-  latency score like any host's.
+  latency score like any host's. A relay whose block fails validation is judged once some node serves a block of the same round
+  that validates (in the same fetch or a later one; at the tip the archival nodes often lack it at first). Then it served corrupt
+  or foreign data: it is left out of the relay list for ten times the host cooldown, capped at an hour but never shorter than the
+  cooldown, and reported as a Warning at most once an hour per relay (#169). While no node serves a valid block the cause may be this
+  decoder, and no relay is blamed.
 
 ## Consequences
 Tip following is spread over about 11 nodes instead of 4. Relays keep a bounded history, so the window must stay well below

@@ -87,6 +87,91 @@ public class BatchedIndexingTests
     }
 
     [Fact]
+    public async Task A_Writer_Resuming_At_The_Tip_Fetches_Its_Seed_Block_With_The_Tip_Hint()
+    {
+        // The seed block (the last published round) is re-fetched on every start; at the tip relays can serve it (#169, ADR 0019).
+        var storage = new RecordingStorage(new ChainContext(ChainId.AlgorandTestnet));
+        await Indexer(storage, Adapter()).RunAsync(LastRound, CancellationToken.None);
+        var restarted = Adapter();
+        restarted.Latest = LastRound;
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+
+        var run = Indexer(storage, restarted, new IndexerOptions { FetchConcurrency = 2, FollowPollInterval = TimeSpan.FromMilliseconds(10) }).RunAsync(null, stop.Token);
+        while (restarted.FetchCount == 0)
+        {
+            await Task.Delay(10, stop.Token);
+        }
+
+        await stop.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+
+        Assert.Equal([LastRound], restarted.TipHints); // the seed fetch, the only fetch of a writer that is already caught up
+    }
+
+    [Fact]
+    public async Task A_Wrong_Seed_Block_From_A_Relay_Does_Not_Stop_The_Writer_When_The_Archival_Nodes_Serve_The_Right_One()
+    {
+        // With the tip hint the seed may come from a public relay. A different (self-consistent) block from there must not end in a
+        // "chain divergence, rebuild the database": the archival nodes decide.
+        var storage = new RecordingStorage(new ChainContext(ChainId.AlgorandTestnet));
+        await Indexer(storage, Adapter()).RunAsync(LastRound, CancellationToken.None);
+        var foreign = Blocks(new TestChain { TxnCounterBefore = 1_000 }).Single(static b => b.Round == LastRound);
+        var restarted = new RelayServes(Adapter(), foreign) { Latest = LastRound };
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+
+        var run = Indexer(storage, restarted, new IndexerOptions { FetchConcurrency = 2, FollowPollInterval = TimeSpan.FromMilliseconds(10) }).RunAsync(null, stop.Token);
+        while (restarted.ArchivalFetches == 0 && !run.IsCompleted)
+        {
+            await Task.Delay(10, stop.Token);
+        }
+
+        await Task.Delay(100, CancellationToken.None);
+        Assert.False(run.IsCompleted, run.Exception?.ToString()); // still following, not stopped by a divergence
+        await stop.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+    }
+
+    /// <summary>Serves <paramref name="relayBlock"/> for fetches with a tip hint (as a relay could), the real chain otherwise.</summary>
+    private sealed class RelayServes(FakeChainAdapter archive, Adapters.BlockData relayBlock) : Adapters.IChainAdapter
+    {
+        private int _archivalFetches;
+
+        public ulong? Latest { get => archive.Latest; set => archive.Latest = value; }
+
+        public int ArchivalFetches => Volatile.Read(ref _archivalFetches);
+
+        public Adapters.ChainProfile Profile => archive.Profile;
+
+        public ReadOnlyMemory<byte> GenesisHash => archive.GenesisHash;
+
+        public Task<ulong> GetLatestRoundAsync(CancellationToken cancellationToken) => archive.GetLatestRoundAsync(cancellationToken);
+
+        public Task<Adapters.GenesisDocument> GetGenesisAsync(CancellationToken cancellationToken) => archive.GetGenesisAsync(cancellationToken);
+
+        public Task<Adapters.BlockData> FetchBlockAsync(ulong round, ulong latestRound, CancellationToken cancellationToken) =>
+            round == relayBlock.Round ? Task.FromResult(relayBlock) : archive.FetchBlockAsync(round, latestRound, cancellationToken);
+
+        public Task<Adapters.BlockData> FetchBlockAsync(ulong round, CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref _archivalFetches);
+            return archive.FetchBlockAsync(round, cancellationToken);
+        }
+    }
+
+    [Fact]
+    public async Task A_Bounded_Resume_Fetches_Its_Seed_Block_Without_A_Tip_Hint()
+    {
+        var storage = new RecordingStorage(new ChainContext(ChainId.AlgorandTestnet));
+        await Indexer(storage, Adapter()).RunAsync(LastRound - 2, CancellationToken.None);
+        var resumed = Adapter();
+
+        await Indexer(storage, resumed).RunAsync(LastRound, CancellationToken.None);
+
+        Assert.True(resumed.FetchCount > 0);
+        Assert.Empty(resumed.TipHints); // a bounded run's target is not the chain tip
+    }
+
+    [Fact]
     public async Task A_Backfill_Pass_Gives_The_Fetcher_No_Tip_Because_The_Tip_Moves_On_During_It()
     {
         var storage = new RecordingStorage(new ChainContext(ChainId.AlgorandTestnet));

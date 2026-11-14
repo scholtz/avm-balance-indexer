@@ -546,6 +546,169 @@ public class GossipBlockFetcherTests
     }
 
     [Fact]
+    public async Task A_Relay_That_Serves_An_Invalid_Block_Is_Reported_Once_And_Rested_Longer()
+    {
+        var logger = new CapturingLogger();
+        var clock = new ManualClock();
+        var relayCalls = 0;
+        var archiveHasBlock = true;
+        var fetcher = CreateFetcher(
+            (request, _) =>
+            {
+                var relay = request.RequestUri!.Host.StartsWith("relay", StringComparison.Ordinal);
+                if (relay)
+                {
+                    Interlocked.Increment(ref relayCalls);
+                }
+
+                // The relay answers with another round's block: it fails validation. The archival node is right.
+                return Task.FromResult(relay ? Ok(Chain.Encode(1001, [])) : Volatile.Read(ref archiveHasBlock) ? Ok(Chain.Encode(1000, [])) : new HttpResponseMessage(HttpStatusCode.NotFound));
+            },
+            time: clock,
+            logger: logger,
+            provider: new TieredHosts(["http://archive.test:4160"], ["http://relay.test:4160"]));
+
+        async Task FetchUntilTheRelayWasAskedAsync()
+        {
+            var before = Volatile.Read(ref relayCalls);
+            for (var i = 0; i < 200 && Volatile.Read(ref relayCalls) == before; i++)
+            {
+                Assert.Equal(1000UL, (await fetcher.FetchBlockAsync(1000, 1000, CancellationToken.None)).Round);
+            }
+
+            Assert.True(Volatile.Read(ref relayCalls) > before, "the relay was never asked");
+        }
+
+        await FetchUntilTheRelayWasAskedAsync();
+        var reported = Assert.Single(logger.Entries, static e => e.Message.Contains("failed validation", StringComparison.Ordinal));
+        Assert.Equal(LogLevel.Warning, reported.Level);
+        Assert.Contains("relay.test", reported.Message, StringComparison.Ordinal);
+
+        // Longer than the normal cooldown (1 minute here), shorter than the long one (10 minutes): the relay is left alone.
+        clock.Advance(TimeSpan.FromMinutes(2));
+        var calls = Volatile.Read(ref relayCalls);
+        for (var i = 0; i < 40; i++)
+        {
+            await fetcher.FetchBlockAsync(1000, 1000, CancellationToken.None);
+        }
+
+        Assert.Equal(calls, Volatile.Read(ref relayCalls));
+
+        // Left out, not merely ordered last: also when the archival node does not have the block, the relay is not asked.
+        Volatile.Write(ref archiveHasBlock, false);
+        await Assert.ThrowsAsync<BlockNotAvailableException>(() => fetcher.FetchBlockAsync(1000, 1000, CancellationToken.None));
+        Assert.Equal(calls, Volatile.Read(ref relayCalls));
+        Volatile.Write(ref archiveHasBlock, true);
+
+        // After the long rest it is asked again; a second invalid answer within the hour is not reported again.
+        clock.Advance(TimeSpan.FromMinutes(9));
+        await FetchUntilTheRelayWasAskedAsync();
+        Assert.Single(logger.Entries, static e => e.Message.Contains("failed validation", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_Relay_Is_Blamed_When_A_Later_Fetch_Of_The_Same_Round_Gets_A_Valid_Block()
+    {
+        // At the tip the archival nodes often do not have the block yet: the fetch that met the bad relay fails as "not available",
+        // and the round only validates on a later fetch. The relay must still be reported then.
+        var logger = new CapturingLogger();
+        var archiveHasBlock = false;
+        var fetcher = CreateFetcher(
+            (request, _) => Task.FromResult(request.RequestUri!.Host.StartsWith("relay", StringComparison.Ordinal)
+                ? Ok(Chain.Encode(1001, []))
+                : Volatile.Read(ref archiveHasBlock) ? Ok(Chain.Encode(1000, [])) : new HttpResponseMessage(HttpStatusCode.NotFound)),
+            maxAttempts: 3,
+            logger: logger,
+            provider: new TieredHosts(["http://archive.test:4160"], ["http://relay.test:4160"]));
+
+        for (var i = 0; i < 200 && !logger.Entries.Any(static e => e.Message.Contains("relay.test", StringComparison.Ordinal)); i++)
+        {
+            await Assert.ThrowsAsync<BlockNotAvailableException>(() => fetcher.FetchBlockAsync(1000, 1000, CancellationToken.None));
+        }
+
+        Assert.DoesNotContain(logger.Entries, static e => e.Message.Contains("failed validation", StringComparison.Ordinal)); // not judged while no node has a valid block
+
+        Volatile.Write(ref archiveHasBlock, true);
+        Assert.Equal(1000UL, (await fetcher.FetchBlockAsync(1000, 1000, CancellationToken.None)).Round);
+
+        var reported = Assert.Single(logger.Entries, static e => e.Message.Contains("failed validation", StringComparison.Ordinal));
+        Assert.Contains("relay.test", reported.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(30, 300)] // ten times the cooldown
+    [InlineData(360, 3600)] // capped at an hour
+    [InlineData(600, 3600)]
+    [InlineData(3600, 3600)] // the longest cooldown the options allow
+    public void An_Invalid_Relay_Rests_Ten_Cooldowns_Capped_At_An_Hour_But_Not_Below_The_Cooldown(int cooldownSeconds, int restSeconds) =>
+        Assert.Equal(TimeSpan.FromSeconds(restSeconds), GossipBlockFetcher.InvalidRelayRest(TimeSpan.FromSeconds(cooldownSeconds)));
+
+    [Fact]
+    public async Task A_Relay_That_Later_Serves_The_Valid_Block_Itself_Is_Not_Blamed()
+    {
+        var logger = new CapturingLogger();
+        var relayFixed = false;
+        var fetcher = CreateFetcher(
+            (request, _) => Task.FromResult(request.RequestUri!.Host.StartsWith("relay", StringComparison.Ordinal)
+                ? Ok(Chain.Encode(Volatile.Read(ref relayFixed) ? 1000UL : 1001UL, []))
+                : new HttpResponseMessage(HttpStatusCode.NotFound)),
+            maxAttempts: 3,
+            logger: logger,
+            provider: new TieredHosts(["http://archive.test:4160"], ["http://relay.test:4160"]));
+
+        await Assert.ThrowsAsync<BlockNotAvailableException>(() => fetcher.FetchBlockAsync(1000, 1000, CancellationToken.None));
+        Volatile.Write(ref relayFixed, true);
+        ulong? served = null;
+        for (var i = 0; i < 50 && served is null; i++)
+        {
+            try
+            {
+                served = (await fetcher.FetchBlockAsync(1000, 1000, CancellationToken.None)).Round;
+            }
+            catch (BlockNotAvailableException)
+            {
+                // The relay may still be in its normal cooldown; ask again.
+            }
+        }
+
+        Assert.Equal(1000UL, served);
+        Assert.DoesNotContain(logger.Entries, static e => e.Message.Contains("failed validation", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task No_Relay_Is_Blamed_When_No_Node_Serves_A_Block_That_Validates()
+    {
+        // Every node's answer fails validation, for example a block this decoder cannot handle: not the relay's fault.
+        var logger = new CapturingLogger();
+        var fetcher = CreateFetcher(
+            (_, _) => Task.FromResult(Ok(Chain.Encode(1001, []))),
+            maxAttempts: 3,
+            logger: logger,
+            provider: new TieredHosts(["http://archive.test:4160"], ["http://relay.test:4160"]));
+
+        for (var i = 0; i < 10; i++)
+        {
+            await Assert.ThrowsAsync<BlockFetchException>(() => fetcher.FetchBlockAsync(1000, 1000, CancellationToken.None));
+        }
+
+        Assert.DoesNotContain(logger.Entries, static e => e.Message.Contains("failed validation", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task An_Invalid_Block_From_A_Relay_Does_Not_Make_The_Fetch_Fail_As_Bad_Data()
+    {
+        // Only the relay answers, and wrongly; the archival node does not have the block yet: that is "not available", as before.
+        var fetcher = CreateFetcher(
+            (request, _) => Task.FromResult(request.RequestUri!.Host.StartsWith("relay", StringComparison.Ordinal)
+                ? Ok(Chain.Encode(1001, []))
+                : new HttpResponseMessage(HttpStatusCode.NotFound)),
+            maxAttempts: 3,
+            provider: new TieredHosts(["http://archive.test:4160"], ["http://relay.test:4160"]));
+
+        await Assert.ThrowsAsync<BlockNotAvailableException>(() => fetcher.FetchBlockAsync(1000, 1000, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task Failing_Relays_Between_Archival_Attempts_Do_Not_Make_The_Rotation_Skip_An_Archival_Node()
     {
         string[] archival = ["http://a1.test:4160", "http://a2.test:4160", "http://a3.test:4160"];
