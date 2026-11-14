@@ -165,3 +165,4 @@ prove it), size it to one PR, and add `enhancement` plus your team label. Cite s
 - A setting that Cassandra reads only at start (`auto_snapshot_ttl`) must be deployed in an earlier release than the action that depends on it (a drop), otherwise the snapshot is made without it; split such a change into two merges.
 - `gh pr checks --watch` and a poll for "no pending" return while only the first checks are registered: wait until the expected number of checks exists and none is pending.
 - Run the Helm and shell snippets of CI/workflows before pushing, one case per branch (`docker run alpine/helm` with the repo mounted): reviews found real defects (pipefail with `grep -q`, a failing `sed` stopping a pod) that no .NET test reaches.
+- Alert rules: every review round found a false alert in a normal situation (failover, slow backfill, quiet API, a replica with stale gauges) -> write promtool tests for the silent side together with each rule, not only the firing one.
