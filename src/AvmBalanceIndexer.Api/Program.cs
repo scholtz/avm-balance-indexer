@@ -248,27 +248,28 @@ v1.MapGet(
     async (
         ChainContext chain,
         IChainStorage storage,
-        IOptions<StorageOptions> options,
         TimeProvider clock,
         CancellationToken cancellationToken) =>
     {
         var status = await storage.GetAsync(chain.Chain, cancellationToken);
         if (status is null)
         {
-            return Results.Ok(new StatusResponse(chain.Chain, options.Value.Provider.ToString(), "NotStarted", null, null, null, null, "NotStarted", null, historicalQueries));
+            return Results.Ok(new StatusResponse(chain.Chain, storageSettings.Provider.ToString(), "NotStarted", null, null, null, null, "NotStarted", null, historicalQueries));
         }
 
-        // A writer clock ahead of the API's would give a negative age; that is not a stall.
-        var age = (long)Math.Max(0, Math.Floor((clock.GetUtcNow() - status.UpdatedAt).TotalSeconds));
+        // A writer clock ahead of the API's would give a negative age; that is not a stall. The verdict uses the exact age, the
+        // response the whole seconds.
+        var elapsed = clock.GetUtcNow() - status.UpdatedAt;
+        var age = (long)Math.Max(0, Math.Floor(elapsed.TotalSeconds));
         return Results.Ok(new StatusResponse(
             chain.Chain,
-            options.Value.Provider.ToString(),
+            storageSettings.Provider.ToString(),
             status.State.ToString(),
             status.IndexedRound,
             status.TargetRound,
             status.Lag,
             status.UpdatedAt,
-            age > api.StalledAfterSeconds ? "Stalled" : "Healthy",
+            elapsed > TimeSpan.FromSeconds(api.StalledAfterSeconds) ? "Stalled" : "Healthy",
             age,
             historicalQueries));
     })

@@ -92,8 +92,9 @@ public sealed class ApiTests : IDisposable
     [InlineData(-30, "Healthy", 30)]
     [InlineData(-120, "Healthy", 120)]
     [InlineData(-121, "Stalled", 121)]
+    [InlineData(-120.5, "Stalled", 120)] // longer than the threshold, although the reported whole seconds equal it
     [InlineData(45, "Healthy", 0)] // a writer clock ahead of the API's: never a negative age
-    public async Task Status_Reports_Stalled_When_The_Writer_Has_Not_Updated_It_For_Too_Long(int offsetSeconds, string health, long age)
+    public async Task Status_Reports_Stalled_When_The_Writer_Has_Not_Updated_It_For_Too_Long(double offsetSeconds, string health, long age)
     {
         await _storage.WriteRoundAsync(
             new ChainStatus(ChainId.AlgorandTestnet, 0, TestChain.FakeHash(0), 0, IngestionState.Following, Now.AddSeconds(offsetSeconds)),

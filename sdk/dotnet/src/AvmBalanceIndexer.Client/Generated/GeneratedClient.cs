@@ -1791,7 +1791,7 @@ namespace AvmBalanceIndexer.Client.Generated
         public string Mode { get; set; } = default!;
 
         /// <summary>
-        /// Longest a synchronous query can run: the smaller of the request timeout (answered with 504) and the storage read timeout (answered with 503). A query that needs longer belongs in an asynchronous scan.
+        /// The smaller of the request timeout (answered with 504) and the storage read timeout (answered with 503). On Cassandra the read timeout bounds a whole read; on PostgreSQL it bounds each statement, so a request can run until the request timeout. A query that needs longer belongs in an asynchronous scan.
         /// </summary>
         [System.Text.Json.Serialization.JsonPropertyName("synchronousTimeoutSeconds")]
         public int SynchronousTimeoutSeconds { get; set; } = default!;
