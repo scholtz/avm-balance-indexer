@@ -1,0 +1,48 @@
+{{- with .Values.api.autoscaling }}
+{{- if .enabled }}
+{{- range $name := list "minReplicas" "maxReplicas" }}
+{{- if not (regexMatch "^[1-9][0-9]{0,3}$" (toString (get $.Values.api.autoscaling $name))) }}
+{{- fail (printf "api.autoscaling.%s %v must be a whole number of replicas, at least 1" $name (get $.Values.api.autoscaling $name)) }}
+{{- end }}
+{{- end }}
+{{- if gt (int .minReplicas) (int .maxReplicas) }}
+{{- fail "api.autoscaling.minReplicas must not be greater than api.autoscaling.maxReplicas" }}
+{{- end }}
+{{- /* Utilization is measured against the CPU request and may exceed 100 (limits above requests); the API field is an integer. */}}
+{{- if not (regexMatch "^[1-9][0-9]{0,3}$" (toString .targetCPUUtilizationPercentage)) }}
+{{- fail (printf "api.autoscaling.targetCPUUtilizationPercentage %v must be a whole number of percent of the CPU request (1 to 9999)" .targetCPUUtilizationPercentage) }}
+{{- end }}
+{{- /* Kubernetes takes the CPU request from the limit when only a limit is set. */}}
+{{- $resources := default dict $.Values.api.resources }}
+{{- if not (or (dig "requests" "cpu" "" $resources) (dig "limits" "cpu" "" $resources)) }}
+{{- fail "api.autoscaling needs api.resources.requests.cpu (or limits.cpu): CPU utilization is measured against the request" }}
+{{- end }}
+{{- with $.Values.api.podDisruptionBudget }}
+{{- if and .enabled (regexMatch "^[0-9]+$" (toString .minAvailable)) (le (int $.Values.api.autoscaling.minReplicas) (int .minAvailable)) }}
+{{- fail (printf "api.autoscaling.minReplicas must be greater than api.podDisruptionBudget.minAvailable (%v): at the minimum no API pod could be evicted and every node drain would block" .minAvailable) }}
+{{- end }}
+{{- end }}
+# Scales the API on CPU. Needs metrics-server. The API is stateless (reads only), so it is the one component that is safe to scale;
+# the worker has a single writer and the embedded Cassandra a single data directory.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "avm.fullname" $ }}-api
+  labels: {{- include "avm.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "avm.fullname" $ }}-api
+  minReplicas: {{ .minReplicas }}
+  maxReplicas: {{ .maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .targetCPUUtilizationPercentage }}
+{{- end }}
+{{- end }}

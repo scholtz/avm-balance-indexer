@@ -129,6 +129,7 @@ jobs:
         env:
           RELEASE: ${{ inputs.release }}
           CHAIN: ${{ inputs.chain }}
+          VALUES: ${{ inputs.values }}
         run: |
           # can-i answers yes or no; anything else (a flaky API server) stops the job instead of being read as "no".
           can() {
@@ -137,7 +138,29 @@ jobs:
             [ "$answer" = yes ]
           }
           missing=()
-          for resource in deployments.apps services configmaps secrets ingresses.networking.k8s.io; do
+          resources=(deployments.apps services configmaps secrets ingresses.networking.k8s.io)
+          # The API autoscaler is opt-in per release (api.autoscaling.enabled). Its rights are needed when the values enable it, and to
+          # delete it when they switch it off again (a missing delete right would fail the upgrade half way).
+          hpa=no
+          if [ "$(yq '.api.autoscaling.enabled // false' "deploy/helm/values/$VALUES")" = true ]; then
+            hpa=yes
+          elif can get horizontalpodautoscalers.autoscaling; then
+            # Switched off (or never on): an autoscaler left from earlier is removed by this upgrade and recreated by its rollback.
+            # Only "not found" means there is none; any other failure of the lookup is not an answer. An account that may not even read
+            # autoscalers never created one (after a switch to such an account, remove a leftover autoscaler by hand).
+            if probe="$(kubectl -n "$NAMESPACE" get horizontalpodautoscaler "${RELEASE}-${CHAIN}-api" -o name 2>&1)"; then
+              hpa="yes (to remove it)"
+            elif ! grep -q "NotFound" <<< "$probe"; then
+              echo "::error::Could not tell whether the release has an API autoscaler to remove: $probe"; exit 1
+            fi
+          fi
+          if [ "$hpa" != no ]; then
+            # All rights including delete: the --atomic rollback removes or recreates the autoscaler.
+            for verb in get list watch create update patch delete; do
+              can "$verb" horizontalpodautoscalers.autoscaling || missing+=("$verb horizontalpodautoscalers.autoscaling")
+            done
+          fi
+          for resource in "${resources[@]}"; do
             for verb in get list watch create update patch; do
               can "$verb" "$resource" || missing+=("$verb $resource")
             done
@@ -153,6 +176,7 @@ jobs:
             for item in "${missing[@]}"; do echo "::error::The kube config may not $item"; done
             echo "::error::Grant these in the namespace ${NAMESPACE} (deploy/rbac/deployer.yaml lists everything the chart needs)"; exit 1
           fi
+          echo "API autoscaler in the values: $hpa"
           # The PodDisruptionBudget only protects the API during node drains.
           for verb in get list watch create update patch; do
             if ! can "$verb" poddisruptionbudgets.policy; then
