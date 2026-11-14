@@ -48,7 +48,18 @@ public sealed class IndexingMetricsTests : IDisposable
         _capture.Metrics.DecoderError(DecoderErrorKind.Arc200Log, 2);
         _capture.Metrics.DecoderError(DecoderErrorKind.Arc200Log, 0);
 
-        Assert.Equal([("block", 1d), ("arc200_log", 2d)], _capture.Of("avm.indexer.decoder_errors").Select(static m => ((string)m.Tags["kind"]!, m.Value)));
+        Assert.Equal(1, _capture.Observe("avm.indexer.decoder_errors", ("kind", "block")));
+        Assert.Equal(2, _capture.Observe("avm.indexer.decoder_errors", ("kind", "arc200_log")));
+    }
+
+    [Fact]
+    public void Both_Decoder_Error_Series_Are_Reported_At_Zero_Before_Any_Error()
+    {
+        // An alert on increase() needs a 0 before the first error; a series that first appears at 1 shows no increase.
+        _capture.Observe("avm.indexer.decoder_errors");
+
+        var kinds = _capture.Of("avm.indexer.decoder_errors").Select(static m => ((string)m.Tags["kind"]!, m.Value)).Order().ToArray();
+        Assert.Equal([("arc200_log", 0d), ("block", 0d)], kinds);
     }
 
     [Theory]

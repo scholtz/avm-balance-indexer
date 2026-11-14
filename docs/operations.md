@@ -137,7 +137,9 @@ selector in `alerts.labels`). Every rule selects its release by `avm_chain="<cha
 label (Prometheus `otlp.promote_resource_attributes: [avm.chain]`, or the collector's resource-to-label processor), or set `alerts.selector`
 to the matcher that identifies the release's series. The rules: `AvmIndexerLagHigh`, `AvmIndexerStalled`, `AvmIndexerNoWriter`,
 `AvmIndexerTwoWriters`, `AvmIndexerLeaseFlapping`, `AvmIndexerStatusUnreadable`, `AvmIndexerDecoderErrors`, `AvmApiErrors`, `AvmApiSlow`
-(tested with `promtool` in CI, `deploy/helm/ci/alerts.test.yaml`). The metrics:
+(tested with `promtool` in CI, `deploy/helm/ci/alerts.test.yaml`). It needs exported metrics (`telemetry.otlpEndpoint` or `otlpMetricsEndpoint`;
+the chart refuses `alerts.enabled` without). Metrics ingested over OTLP carry no staleness markers, so a dead pod's last sample stays
+visible for Prometheus's lookback (5 minutes by default): a no-writer page can come up to that much later than its `for` delay. The metrics:
 
 | Metric | Alert |
 |---|---|

@@ -194,8 +194,10 @@ jobs:
           fi
       - name: Alert rules render, are valid and fire as tested
         run: |
-          t() { helm template ci deploy/helm/avm-balance-indexer -f deploy/helm/values/stage-testnet.yaml --set cassandra.embedded.node=ci-node "$@"; }
+          t() { helm template ci deploy/helm/avm-balance-indexer -f deploy/helm/values/stage-testnet.yaml --set cassandra.embedded.node=ci-node --set telemetry.otlpEndpoint=http://otel:4317 "$@"; }
           if grep -q "kind: PrometheusRule" <<< "$(t)"; then echo "alert rules must be off by default"; exit 1; fi
+          if t --set alerts.enabled=true --set telemetry.otlpEndpoint= > /dev/null 2>&1; then echo "alerts without a metrics endpoint must fail the render"; exit 1; fi
+          if t --set alerts.enabled=true --set alerts.api5xxRatio=5 > /dev/null 2>&1; then echo "alerts.api5xxRatio=5 must fail the render"; exit 1; fi
           t --set alerts.enabled=true | yq 'select(.kind == "PrometheusRule") | .spec' > /tmp/rules-full.yaml
           test "$(yq '[.groups[].rules[]] | length' /tmp/rules-full.yaml)" = 9
           # The unit tests (deploy/helm/ci/alerts.test.yaml) check expressions, durations and labels, not the annotation texts.
@@ -214,7 +216,7 @@ jobs:
           grep -q "for: 360s" <<< "$(t --set alerts.enabled=true --set storage.cassandra.leaseTtlSeconds=300)"
           # Extra labels are merged with the chart labels, not duplicated.
           test "$(t --set alerts.enabled=true --set 'alerts.labels.app\.kubernetes\.io/part-of=monitoring' | yq 'select(.kind == "PrometheusRule") | .metadata.labels."app.kubernetes.io/part-of"')" = monitoring
-          grep -q 'avm_chain="voi"' <<< "$(helm template ci deploy/helm/avm-balance-indexer -f deploy/helm/values/prod-voi.yaml --set cassandra.embedded.node=ci-node --set alerts.enabled=true)"
+          grep -q 'avm_chain="voi"' <<< "$(helm template ci deploy/helm/avm-balance-indexer -f deploy/helm/values/prod-voi.yaml --set cassandra.embedded.node=ci-node --set telemetry.otlpEndpoint=http://otel:4317 --set alerts.enabled=true)"
           grep -q 'release="x"' <<< "$(t --set alerts.enabled=true --set 'alerts.selector=release="x"')"
       - name: API autoscaling renders (opt-in, no replica count on the Deployment, invalid combinations refused)
         run: |

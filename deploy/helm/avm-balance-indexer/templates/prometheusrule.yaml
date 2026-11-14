@@ -10,6 +10,12 @@
 {{- fail (printf "alerts.%s must be greater than zero" $name) }}
 {{- end }}
 {{- end }}
+{{- if ge (float64 .api5xxRatio) 1.0 }}
+{{- fail "alerts.api5xxRatio is a share of requests and must be below 1 (0.05 is 5 percent)" }}
+{{- end }}
+{{- if not (or $.Values.telemetry.otlpEndpoint $.Values.telemetry.otlpMetricsEndpoint) }}
+{{- fail "alerts.enabled needs telemetry.otlpEndpoint or telemetry.otlpMetricsEndpoint: without exported metrics the rules see nothing and AvmIndexerNoWriter always fires" }}
+{{- end }}
 {{- if ge (float64 .apiP95Seconds) 10.0 }}
 {{- fail "alerts.apiP95Seconds must be below 10: the API latency histogram's largest bucket is 10 s, so a p95 of 10 s or more is never reported" }}
 {{- end }}
@@ -34,10 +40,11 @@ spec:
     - name: {{ include "avm.fullname" $ }}
       rules:
         - alert: AvmIndexerLagHigh
-          # Only while the lag does not shrink: a backfill or reindex starts millions of rounds behind and catches up for days.
+          # Not while it catches up: a backfill or reindex starts millions of rounds behind and shrinks the lag for days. Catching up
+          # means the lag fell by at least the threshold in 30 minutes; a flat or noisy lag is not catching up.
           expr: |
             max(avm_indexer_lag_rounds{ {{- $sel -}} }) > {{ .lagRounds }}
-              and max(deriv(avm_indexer_lag_rounds{ {{- $sel -}} }[30m])) >= 0
+              unless max(avm_indexer_lag_rounds{ {{- $sel -}} }) < max(avm_indexer_lag_rounds{ {{- $sel -}} } offset 30m) - {{ .lagRounds }}
           for: 15m
           labels: { severity: warning, chain: {{ $.Values.chain | quote }} }
           annotations:

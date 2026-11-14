@@ -125,6 +125,17 @@ tests:
     alert_rule_test:
       - { eval_time: 50m, alertname: AvmIndexerLagHigh, exp_alerts: [] }
 
+  - name: a lag that stays high but moves up and down is still a lag alert
+    interval: 1m
+    input_series:
+      - series: 'avm_indexer_lag_rounds{avm_chain="algorand-testnet"}'
+        values: '2000 1990 2010 2000 1990 2010 2000 1990 2010 2000 1990 2010 2000 1990 2010 2000 1990 2010 2000 1990 2010 2000 1990 2010 2000 1990 2010 2000 1990 2010 2000 1990 2010 2000 1990 2010 2000 1990 2010 2000 1990 2010 2000 1990 2010 2000 1990 2010 2000 1990 2010 2000 1990 2010 2000 1990 2010 2000 1990 2010'
+    alert_rule_test:
+      - eval_time: 55m
+        alertname: AvmIndexerLagHigh
+        exp_alerts:
+          - exp_labels: { severity: warning, chain: algorand-testnet }
+
   - name: a lost lease more than 3 times an hour is flapping
     interval: 1m
     input_series:

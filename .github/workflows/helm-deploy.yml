@@ -154,12 +154,26 @@ jobs:
               echo "::error::Could not tell whether the release has an API autoscaler to remove: $probe"; exit 1
             fi
           fi
-          # Alert rules are opt-in too (alerts.enabled): they need the PrometheusRule rights and the Prometheus Operator CRD.
+          # Alert rules are opt-in too (alerts.enabled): they need the PrometheusRule rights and the Prometheus Operator CRD. When the values
+          # switch them off while the release still has its rule, the upgrade deletes it (and a rollback recreates it): same rights.
+          rules=no
           if [ "$(yq '.alerts.enabled // false' "deploy/helm/values/$VALUES")" = true ]; then
+            if ! crds="$(kubectl api-resources --api-group=monitoring.coreos.com -o name 2>&1)"; then
+              echo "::error::Could not ask the cluster for the PrometheusRule CRD: $crds"; exit 1
+            fi
+            grep -q '^prometheusrules' <<< "$crds" || { echo "::error::alerts.enabled needs the PrometheusRule CRD of the Prometheus Operator in the cluster"; exit 1; }
+            rules=yes
+          elif can get prometheusrules.monitoring.coreos.com; then
+            if probe="$(kubectl -n "$NAMESPACE" get prometheusrule "${RELEASE}-${CHAIN}-alerts" -o name 2>&1)"; then
+              rules="yes (to remove them)"
+            elif ! grep -q -e "NotFound" -e "the server doesn't have a resource type" <<< "$probe"; then
+              echo "::error::Could not tell whether the release has alert rules to remove: $probe"; exit 1
+            fi
+          fi
+          if [ "$rules" != no ]; then
             for verb in get list watch create update patch delete; do
               can "$verb" prometheusrules.monitoring.coreos.com || missing+=("$verb prometheusrules.monitoring.coreos.com")
             done
-            kubectl api-resources --api-group=monitoring.coreos.com -o name 2>/dev/null | grep -q '^prometheusrules'               || { echo "::error::alerts.enabled needs the PrometheusRule CRD of the Prometheus Operator in the cluster"; exit 1; }
           fi
           if [ "$hpa" != no ]; then
             # All rights including delete: the --atomic rollback removes or recreates the autoscaler.
