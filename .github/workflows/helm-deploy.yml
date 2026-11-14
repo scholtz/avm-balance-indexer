@@ -146,10 +146,14 @@ jobs:
             # Delete too: the --atomic rollback of the upgrade that creates the autoscaler has to remove it again.
             resources+=(horizontalpodautoscalers.autoscaling); hpa=yes
             can delete horizontalpodautoscalers.autoscaling || missing+=("delete horizontalpodautoscalers.autoscaling")
-          else
-            # Only "not found" means there is nothing to remove; any other failure (no right to read, API error) is not an answer.
+          elif can get horizontalpodautoscalers.autoscaling; then
+            # Switched off (or never on): an autoscaler left from earlier is removed by this upgrade, and recreated by its rollback, so
+            # then all its rights are needed. Only "not found" means there is none; any other failure of the lookup is not an answer.
+            # An account that may not even read autoscalers never created one: nothing to check.
             if probe="$(kubectl -n "$NAMESPACE" get horizontalpodautoscaler "${RELEASE}-${CHAIN}-api" -o name 2>&1)"; then
-              can delete horizontalpodautoscalers.autoscaling || missing+=("delete horizontalpodautoscalers.autoscaling (to remove the API autoscaler)")
+              for verb in get list watch create update patch delete; do
+                can "$verb" horizontalpodautoscalers.autoscaling || missing+=("$verb horizontalpodautoscalers.autoscaling (to remove the API autoscaler)")
+              done
             elif ! grep -q "NotFound" <<< "$probe"; then
               echo "::error::Could not tell whether the release has an API autoscaler to remove: $probe"; exit 1
             fi
