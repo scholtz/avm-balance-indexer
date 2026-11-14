@@ -27,29 +27,35 @@ Two facts make that possible:
     destruction after R undone, and the status row for R is published last. The old keyspace is never modified and is retired
     afterwards (ADR 0020).
   - PostgreSQL: the same state is reached in place and in one transaction: effect rows after R are deleted, holdings are
-    recomputed for the accounts and tokens those rows touched, touched-account rows first seen after R are deleted (and
-    `last_round` recomputed), token records created after R are deleted and a destruction after R undone, scan jobs for
-    rounds after R are deleted, the status is set to R. Each request carries an id and runs once.
+    recomputed for the accounts and tokens those rows touched (and deleted where no effect at or before R remains),
+    touched-account rows first seen after R are deleted (and `last_round` recomputed), token records created after R are
+    deleted and a destruction after R undone, scan jobs for rounds after R are deleted, an audit stop after R is cleared,
+    build records are cut at R, and the status is set to R. Each request carries an id and runs once.
 - **A request that was carried out does nothing.** The request stays in the values across restarts, so the first check is
-  whether the target already has a published round (Cassandra) or the request id is recorded (PostgreSQL); then nothing is
-  read or written, also when the source no longer exists.
+  whether it was carried out: the target has a published round and holds this request (source and R; stored in the target
+  when the copy starts), or the request id is recorded (PostgreSQL). Then nothing is read or written, also when the source no
+  longer exists. A target with a published round but without this request (a mistyped name, an indexed keyspace) is refused,
+  and so is a source equal to the target.
 - **Preconditions, checked before anything is written.** The source holds this chain; R is not beyond the source's published
   round (rows of an unpublished round can exist, ADR 0003, and must never be taken over); the target is empty, or is the
   unfinished copy of the same source and the same R (the request is stored in the target; a copy started with another R is
   refused, never continued: its rows and holding timestamps would outlive the correction).
-- **The hash of R is confirmed before publication.** `chain_status` only stores the hash of the tip, so the hash of block R
-  comes from a fetch. Block R + 1 is fetched as well and must name that hash as its previous block; only then is the status row
-  written. The first indexed round checks its previous hash against the stored one as always.
+- **The source is checked against the chain before anything is copied.** `chain_status` only stores the hash of the source's
+  tip T. Block T is fetched and its hash must equal the stored one; blocks are hash-linked, so this shows the source was built
+  from the chain the nodes serve, R included. The hash of R written into the target's status comes from fetching block R, and
+  the first replayed round checks its previous hash against it as always.
 - **Readers.** The copy is invisible until its status row exists, and reads of a keyspace without one fail. Therefore the API
   does not move with the worker: the values give the API its own keyspace setting, which stays on the old keyspace until the
   new one follows the chain, and is switched in a second change. The old keyspace is frozen: consistent up to its last round,
   but its status row is no longer updated, so the status keeps its last round and lag while `updatedAt` ages (the status
   reports that as stalled, #168). Holder scans are executed by the worker, which is on the new keyspace: while the API is on
-  the old one it refuses to create scans instead of accepting jobs nobody runs. In
+  the old one it refuses to create scans instead of accepting jobs nobody runs, and jobs that were pending or running in the
+  old keyspace when the worker moved are never finished; they end as expired. In
   PostgreSQL readers see the state before the rewind until the transaction commits; afterwards `indexedRound` is R and
   requests for later rounds are refused as not indexed until the replay passes them.
 - **The writer's memory.** The rewind or copy runs after the writer lease is taken and before the indexer is seeded for that
-  term, so no balance cache, token cache, rewards state or cursor of an earlier term survives it.
+  term, and the indexer's process-wide caches (balances, known ARC-200 tokens, rewards state, cursor) are reset, so nothing
+  learned in an earlier term survives it.
 - **It is a database change request** like a retired keyspace (ADR 0020): requested in the values by pull request, carried
   out by the worker that holds the writer lease, reported by the deploy job.
 - **Finding R early.**
@@ -76,6 +82,8 @@ Two facts make that possible:
   request. Cassandra keeps the old keyspace until it is retired. The rewind deletes by round from a table that is keyed and
   partitioned by account, so it reads every partition; a rewind over many rounds is one long transaction (WAL, bloat, vacuum
   held back). Its cost has to be measured before PostgreSQL is used for a large chain (#180).
+- Responses for an explicit round are cacheable for an hour (`Cache-Control: public, max-age=3600`, `ReadEndpoints.MarkImmutable`). Answers for rounds after R
+  given before the switch (Cassandra) or the rewind (PostgreSQL) can stay in client and proxy caches for that hour.
 - This mechanism is for fixes of the indexer's own logic. A database built from a wrong history (a hash divergence) has no
   stored per-round hashes to find a good round by; that case stops the writer and is decided by an operator.
 - A rebuild still reads the replayed rounds from the archival nodes. Voi's archival hosts are patchy and Voi has no ledger
