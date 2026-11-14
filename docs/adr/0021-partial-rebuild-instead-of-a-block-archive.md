@@ -1,7 +1,8 @@
 # 0021 Partial rebuild instead of a block archive
 
 Status: accepted as the design (issue #176). Not implemented yet: #178 (Cassandra copy), #179 (values, worker, pipeline,
-runbook), #180 (PostgreSQL), #181 (ledger audit), #182 (build record). Until #179 is merged the runbook in
+runbook), #180 (PostgreSQL), #181 (ledger audit), #182 (build record),
+#168 (the status reports a frozen keyspace as stalled). Until #179 is merged the runbook in
 `docs/operations.md` still describes the rebuild from genesis.
 
 ## Context
@@ -19,7 +20,9 @@ Two facts make that possible:
 
 ## Decision
 - **No block archive.** Blocks are always read from the chain's archival nodes (and relays near the tip, ADR 0019).
-- **Partial rebuild ("fork at a round").** The release values name a source and a round R, the last round known to be good.
+- **Partial rebuild ("fork at a round").** The release values name a source, a round R (the last round known to be good) and
+  the target the request is meant for; a request whose target is not the database the worker uses is refused, so a request
+  left in the values can never fire again for a later keyspace.
   The data up to and including R is taken over, and indexing continues from R + 1 with the fixed code.
   - Cassandra: a new keyspace is filled from the old one. Effects with `round <= R` are copied, the bucket index follows from
     them, touched-account rows with `first_round <= R` are copied, holdings are written from the newest copied effect of each
@@ -36,17 +39,19 @@ Two facts make that possible:
   when the copy starts), or the request id is recorded (PostgreSQL). Then nothing is read or written, also when the source no
   longer exists. A target with a published round but without this request (a mistyped name, an indexed keyspace) is refused,
   and so is a source equal to the target.
-- **Preconditions, checked before anything is written.** The source holds this chain; R is not beyond the source's published
-  round (rows of an unpublished round can exist, ADR 0003, and must never be taken over); the target is empty, or is the
-  unfinished copy of the same source and the same R (the request is stored in the target; a copy started with another R is
-  refused, never continued: its rows and holding timestamps would outlive the correction).
+- **Preconditions, checked before anything is written.** Both providers: the database holds this chain, and R is not beyond
+  its published round (rows of an unpublished round can exist, ADR 0003, and must never be taken over). Cassandra in addition:
+  the source differs from the target, and the target is empty or is the unfinished copy of the same source and the same R (the
+  request is stored in the target; a copy started with another R is refused, never continued: its rows and holding timestamps
+  would outlive the correction). PostgreSQL rewinds the database it uses, so source and target are the same by design.
 - **The source is checked against the chain before anything is copied.** `chain_status` only stores the hash of the source's
   tip T. Block T is fetched and its hash must equal the stored one; blocks are hash-linked, so this shows the source was built
-  from the chain the nodes serve, R included. The hash of R written into the target's status comes from fetching block R, and
-  the first replayed round checks its previous hash against it as always.
+  from the chain the nodes serve, R included. In both providers the hash of R written into the status comes from fetching block
+  R, and the first replayed round checks its previous hash against it as always.
 - **Readers.** The copy is invisible until its status row exists, and reads of a keyspace without one fail. Therefore the API
   does not move with the worker: the values give the API its own keyspace setting, which stays on the old keyspace until the
-  new one follows the chain, and is switched in a second change. The old keyspace is frozen: consistent up to its last round,
+  new one follows the chain, and is switched in a second change. The keyspace the API reads can never be retired (ADR 0020's
+  guard covers it like the worker's keyspace). The old keyspace is frozen: consistent up to its last round,
   but its status row is no longer updated, so the status keeps its last round and lag while `updatedAt` ages (the status
   reports that as stalled, #168). Holder scans are executed by the worker, which is on the new keyspace: while the API is on
   the old one it refuses to create scans instead of accepting jobs nobody runs, and jobs that were pending or running in the
@@ -63,11 +68,14 @@ Two facts make that possible:
     every round while following the tip, and a sample of rounds during backfill and during the replay after a partial rebuild,
     as far as the node serves deltas for them. The audit runs after publication: it detects, it does not prevent. A node that
     is unavailable, rate-limited or answers something unreadable is a skipped round, never a failure. A disagreement stops the
-    writer at that round (configurable per release), because every further round would have to be rebuilt. The stop is
-    recorded in the database, so a restarted worker does not index past it until an operator acknowledges that round or
-    rebuilds. Native and ASA balances are audited; ARC-200 balances are not ledger state and are not.
+    writer (configurable per release), because every further round would have to be rebuilt. The audit runs after
+    publication and batches publish several rounds at once, so the writer stops at its current tip, which can be past the bad
+    round S; a rebuild must choose R below S. The stop is recorded in the database, so a restarted worker does not index on
+    until an operator acknowledges it or a partial rebuild releases it. Native and ASA balances are audited; ARC-200 balances
+    live in application state whose layout differs per contract, so they are not audited.
   - The database records which build indexed which round range, so "everything indexed by a build before the fix" is a lookup.
-    A partial rebuild takes the records up to R over, so the history of the kept rounds is not lost with the old keyspace.
+    A partial rebuild takes the records up to R over (Cassandra copies them, PostgreSQL cuts them at R), so the history of the
+    kept rounds is not lost with the old keyspace. An audit stop is not taken over: the rebuild releases it.
 
 ## Consequences
 - A fix whose first affected round is recent costs a copy (a full read of the old effect tables, hours) plus the rounds after
