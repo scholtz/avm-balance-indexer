@@ -71,6 +71,10 @@ public sealed class IndexingMetrics : IDisposable
         _fetchDuration = _meter.CreateHistogram("avm.fetch.block.duration", "s", "Download and validation of a block that was served, by source (archival, relay); failed requests are in avm.fetch.block.failures", advice: SecondsBuckets);
         _fetchFailures = _meter.CreateCounter<long>("avm.fetch.block.failures", description: "Failed block requests to one host, by source and reason");
         _decoderErrors = _meter.CreateCounter<long>("avm.indexer.decoder_errors", description: "Fetches that failed because no node served a block that validates, and malformed ARC-200 transfer logs of committed rounds");
+
+        // Both series exist from the start at 0, so that the first error is an increase that an alert (increase over a window) sees.
+        _decoderErrors.Add(0, new KeyValuePair<string, object?>("kind", "block"));
+        _decoderErrors.Add(0, new KeyValuePair<string, object?>("kind", "arc200_log"));
         _scanDuration = _meter.CreateHistogram("avm.scan.duration", "s", "Holder scans from claim to end, by outcome", advice: SecondsBuckets);
     }
 

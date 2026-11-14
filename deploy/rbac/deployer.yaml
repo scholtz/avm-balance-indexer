@@ -30,6 +30,10 @@ rules:
   - apiGroups: [policy]
     resources: [poddisruptionbudgets]
     verbs: [get, list, watch, create, update, patch, delete]
+  # Only needed with alerts.enabled (and the Prometheus Operator CRD installed).
+  - apiGroups: [monitoring.coreos.com]
+    resources: [prometheusrules]
+    verbs: [get, list, watch, create, update, patch, delete]
   # Needed with api.autoscaling.enabled, and to switch it off again while the autoscaler exists.
   - apiGroups: [autoscaling]
     resources: [horizontalpodautoscalers]

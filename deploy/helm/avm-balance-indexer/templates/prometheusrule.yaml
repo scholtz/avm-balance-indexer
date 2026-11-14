@@ -1,0 +1,114 @@
+{{- with .Values.alerts }}
+{{- if .enabled }}
+{{- range $name := list "lagRounds" "statusAgeSeconds" "api5xxRatio" "apiP95Seconds" }}
+{{- $value := get $.Values.alerts $name }}
+{{- /* Numbers from a values file are float64 and print as 1e+06 when large; check the kind and the value, not the text. */}}
+{{- if not (or (kindIs "float64" $value) (kindIs "int64" $value) (kindIs "int" $value)) }}
+{{- fail (printf "alerts.%s %v must be a number" $name $value) }}
+{{- end }}
+{{- if le (float64 $value) 0.0 }}
+{{- fail (printf "alerts.%s must be greater than zero" $name) }}
+{{- end }}
+{{- end }}
+{{- if ge (float64 .apiP95Seconds) 10.0 }}
+{{- fail "alerts.apiP95Seconds must be below 10: the API latency histogram's largest bucket is 10 s, so a p95 of 10 s or more is never reported" }}
+{{- end }}
+{{- /*
+  Every series of this release: the services export the chain as the OTLP resource attribute avm.chain, which Prometheus must promote
+  to the label avm_chain (otlp.promote_resource_attributes). alerts.selector replaces it for a different label set.
+*/}}
+{{- $sel := default (printf "avm_chain=%q" $.Values.chain) .selector }}
+{{- $runbook := "https://github.com/scholtz/avm-balance-indexer/blob/main/docs/operations.md#failure-modes" }}
+{{- /* A failover waits for the lease to expire: Cassandra's lease TTL plus a minute, at least the 3 minutes PostgreSQL needs. */}}
+{{- $noWriterFor := 180 }}
+{{- if eq $.Values.storage.provider "Cassandra" }}
+{{- $noWriterFor = max 180 (add (int $.Values.storage.cassandra.leaseTtlSeconds) 60) }}
+{{- end }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "avm.fullname" $ }}-alerts
+  labels: {{- merge (dict) (default dict .labels) (include "avm.labels" $ | fromYaml) | toYaml | nindent 4 }}
+spec:
+  groups:
+    - name: {{ include "avm.fullname" $ }}
+      rules:
+        - alert: AvmIndexerLagHigh
+          # Only while the lag does not shrink: a backfill or reindex starts millions of rounds behind and catches up for days.
+          expr: |
+            max(avm_indexer_lag_rounds{ {{- $sel -}} }) > {{ .lagRounds }}
+              and max(deriv(avm_indexer_lag_rounds{ {{- $sel -}} }[30m])) >= 0
+          for: 15m
+          labels: { severity: warning, chain: {{ $.Values.chain | quote }} }
+          annotations:
+            summary: "{{ $.Values.chain }}: the indexer is more than {{ .lagRounds }} rounds behind the chain and not catching up"
+            description: "The published round stays behind the chain tip. Check the worker log, the archival nodes and algod."
+            runbook_url: {{ $runbook | quote }}
+        - alert: AvmIndexerStalled
+          expr: min(avm_indexer_status_age_seconds{ {{- $sel -}} }) > {{ .statusAgeSeconds }}
+          for: 5m
+          labels: { severity: critical, chain: {{ $.Values.chain | quote }} }
+          annotations:
+            summary: "{{ $.Values.chain }}: the published status has not changed for {{ .statusAgeSeconds }} s"
+            description: "The writer is stuck, has no lease, or cannot reach the database or a block. The API reports health Stalled."
+            runbook_url: {{ $runbook | quote }}
+        - alert: AvmIndexerNoWriter
+          # No series at all (no worker exports) counts as no writer.
+          expr: (sum(avm_worker_is_leader{ {{- $sel -}} }) or vector(0)) < 1
+          for: {{ $noWriterFor }}s
+          labels: { severity: critical, chain: {{ $.Values.chain | quote }} }
+          annotations:
+            summary: "{{ $.Values.chain }}: no worker replica holds the writer lease"
+            description: "Nothing indexes. Check that worker pods run and can reach the database."
+            runbook_url: {{ $runbook | quote }}
+        - alert: AvmIndexerTwoWriters
+          expr: sum(avm_worker_is_leader{ {{- $sel -}} }) > 1
+          for: 10m
+          labels: { severity: warning, chain: {{ $.Values.chain | quote }} }
+          annotations:
+            summary: "{{ $.Values.chain }}: more than one worker replica reports the writer lease"
+            description: "A short overlap after a failover is normal; for minutes it means a stale exporter or a lease problem."
+            runbook_url: {{ $runbook | quote }}
+        - alert: AvmIndexerLeaseFlapping
+          expr: sum(increase(avm_worker_leases_lost_total{ {{- $sel -}} }[1h])) > 3
+          labels: { severity: warning, chain: {{ $.Values.chain | quote }} }
+          annotations:
+            summary: "{{ $.Values.chain }}: the writer lease was lost more than 3 times in an hour"
+            description: "Usually a flapping database connection or Cassandra timeouts."
+            runbook_url: {{ $runbook | quote }}
+        - alert: AvmIndexerStatusUnreadable
+          expr: sum(increase(avm_indexer_status_sample_failures_total{ {{- $sel -}} }[10m])) > 5
+          for: 10m
+          labels: { severity: warning, chain: {{ $.Values.chain | quote }} }
+          annotations:
+            summary: "{{ $.Values.chain }}: the workers cannot read the published status"
+            description: "The database is unreachable or slow; the other indexer gauges are stale while this lasts."
+            runbook_url: {{ $runbook | quote }}
+        - alert: AvmIndexerDecoderErrors
+          # The worker exports both kinds from start at 0, so the first error is an increase.
+          expr: sum(increase(avm_indexer_decoder_errors_total{ {{- $sel -}} ,kind="block"}[15m])) > 0
+          labels: { severity: warning, chain: {{ $.Values.chain | quote }} }
+          annotations:
+            summary: "{{ $.Values.chain }}: block fetches failed because the nodes served blocks that do not validate"
+            description: "A bad node fleet, or blocks this indexer cannot read (a new protocol version)."
+            runbook_url: {{ $runbook | quote }}
+        - alert: AvmApiErrors
+          expr: |
+            sum(rate(http_server_request_duration_seconds_count{ {{- $sel -}} ,http_response_status_code=~"5.."}[5m]))
+              / sum(rate(http_server_request_duration_seconds_count{ {{- $sel -}} }[5m])) > {{ .api5xxRatio }}
+          for: 10m
+          labels: { severity: warning, chain: {{ $.Values.chain | quote }} }
+          annotations:
+            summary: "{{ $.Values.chain }}: more than {{ mulf .api5xxRatio 100 }} percent of API requests fail"
+            description: "503 often means storage read timeouts or a database outage; 504 the request timeout."
+            runbook_url: {{ $runbook | quote }}
+        - alert: AvmApiSlow
+          expr: histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_seconds_bucket{ {{- $sel -}} }[5m]))) > {{ .apiP95Seconds }}
+          for: 10m
+          labels: { severity: warning, chain: {{ $.Values.chain | quote }} }
+          annotations:
+            summary: "{{ $.Values.chain }}: the API p95 latency is above {{ .apiP95Seconds }} s"
+            description: "Slow database reads or large holder queries; consider asynchronous scans for those."
+            runbook_url: {{ $runbook | quote }}
+{{- end }}
+{{- end }}
