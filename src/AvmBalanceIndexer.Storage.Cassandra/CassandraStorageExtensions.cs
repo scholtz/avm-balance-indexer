@@ -35,10 +35,11 @@ public static class CassandraStorageExtensions
 
 internal sealed partial class CassandraOptionsValidator : IValidateOptions<StorageOptions>
 {
-    [GeneratedRegex("^[A-Za-z][A-Za-z0-9_]{0,47}$")]
+    // \z, not $: $ also matches before a trailing newline, which would end up in statements and schema lookups.
+    [GeneratedRegex(@"^[A-Za-z][A-Za-z0-9_]{0,47}\z")]
     private static partial Regex KeyspacePattern();
 
-    [GeneratedRegex("^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")]
+    [GeneratedRegex(@"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\z")]
     private static partial Regex DatacenterPattern();
 
     internal static bool IsValidIdentifier(string? value) => value is not null && KeyspacePattern().IsMatch(value);

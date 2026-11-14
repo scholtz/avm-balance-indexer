@@ -165,7 +165,7 @@ public sealed class CassandraFixture : IAsyncLifetime
     }
 
     /// <summary>Keyspace a storage created by this fixture lives in.</summary>
-    public string KeyspaceOf(CassandraChainStorage storage) => _storages[storage].Options.Keyspace;
+    public string KeyspaceOf(CassandraChainStorage storage) => _storages[storage].Options.Keyspace.ToLowerInvariant(); // the name Cassandra stores
 
     /// <summary>The driver session of a storage created by this fixture, to plant or inspect rows the storage API cannot.</summary>
     public Task<global::Cassandra.ISession> SessionOfAsync(CassandraChainStorage storage) =>

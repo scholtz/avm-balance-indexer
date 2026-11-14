@@ -172,6 +172,7 @@ public class CassandraRetirementTests(CassandraFixture cassandra)
     [InlineData("System", "system keyspace")]
     [InlineData("old; DROP KEYSPACE x", "not a keyspace name")]
     [InlineData("", "not a keyspace name")]
+    [InlineData("avm_old\n", "not a keyspace name")]
     public void A_Retired_Name_That_Must_Never_Be_Dropped_Fails_The_Configuration(string retired, string expected)
     {
         var options = new StorageOptions
