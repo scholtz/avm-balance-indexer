@@ -48,12 +48,12 @@ amount="$(jq -r '.amount' <<< "$balance")"
 if [ "$provider" = Cassandra ]; then
   cassandra="deploy/$release-algorand-testnet-cassandra"
   tables="$(kubectl -n "$ns" exec "$cassandra" -c cassandra -- \
-    cqlsh -e "SELECT table_name FROM system_schema.tables WHERE keyspace_name='avm_indexer'")"
+    cqlsh -e "SELECT table_name FROM system_schema.tables WHERE keyspace_name='avm_indexer'" 2>&1)" || fail "cqlsh failed: $tables"
   grep -q "rows)" <<< "$tables" && ! grep -q "(0 rows)" <<< "$tables" || fail "no tables in keyspace avm_indexer: $tables"
 
   # The start command override of the embedded Cassandra (autoSnapshotTtl) reached cassandra.yaml.
   setting="$(kubectl -n "$ns" exec "$cassandra" -c cassandra -- \
-    cqlsh -e "SELECT value FROM system_views.settings WHERE name='auto_snapshot_ttl'")"
+    cqlsh -e "SELECT value FROM system_views.settings WHERE name='auto_snapshot_ttl'" 2>&1)" || fail "cqlsh failed: $setting"
   echo "$setting"
   grep -qw 1d <<< "$setting" || fail "auto_snapshot_ttl is not 1d"
 
@@ -66,9 +66,12 @@ if [ "$provider" = Cassandra ]; then
   grep -q OPEN <<< "$allowed" || fail "a pod of the release cannot reach Cassandra: $allowed"
   other="$(probe cql-other "app=other")"
   grep -q BLOCKED <<< "$other" || fail "the network policy lets any pod reach Cassandra: $other"
+  # Blocked only counts if Cassandra was reachable around it (not a restart or a DNS failure in between).
+  again="$(probe cql-allowed-again "app.kubernetes.io/instance=$release,avm.scholtz.sk/chain=algorand-testnet")"
+  grep -q OPEN <<< "$again" || fail "Cassandra was unreachable after the blocked probe, so it proves nothing: $again"
 else
   tables="$(kubectl -n "$ns" exec deploy/postgres -- psql -U postgres -tAc \
-    "SELECT count(*) FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog', 'information_schema')")"
+    "SELECT count(*) FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog', 'information_schema')" 2>&1)" || fail "psql failed: $tables"
   [ "$tables" -gt 0 ] || fail "no indexer tables in PostgreSQL"
 fi
 echo "smoke test OK: $provider"

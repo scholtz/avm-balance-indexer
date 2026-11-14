@@ -25,14 +25,15 @@ permissions:
 
 concurrency:
   group: k8s-smoke-${{ github.ref }}
-  cancel-in-progress: true
+  # A newer push to a PR replaces its run; every commit on main is tested to the end.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   smoke:
     name: Smoke (${{ matrix.provider }})
     runs-on: ubuntu-latest
-    # Image builds (a few minutes), install (at most 10), checks (at most about 12), diagnostics.
-    timeout-minutes: 30
+    # Image builds (a few minutes), database (at most 5), install (at most 10), checks (at most about 13), diagnostics.
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
@@ -43,6 +44,8 @@ jobs:
       - uses: helm/kind-action@v1
         with:
           cluster_name: chart-testing
+          # kindnet enforces NetworkPolicy from kind 0.24 on; the Cassandra leg checks the policy.
+          version: v0.27.0
       - name: Build the images and load them into kind
         run: |
           for c in api worker; do
