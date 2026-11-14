@@ -1,5 +1,6 @@
 using AvmBalanceIndexer.Domain.Storage;
 using AvmBalanceIndexer.Domain.Tokens;
+using AvmBalanceIndexer.Indexing;
 using Microsoft.Extensions.Options;
 
 namespace AvmBalanceIndexer.Worker;
@@ -15,8 +16,11 @@ public sealed partial class ScanExecutor(
     IStorageFailureClassifier failures,
     IOptions<ScanOptions> options,
     TimeProvider clock,
-    ILogger<ScanExecutor> logger) : BackgroundService
+    ILogger<ScanExecutor> logger,
+    IndexingMetrics? metrics = null) : BackgroundService
 {
+    private readonly IndexingMetrics _metrics = metrics ?? IndexingMetrics.None;
+
     private static readonly TimeSpan CleanupEvery = TimeSpan.FromMinutes(5);
 
     private readonly string _owner = $"{Environment.MachineName}:{Guid.NewGuid():N}";
@@ -83,6 +87,8 @@ public sealed partial class ScanExecutor(
         var cursor = job.Cursor;
         var retries = 0;
         var resync = false;
+        var started = clock.GetTimestamp();
+        var outcome = ScanOutcome.Abandoned; // released, expired, taken over, paused or shut down
         try
         {
             while (true)
@@ -134,6 +140,7 @@ public sealed partial class ScanExecutor(
 
                     if (await jobs.CompleteAsync(job.Id, _owner, clock.GetUtcNow(), stoppingToken).ConfigureAwait(false))
                     {
+                        outcome = ScanOutcome.Completed;
                         LogCompleted(logger, job.Id);
                     }
                     else
@@ -173,13 +180,22 @@ public sealed partial class ScanExecutor(
             LogFailed(logger, ex, job.Id);
             try
             {
-                await jobs.FailAsync(job.Id, _owner, Describe(ex), clock.GetUtcNow(), CancellationToken.None).ConfigureAwait(false);
+                // Only a stored failure is the end of the scan; when it cannot be stored (the database is away, or another replica took
+                // the job over), the job goes on elsewhere.
+                if (await jobs.FailAsync(job.Id, _owner, Describe(ex), clock.GetUtcNow(), CancellationToken.None).ConfigureAwait(false))
+                {
+                    outcome = ScanOutcome.Failed;
+                }
             }
             catch (Exception failure)
             {
                 // The job stays running and is picked up again after StaleAfter.
                 LogUnavailable(logger, failure);
             }
+        }
+        finally
+        {
+            _metrics.ScanEnded(clock.GetElapsedTime(started), outcome);
         }
     }
 

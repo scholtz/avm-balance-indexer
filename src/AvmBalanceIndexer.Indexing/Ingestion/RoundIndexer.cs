@@ -24,9 +24,14 @@ public sealed partial class RoundIndexer(
     IChainStorage storage,
     IOptions<IndexerOptions> options,
     ILogger<RoundIndexer> logger,
-    TimeProvider? timeProvider = null)
+    TimeProvider? timeProvider = null,
+    IndexingMetrics? metrics = null)
 {
     private readonly IndexerOptions _options = options.Value;
+    private readonly IndexingMetrics _metrics = metrics ?? IndexingMetrics.None;
+
+    /// <summary>Malformed ARC-200 logs of the queued, not yet published rounds: counted when they are published, so a replay does not count twice.</summary>
+    private int _pendingMalformedArc200Logs;
     private readonly HashSet<ulong> _knownArc200 = [];
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
     private static readonly TimeSpan FlushGracePeriod = TimeSpan.FromSeconds(10);
@@ -47,6 +52,7 @@ public sealed partial class RoundIndexer(
     public async Task<IndexingResult> RunAsync(ulong? stopAfterRound, CancellationToken cancellationToken)
     {
         _writeFailed = false;
+        _pendingMalformedArc200Logs = 0;
         var chain = adapter.Profile.Chain;
         var status = await storage.GetAsync(chain, cancellationToken).ConfigureAwait(false);
         RewardsState rewards;
@@ -323,6 +329,9 @@ public sealed partial class RoundIndexer(
         var state = targetRound - block.Round <= (ulong)_options.FollowingThresholdRounds ? IngestionState.Following : IngestionState.Backfilling;
         var status = new ChainStatus(chain, block.Round, block.Hash, targetRound, state, _time.GetUtcNow());
         tracker.Stage(round);
+
+        // Counted with the round only once it is queued: a round that fails before it never reaches a flush.
+        _pendingMalformedArc200Logs += normalized.MalformedArc200Logs;
         return new RoundWrite(status, round.Effects);
     }
 
@@ -349,6 +358,7 @@ public sealed partial class RoundIndexer(
         }
 
         bool applied;
+        var started = _time.GetTimestamp();
         try
         {
             applied = await storage.WriteRoundsAsync(pending, cancellationToken).ConfigureAwait(false);
@@ -368,6 +378,9 @@ public sealed partial class RoundIndexer(
         }
 
         tracker.CommitStaged();
+        _metrics.CommitRecorded(_time.GetElapsedTime(started), pending.Sum(static round => round.Effects.Count));
+        _metrics.DecoderError(DecoderErrorKind.Arc200Log, _pendingMalformedArc200Logs);
+        _pendingMalformedArc200Logs = 0;
         Interlocked.Add(ref _roundsCommitted, pending.Count);
         pending.Clear();
     }

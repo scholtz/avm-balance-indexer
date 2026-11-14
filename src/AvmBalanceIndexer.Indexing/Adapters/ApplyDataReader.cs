@@ -169,8 +169,9 @@ public static class ApplyDataReader
         var count = reader.ReadArrayHeader();
         for (var i = 0; i < count; i++)
         {
-            // Only 100-byte logs can be ARC-200 transfers; keeping the others would allocate for nothing.
-            if (reader.ReadBytes() is { Length: Arc200TransferLogLength } log)
+            // Only 100-byte logs can be ARC-200 transfers; keeping the others would allocate for nothing. Logs that start with the
+            // transfer selector are kept whatever their length, so that the normalizer can count malformed transfer events.
+            if (reader.ReadBytes() is { } log && (log.Length == Arc200TransferLogLength || new System.Buffers.SequenceReader<byte>(log).IsNext(Normalization.Arc200Events.TransferSelector)))
             {
                 logs.Add(log.ToArray());
             }

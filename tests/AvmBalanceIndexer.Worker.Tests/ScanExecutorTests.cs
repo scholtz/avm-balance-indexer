@@ -27,7 +27,7 @@ public class ScanExecutorTests
         return storage;
     }
 
-    private static ScanExecutor Executor(ScanStorage storage, int pageSize = 2, int retries = 3, int concurrency = 1)
+    private static ScanExecutor Executor(ScanStorage storage, int pageSize = 2, int retries = 3, int concurrency = 1, MetricsCapture? capture = null)
     {
         var options = Options.Create(new ScanOptions
         {
@@ -38,7 +38,7 @@ public class ScanExecutorTests
             MaxStepRetries = retries,
             Concurrency = concurrency,
         });
-        return new ScanExecutor(storage, storage, storage, options, new FixedClock(Now), NullLogger<ScanExecutor>.Instance);
+        return new ScanExecutor(storage, storage, storage, options, new FixedClock(Now), NullLogger<ScanExecutor>.Instance, capture?.Metrics);
     }
 
     private static ScanJob NewJob(ulong round = 4, bool includeZero = true, TimeSpan? created = null) =>
@@ -90,6 +90,33 @@ public class ScanExecutorTests
         Assert.Equal(expected.Items.Count, finished.HoldersFound);
         Assert.Equal(expected.Items, scanned);
         Assert.True(storage.AppendCalls >= 3, "The scan should have worked in several steps.");
+    }
+
+    [Fact]
+    public async Task A_Completed_And_A_Failed_Scan_Record_Their_Duration_With_The_Outcome()
+    {
+        using var capture = new MetricsCapture();
+        var storage = await IndexedAsync();
+        var completed = NewJob();
+        await storage.CreateAsync(completed, CancellationToken.None);
+        using (var executor = Executor(storage, capture: capture))
+        {
+            await executor.StartAsync(CancellationToken.None);
+            await WaitForAsync(storage, completed.Id, static j => j.State == ScanState.Completed);
+            await executor.StopAsync(CancellationToken.None);
+        }
+
+        var failed = NewJob(created: TimeSpan.FromSeconds(1));
+        await storage.CreateAsync(failed, CancellationToken.None);
+        storage.FailReads = int.MaxValue;
+        using (var executor = Executor(storage, retries: 1, capture: capture))
+        {
+            await executor.StartAsync(CancellationToken.None);
+            await WaitForAsync(storage, failed.Id, static j => j.State == ScanState.Failed);
+            await executor.StopAsync(CancellationToken.None);
+        }
+
+        Assert.Equal(["completed", "failed"], capture.Of("avm.scan.duration").Select(static m => (string)m.Tags["outcome"]!));
     }
 
     [Fact]

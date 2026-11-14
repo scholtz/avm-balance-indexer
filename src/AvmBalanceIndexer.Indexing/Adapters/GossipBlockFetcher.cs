@@ -31,6 +31,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
     private readonly ConcurrentDictionary<string, HostLatency> _latency = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, HostGate> _gates = new(StringComparer.OrdinalIgnoreCase);
     private readonly ThrottleReport _throttleReport;
+    private readonly IndexingMetrics _metrics;
 
     public GossipBlockFetcher(
         HttpClient http,
@@ -39,7 +40,8 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
         AlgorandChainOptions options,
         byte[]? expectedGenesisHash,
         ILogger<GossipBlockFetcher> logger,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IndexingMetrics? metrics = null)
     {
         _http = http ?? throw new ArgumentNullException(nameof(http));
         _hosts = hosts ?? throw new ArgumentNullException(nameof(hosts));
@@ -48,6 +50,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
         _expectedGenesisHash = expectedGenesisHash;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _time = timeProvider ?? TimeProvider.System;
+        _metrics = metrics ?? IndexingMetrics.None;
         _throttleReport = new ThrottleReport(options.ThrottleLogInterval);
     }
 
@@ -93,11 +96,13 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
         for (var attempt = 0; attempt < _options.MaxAttempts;)
         {
             var (host, gate, entered) = await AcquireHostAsync(hosts, missedRelays, attempt, round, throttling, cancellationToken).ConfigureAwait(false);
+            var started = _time.GetTimestamp();
             try
             {
                 var payload = await DownloadTimedAsync(host, round, cancellationToken).ConfigureAwait(false);
                 gate.OnSuccess(entered);
                 var block = BlockDecoder.Decode(payload, round, _profile, _expectedGenesisHash);
+                _metrics.FetchSucceeded(_time.GetElapsedTime(started), relays.Contains(host));
                 _cooldownUntil.TryRemove(host, out _);
                 ReportThrottling(_throttleReport.Flush(_time.GetUtcNow()));
                 if (_suspectRelays.TryRemove(round, out var suspects))
@@ -125,6 +130,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
             {
                 // The relay slows down like any node, but its pause is not this fetch's problem: it is left out and neither waited for
                 // nor counted towards the throttle timeout, which is about the archival nodes that must carry the block.
+                _metrics.FetchFailed(relay: true, FetchFailure.Throttled);
                 var relayNow = _time.GetUtcNow();
                 var relayResult = gate.OnThrottled(ex.RetryAfter, entered, relayNow);
                 if (relayResult.NewPause)
@@ -138,6 +144,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
             }
             catch (HostThrottledException ex)
             {
+                _metrics.FetchFailed(relay: false, FetchFailure.Throttled);
                 throttling.Last = ex; // not `last`: a rate limit must not hide the real failure of the other attempts
                 var now = _time.GetUtcNow();
                 var result = gate.OnThrottled(ex.RetryAfter, entered, now);
@@ -162,6 +169,7 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
                 // Asked once and skipped for the rest of this fetch, without using up an attempt or waiting: relays are many and
                 // answer quickly, and the archival nodes must still be reached when several of them have already pruned the block.
                 missedRelays.Add(host);
+                _metrics.FetchFailed(relay: true, FetchFailure.NotFound);
                 LogNotOnHost(_logger, round, host, attempt + 1);
                 continue;
             }
@@ -169,10 +177,12 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
             {
                 last = ex;
                 notFound++;
+                _metrics.FetchFailed(relay: false, FetchFailure.NotFound);
                 LogNotOnHost(_logger, round, host, attempt + 1);
             }
             catch (Exception ex) when (ex is HttpRequestException or BlockValidationException or TimeoutException or IOException or UriFormatException)
             {
+                _metrics.FetchFailed(relays.Contains(host), ex is BlockValidationException ? FetchFailure.Invalid : FetchFailure.Network);
                 if (relays.Contains(host))
                 {
                     // Relays are optional extra capacity: a failing one is cooled down and left out of this fetch without using up an
@@ -225,6 +235,12 @@ public sealed partial class GossipBlockFetcher : IBlockFetcher
         if (notFound > 0 && notFound >= errors && notFound > badData)
         {
             throw new BlockNotAvailableException(round);
+        }
+
+        if (badData > 0 && badData >= errors)
+        {
+            // Mostly blocks that failed validation and none that validates: a bad fleet, or this decoder (not a network outage).
+            _metrics.DecoderError(DecoderErrorKind.Block);
         }
 
         throw new BlockFetchException($"Block {round} could not be fetched after {_options.MaxAttempts} attempts.", round, last);

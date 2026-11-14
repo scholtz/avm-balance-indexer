@@ -39,7 +39,7 @@ public partial class DocumentationTests
     [GeneratedRegex(@"`((?:Storage|Algorand|Indexer|Worker|Scans|Api|Telemetry):[A-Za-z0-9:]+)`")]
     private static partial Regex ConfigKey();
 
-    [GeneratedRegex(@"`(avm\.[a-z_.]+)`")]
+    [GeneratedRegex(@"`(avm\.[a-z_.]+)(?:\{[^`]*\})?`")]
     private static partial Regex Metric();
 
     /// <summary>The text of one options class, found by its name among the source files.</summary>
@@ -91,17 +91,18 @@ public partial class DocumentationTests
     }
 
     [Fact]
-    public void Every_Metric_The_Runbook_Names_Is_Registered_On_The_Worker_Meter()
+    public void Every_Metric_The_Runbook_Names_Is_Registered_On_The_Worker_Or_Indexing_Meter()
     {
         var runbook = File.ReadAllText(Path.Combine(Root, "docs", "operations.md"));
-        var registrations = File.ReadAllText(Path.Combine(Root, "src", "AvmBalanceIndexer.Worker", "WorkerHealth.cs"));
+        var registrations = File.ReadAllText(Path.Combine(Root, "src", "AvmBalanceIndexer.Worker", "WorkerHealth.cs"))
+            + File.ReadAllText(Path.Combine(Root, "src", "AvmBalanceIndexer.Indexing", "IndexingMetrics.cs"));
 
         var metrics = Metric().Matches(runbook).Select(static m => m.Groups[1].Value).Distinct().ToArray();
 
         Assert.NotEmpty(metrics);
         foreach (var metric in metrics)
         {
-            Assert.Matches($@"Create(?:Observable)?(?:Gauge|Counter)(?:<\w+>)?\(\s*""{Regex.Escape(metric)}""", registrations);
+            Assert.Matches($@"Create(?:Observable)?(?:Gauge|Counter|Histogram)(?:<\w+>)?\(\s*""{Regex.Escape(metric)}""", registrations);
         }
     }
 

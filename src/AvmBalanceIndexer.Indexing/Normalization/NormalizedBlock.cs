@@ -10,4 +10,8 @@ namespace AvmBalanceIndexer.Indexing.Normalization;
 /// code that sums deltas must treat them specially.
 /// </param>
 /// <param name="TokenChanges">Token records created or destroyed by the block (full replacement records, in block order).</param>
-public sealed record NormalizedBlock(IReadOnlyList<BalanceDelta> Deltas, IReadOnlyList<TokenInfo> TokenChanges);
+public sealed record NormalizedBlock(IReadOnlyList<BalanceDelta> Deltas, IReadOnlyList<TokenInfo> TokenChanges)
+{
+    /// <summary>Application logs that start with the ARC-200 transfer selector but are not a well-formed transfer event (skipped).</summary>
+    public int MalformedArc200Logs { get; init; }
+}

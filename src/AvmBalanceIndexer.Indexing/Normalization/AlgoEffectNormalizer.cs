@@ -74,7 +74,7 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
             round.Add(proposerAddress, payout, EffectType.ProposerPayout, feeSink, []);
         }
 
-        return new NormalizedBlock(round.Deltas, round.TokenChanges);
+        return new NormalizedBlock(round.Deltas, round.TokenChanges) { MalformedArc200Logs = round.MalformedArc200Logs };
     }
 
     /// <summary>
@@ -204,7 +204,18 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
         var token = TokenKey.Arc200(application);
         foreach (var log in logs)
         {
-            if (!Arc200Events.TryParseTransfer(log.Span, out var fromBytes, out var toBytes, out var amount) || amount.IsZero)
+            if (!Arc200Events.TryParseTransfer(log.Span, out var fromBytes, out var toBytes, out var amount))
+            {
+                if (log.Span.StartsWith(Arc200Events.TransferSelector))
+                {
+                    // The transfer selector without the shape of a transfer event: counted as a decoder error metric, not indexed.
+                    round.MalformedArc200Logs++;
+                }
+
+                continue;
+            }
+
+            if (amount.IsZero)
             {
                 continue;
             }
@@ -320,6 +331,8 @@ public sealed class AlgoEffectNormalizer : IEffectNormalizer
         private string _transactionId = string.Empty;
 
         public ulong Round { get; } = round;
+
+        public int MalformedArc200Logs { get; set; }
 
         public DomainAddress FeeSink { get; } = feeSink;
 
