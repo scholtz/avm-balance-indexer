@@ -143,9 +143,16 @@ jobs:
           # delete it when they switch it off again (a missing delete right would fail the upgrade half way).
           hpa=no
           if [ "$(yq '.api.autoscaling.enabled // false' "deploy/helm/values/$VALUES")" = true ]; then
+            # Delete too: the --atomic rollback of the upgrade that creates the autoscaler has to remove it again.
             resources+=(horizontalpodautoscalers.autoscaling); hpa=yes
-          elif kubectl -n "$NAMESPACE" get horizontalpodautoscaler "${RELEASE}-${CHAIN}-api" > /dev/null 2>&1; then
-            can delete horizontalpodautoscalers.autoscaling || missing+=("delete horizontalpodautoscalers.autoscaling (to remove the API autoscaler)")
+            can delete horizontalpodautoscalers.autoscaling || missing+=("delete horizontalpodautoscalers.autoscaling")
+          else
+            # Only "not found" means there is nothing to remove; any other failure (no right to read, API error) is not an answer.
+            if probe="$(kubectl -n "$NAMESPACE" get horizontalpodautoscaler "${RELEASE}-${CHAIN}-api" -o name 2>&1)"; then
+              can delete horizontalpodautoscalers.autoscaling || missing+=("delete horizontalpodautoscalers.autoscaling (to remove the API autoscaler)")
+            elif ! grep -q "NotFound" <<< "$probe"; then
+              echo "::error::Could not tell whether the release has an API autoscaler to remove: $probe"; exit 1
+            fi
           fi
           for resource in "${resources[@]}"; do
             for verb in get list watch create update patch; do

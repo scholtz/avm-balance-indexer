@@ -30,7 +30,7 @@ rules:
   - apiGroups: [policy]
     resources: [poddisruptionbudgets]
     verbs: [get, list, watch, create, update, patch, delete]
-  # Only needed with api.autoscaling.enabled.
+  # Needed with api.autoscaling.enabled, and delete also to switch it off again.
   - apiGroups: [autoscaling]
     resources: [horizontalpodautoscalers]
     verbs: [get, list, watch, create, update, patch, delete]

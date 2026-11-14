@@ -218,7 +218,10 @@ jobs:
           refused 'greater than api.podDisruptionBudget.minAvailable' --set api.autoscaling.enabled=true --set api.autoscaling.minReplicas=2 --set api.podDisruptionBudget.minAvailable=2
           # A target above 100 is valid (utilization is relative to the request).
           grep -q "averageUtilization: 150" <<< "$(t --set api.autoscaling.enabled=true --set api.autoscaling.targetCPUUtilizationPercentage=150)"
-          refused 'requests.cpu' --set api.autoscaling.enabled=true --set api.resources.requests.cpu=null
+          refused 'requests.cpu' --set api.autoscaling.enabled=true --set api.resources.requests.cpu=null --set api.resources.limits.cpu=null
+          refused 'whole number of replicas' --set api.autoscaling.enabled=true --set api.autoscaling.minReplicas=2.5
+          # A CPU limit alone is enough: Kubernetes takes the request from it.
+          grep -q "kind: HorizontalPodAutoscaler" <<< "$(t --set api.autoscaling.enabled=true --set api.resources.requests.cpu=null)"
           # One replica is allowed without the PodDisruptionBudget.
           grep -q "minReplicas: 1" <<< "$(t --set api.autoscaling.enabled=true --set api.autoscaling.minReplicas=1 --set api.podDisruptionBudget.enabled=false)"
       - name: Deployment overlays render (hostPath, ingress host, embedded Cassandra contact point)
