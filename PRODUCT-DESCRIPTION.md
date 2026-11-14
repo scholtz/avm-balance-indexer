@@ -281,7 +281,7 @@ Cassandra does not provide a relational transaction spanning all partitions. Do 
 2. Derive all canonical balance effects with stable keys from chain, round, transaction ID, inner path, and effect ordinal; compute each account/token’s ordered `balance_after` during round processing.
 3. Upsert query tables idempotently, using explicit consistency levels and retry policy.
 4. Verify expected write counts/checksums and then advance the visible `chain_status.indexed_round` as the final publication step.
-5. On restart, replay incomplete rounds safely; detect unexpected block-hash changes and recover by a partial rebuild from the last verified round (see below).
+5. On restart, replay incomplete rounds safely; detect unexpected block-hash changes and stop; recovery is a partial rebuild from a round before the problem (see below).
 
 This makes API reads expose only completed rounds while allowing independently written query tables to converge. The chain's archival nodes are the replayable source; no raw block archive is kept next to them. Avoid Cassandra counters for balances; compute exact totals from deterministic effects and write absolute current balance values.
 
@@ -289,10 +289,10 @@ This makes API reads expose only completed rounds while allowing independently w
 
 A fix in the normalizer only changes rounds indexed afterwards, and stored rows are never edited in place in Cassandra. Rebuilding a chain from genesis takes weeks, so a fix must not need it:
 
-- **Partial rebuild (fork at a round).** The operator names the last round R known to be good. The data up to R is taken over and only the rounds after R are indexed again with the fixed code. Cassandra fills a new keyspace from the old one (effects up to R are copied; holdings, the touched-account directory and the bucket index are derived from them; the status row for R is published last), then the old keyspace is retired. PostgreSQL deletes the rows after R and recomputes the affected holdings in one transaction. Either way the API never exposes a half-built state, and the result must equal a database that was indexed straight through with the fixed code.
+- **Partial rebuild (fork at a round).** The operator names the last round R known to be good. The data up to R is taken over and only the rounds after R are indexed again with the fixed code. Cassandra fills a new keyspace from the old one (effects up to R are copied; holdings, the touched-account directory and the bucket index are derived from them; the status row for R is published last), then the old keyspace is retired. PostgreSQL deletes the rows after R and recomputes the affected holdings in one transaction. The API never exposes a half-built state: it keeps reading the old keyspace until the new one follows the chain. Effects, balances at every round, holdings and holders must equal a database that was indexed straight through with the fixed code.
 - **It is a reviewed database change request**, set in the release values and carried out by the writer, like the retirement of an old keyspace. Nobody runs statements by hand.
-- **Keep R recent and known.** At the tip the writer audits every round against the ledger deltas of the node where the chain offers them and stops at the first disagreement, and the database records which build indexed which range of rounds.
-- **Limits.** A bug in an early protocol era still costs most of the chain; that class is covered by era tests, not by this mechanism. Token records are not versioned: a field changed after R keeps its newer value until the replay passes that round again; balances do not depend on it.
+- **Keep R recent and known.** The writer audits rounds against the ledger deltas of the node where the chain offers them (every round at the tip, a sample during backfill) and stops at the first disagreement; an unavailable node is never a failure. The database records which build indexed which range of rounds.
+- **Limits.** A bug in an early protocol era still costs most of the chain. Token records are not versioned and are outside the equality above: a field changed after R keeps its value unless the replay writes that token again; balances do not depend on those fields. PostgreSQL rewinds in place and has no undo, so it needs a backup first.
 
 ## Kubernetes deployment model
 
