@@ -37,6 +37,9 @@ public sealed partial class RoundIndexer(
     private static readonly TimeSpan FlushGracePeriod = TimeSpan.FromSeconds(10);
     private long _roundsCommitted;
     private bool _writeFailed;
+    private ulong _lastLatest;
+    private DateTimeOffset _latestAdvancedAt;
+    private bool _tipStale;
 
     /// <summary>Total rounds this instance has committed; lets a supervisor tell progress from a stall without reading storage.</summary>
     public long RoundsCommitted => Interlocked.Read(ref _roundsCommitted);
@@ -90,6 +93,10 @@ public sealed partial class RoundIndexer(
             // A bounded run knows its target and does not need algod at all.
             var latest = stopAfterRound ?? await adapter.GetLatestRoundAsync(cancellationToken).ConfigureAwait(false);
             var target = latest;
+            if (stopAfterRound is null)
+            {
+                NoteLatest(latest);
+            }
 
             if (next > target)
             {
@@ -98,7 +105,11 @@ public sealed partial class RoundIndexer(
                     break;
                 }
 
-                status = await HeartbeatAsync(status, latest, cancellationToken).ConfigureAwait(false);
+                if (!TipIsStale(latest))
+                {
+                    status = await HeartbeatAsync(status, latest, cancellationToken).ConfigureAwait(false);
+                }
+
                 await Task.Delay(_options.FollowPollInterval, _time, cancellationToken).ConfigureAwait(false);
                 continue;
             }
@@ -198,6 +209,36 @@ public sealed partial class RoundIndexer(
 
     private static bool LinksTo(ChainStatus previous, BlockData block) =>
         block.PreviousHash.AsSpan().SequenceEqual(previous.IndexedBlockHash.Span);
+
+    /// <summary>Remembers when algod's latest round last advanced (a lower answer, as from another node behind a balancer, is not an advance).</summary>
+    private void NoteLatest(ulong latest)
+    {
+        if (latest > _lastLatest || _latestAdvancedAt == default)
+        {
+            _lastLatest = latest;
+            _latestAdvancedAt = _time.GetUtcNow();
+        }
+    }
+
+    /// <summary>
+    /// True while algod's latest round has not advanced for <see cref="IndexerOptions.TipStaleAfter"/>: the chain or the node is stuck and
+    /// the idle writer must not claim to be healthy. Logs once when it starts and once when it ends.
+    /// </summary>
+    private bool TipIsStale(ulong latest)
+    {
+        var stale = _time.GetUtcNow() - _latestAdvancedAt > _options.TipStaleAfter;
+        if (stale && !_tipStale)
+        {
+            LogTipStale(logger, latest, _latestAdvancedAt);
+        }
+        else if (!stale && _tipStale)
+        {
+            LogTipAdvancing(logger, latest);
+        }
+
+        _tipStale = stale;
+        return stale;
+    }
 
     /// <summary>
     /// A writer that has caught up with the tip is alive: it republishes the status with the latest round and a fresh timestamp, so that
@@ -461,6 +502,12 @@ public sealed partial class RoundIndexer(
 
     [LoggerMessage(EventId = 1201, Level = LogLevel.Information, Message = "{Chain}: genesis applied with {Accounts} funded accounts")]
     private static partial void LogGenesis(ILogger logger, string chain, int accounts);
+
+    [LoggerMessage(EventId = 1204, Level = LogLevel.Warning, Message = "algod reports round {Round} as the latest since {Since:u}; the chain or the node is stuck, the status is no longer refreshed")]
+    private static partial void LogTipStale(ILogger logger, ulong round, DateTimeOffset since);
+
+    [LoggerMessage(EventId = 1205, Level = LogLevel.Information, Message = "algod advances again (latest round {Round}); the status is refreshed again")]
+    private static partial void LogTipAdvancing(ILogger logger, ulong round);
 
     [LoggerMessage(EventId = 1202, Level = LogLevel.Debug, Message = "Block {Round} is not available on archival nodes yet; waiting")]
     private static partial void LogWaitingForBlock(ILogger logger, ulong round);

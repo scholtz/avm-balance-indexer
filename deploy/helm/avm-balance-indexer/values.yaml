@@ -129,6 +129,8 @@ worker:
   replicaCount: 2
   # Port of /healthz/live and /healthz/ready.
   healthPort: 8081
+  # An idle writer stops refreshing the status when algod's latest round has not advanced for this long (the API then reports Stalled).
+  tipStaleAfter: "00:01:00"
   resources:
     requests: { cpu: 500m, memory: 512Mi }
     limits: { cpu: "2", memory: 2Gi }

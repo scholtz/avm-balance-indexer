@@ -87,6 +87,47 @@ public class BatchedIndexingTests
     }
 
     [Fact]
+    public async Task A_Stuck_Algod_Stops_The_Heartbeat_And_Resumes_When_It_Advances()
+    {
+        // algod keeps answering the same latest round: the writer is caught up, but the chain or the node is stuck (#185).
+        var storage = new RecordingStorage(new ChainContext(ChainId.AlgorandTestnet));
+        var adapter = Adapter();
+        adapter.Latest = LastRound - 1;
+        var options = new IndexerOptions { FetchConcurrency = 2, FollowPollInterval = TimeSpan.FromMilliseconds(10), TipStaleAfter = TimeSpan.FromMilliseconds(400) };
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var run = Indexer(storage, adapter, options).RunAsync(null, stop.Token);
+
+        async Task<ChainStatus> Status() => (await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!;
+        async Task WaitFor(Func<ChainStatus, bool> condition)
+        {
+            while (!condition(await Status()))
+            {
+                await Task.Delay(10, stop.Token);
+            }
+        }
+
+        // caught up with a tip that moves: the heartbeat keeps the timestamp moving
+        await WaitFor(s => s.IndexedRound == LastRound - 1);
+        var first = (await Status()).UpdatedAt;
+        await WaitFor(s => s.UpdatedAt > first);
+
+        // the tip stays: after the stale period the timestamp stops moving
+        await Task.Delay(TimeSpan.FromMilliseconds(900), stop.Token);
+        var frozen = (await Status()).UpdatedAt;
+        await Task.Delay(TimeSpan.FromMilliseconds(300), stop.Token);
+        Assert.Equal(frozen, (await Status()).UpdatedAt);
+
+        // algod advances: the writer indexes the new round and the heartbeat resumes
+        adapter.Latest = LastRound;
+        await WaitFor(s => s.IndexedRound == LastRound);
+        var resumed = (await Status()).UpdatedAt;
+        await WaitFor(s => s.UpdatedAt > resumed);
+
+        await stop.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+    }
+
+    [Fact]
     public async Task A_Writer_Resuming_At_The_Tip_Fetches_Its_Seed_Block_With_The_Tip_Hint()
     {
         // The seed block (the last published round) is re-fetched on every start; at the tip relays can serve it (#169, ADR 0019).

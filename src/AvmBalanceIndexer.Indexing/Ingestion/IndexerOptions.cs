@@ -31,6 +31,13 @@ public sealed class IndexerOptions : IValidatableObject
     public TimeSpan FollowPollInterval { get; set; } = TimeSpan.FromSeconds(2);
 
     /// <summary>
+    /// When algod's latest round has not advanced for this long (blocks come every ~3 s), the idle writer stops refreshing the
+    /// published status, so the API reports it as stalled instead of healthy while the chain or the node is stuck.
+    /// </summary>
+    [Range(typeof(TimeSpan), "00:00:10", "01:00:00")]
+    public TimeSpan TipStaleAfter { get; set; } = TimeSpan.FromSeconds(60);
+
+    /// <summary>
     /// Upper bound of cached account balances. The cache keeps two generations of half this size each, and a round that
     /// touches more accounts than one generation holds bypasses it. Storage always supplies what is not cached.
     /// </summary>
