@@ -1,6 +1,7 @@
 using System.Buffers;
-using System.Numerics;
+using System.Net;
 using System.Text.Json;
+using AvmBalanceIndexer.Domain.Tokens;
 using AvmBalanceIndexer.Indexing.Normalization;
 using MessagePack;
 using Microsoft.Extensions.Logging;
@@ -15,7 +16,8 @@ public sealed partial class AlgodArc200MetadataSource(HttpClient http, ReadOnlyM
     : IArc200MetadataSource, IDisposable
 {
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(5);
-    private static readonly int[] Sizes = [32, 8, 1, 32];
+    private const ulong ValidityWindow = 1000;
+    private const ulong FirstValidSlack = 5;
 
     /// <summary>Disposes the HTTP client when this source created it.</summary>
     public void Dispose()
@@ -31,13 +33,13 @@ public sealed partial class AlgodArc200MetadataSource(HttpClient http, ReadOnlyM
     {
         try
         {
-            var answers = await Task.WhenAll(Arc200Metadata.Signatures.Select(signature =>
-                CallAsync(applicationId, Arc200Metadata.Selector(signature), sender, latestRound, cancellationToken))).ConfigureAwait(false);
+            var answers = await Task.WhenAll(Arc200Metadata.Methods.Select(method =>
+                CallAsync(applicationId, Arc200Metadata.Selector(method.Signature), sender, latestRound, cancellationToken))).ConfigureAwait(false);
 
-            string? name = Arc200Metadata.TryDecodeText(answers[0], Sizes[0], out var n) ? n : null;
-            string? symbol = Arc200Metadata.TryDecodeText(answers[1], Sizes[1], out var s) ? s : null;
-            int? decimals = Arc200Metadata.TryDecodeUint(answers[2], Sizes[2], out var d) ? (int)d : null;
-            BigInteger? supply = Arc200Metadata.TryDecodeUint(answers[3], Sizes[3], out var t) ? t : null;
+            string? name = Arc200Metadata.TryDecodeText(answers[0], Arc200Metadata.Methods[0].Size, out var n) ? n : null;
+            string? symbol = Arc200Metadata.TryDecodeText(answers[1], Arc200Metadata.Methods[1].Size, out var s) ? s : null;
+            int? decimals = Arc200Metadata.TryDecodeUint(answers[2], Arc200Metadata.Methods[2].Size, out var d) ? (int)d : null;
+            Amount? supply = Arc200Metadata.TryDecodeUint(answers[3], Arc200Metadata.Methods[3].Size, out var t) ? new Amount(t) : null;
             return new Arc200Metadata(name, symbol, decimals, supply);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -59,7 +61,15 @@ public sealed partial class AlgodArc200MetadataSource(HttpClient http, ReadOnlyM
         using var content = new ByteArrayContent(BuildRequest(applicationId, selector, sender.Span, latestRound, genesisHash.Span));
         content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/msgpack");
         using var response = await http.PostAsync(new Uri("v2/transactions/simulate", UriKind.Relative), content, timeout.Token).ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
+        if (!response.IsSuccessStatusCode)
+        {
+            // Throttling, a timeout or a server error says nothing about the application; any other rejection (400 for a call that
+            // cannot be simulated) is that application's answer, and must not hold up the lookups of the others.
+            return response.StatusCode is HttpStatusCode.TooManyRequests or HttpStatusCode.Forbidden or HttpStatusCode.RequestTimeout || (int)response.StatusCode >= 500
+                ? throw new HttpRequestException($"algod answered {(int)response.StatusCode}", null, response.StatusCode)
+                : [];
+        }
+
         var body = await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false);
         using var document = JsonDocument.Parse(body);
         var group = document.RootElement.GetProperty("txn-groups")[0];
@@ -108,11 +118,11 @@ public sealed partial class AlgodArc200MetadataSource(HttpClient http, ReadOnlyM
         writer.Write("fee");
         writer.Write(1000UL);
         writer.Write("fv");
-        writer.Write(latestRound);
+        writer.Write(latestRound > FirstValidSlack ? latestRound - FirstValidSlack : 1); // a node a round or two behind must still accept it
         writer.Write("gh");
         writer.Write(genesisHash);
         writer.Write("lv");
-        writer.Write(latestRound + 1000);
+        writer.Write((latestRound > FirstValidSlack ? latestRound - FirstValidSlack : 1) + ValidityWindow);
         writer.Write("snd");
         writer.Write(sender);
         writer.Write("type");

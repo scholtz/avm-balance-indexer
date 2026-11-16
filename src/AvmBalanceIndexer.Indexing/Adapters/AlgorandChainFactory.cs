@@ -76,12 +76,7 @@ public static class AlgorandChainFactory
         ArgumentNullException.ThrowIfNull(loggerFactory);
 
         var profile = ChainProfile.For(options.Chain);
-        var http = HttpClientConfigurator.ConfigureHttpClient(
-            string.IsNullOrWhiteSpace(options.AlgodUrl) ? profile.DefaultAlgodUrl : options.AlgodUrl,
-            options.AlgodToken ?? string.Empty,
-            string.Empty,
-            -1,
-            CreateHandler());
+        var http = CreateAlgodClient(options, profile);
         http.Timeout = TimeSpan.FromSeconds(30);
 
         // A relative request URI replaces the last path segment of a base address without a trailing slash (a gateway such as /algod).
@@ -89,6 +84,14 @@ public static class AlgorandChainFactory
 
         return new AlgodArc200MetadataSource(http, ResolveGenesisHash(profile, options), loggerFactory.CreateLogger<AlgodArc200MetadataSource>(), ownsClient: true);
     }
+
+    private static HttpClient CreateAlgodClient(AlgorandChainOptions options, ChainProfile profile) =>
+        HttpClientConfigurator.ConfigureHttpClient(
+            string.IsNullOrWhiteSpace(options.AlgodUrl) ? profile.DefaultAlgodUrl : options.AlgodUrl,
+            options.AlgodToken ?? string.Empty,
+            string.Empty,
+            -1,
+            CreateHandler());
 
     internal static Uri WithTrailingSlash(Uri address) =>
         address.AbsolutePath.EndsWith('/') ? address : new UriBuilder(address) { Path = address.AbsolutePath + "/" }.Uri;
@@ -118,12 +121,7 @@ public static class AlgorandChainFactory
                 loggerFactory.CreateLogger<GossipBlockFetcher>(),
                 metrics: metrics);
 
-            algodHttp = HttpClientConfigurator.ConfigureHttpClient(
-                string.IsNullOrWhiteSpace(options.AlgodUrl) ? profile.DefaultAlgodUrl : options.AlgodUrl,
-                options.AlgodToken ?? string.Empty,
-                string.Empty,
-                -1,
-                CreateHandler());
+            algodHttp = CreateAlgodClient(options, profile);
             algodHttp.Timeout = TimeSpan.FromSeconds(60);
 
             IDisposable[] resources = hosts is IDisposable disposableHosts ? [.. owned, disposableHosts] : owned;

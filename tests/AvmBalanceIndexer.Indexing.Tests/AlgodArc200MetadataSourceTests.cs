@@ -77,7 +77,7 @@ public class AlgodArc200MetadataSourceTests
         var metadata = await Source(handler).TryReadAsync(42, Sender, 1000, CancellationToken.None);
 
         Assert.NotNull(metadata);
-        Assert.Equal(("Voi Token", "VOI", 6, 256), (metadata.Name, metadata.Symbol, metadata.Decimals, (int)metadata.TotalSupply!.Value));
+        Assert.Equal(("Voi Token", "VOI", 6, 256), (metadata.Name, metadata.Symbol, metadata.Decimals, (int)metadata.TotalSupply!.Value.Value));
         Assert.True(metadata.Complete);
         Assert.Equal(4, handler.Requests.Count);
         Assert.All(handler.Uris, uri => Assert.Equal("/v2/transactions/simulate", uri!.AbsolutePath));
@@ -99,8 +99,8 @@ public class AlgodArc200MetadataSourceTests
         Assert.Equal(["apaa", "apid", "fee", "fv", "gh", "lv", "snd", "type"], txn.Keys.Cast<string>());
         Assert.Equal(42UL, Convert.ToUInt64(txn["apid"], System.Globalization.CultureInfo.InvariantCulture));
         Assert.Equal(1000UL, Convert.ToUInt64(txn["fee"], System.Globalization.CultureInfo.InvariantCulture));
-        Assert.Equal(1000UL, Convert.ToUInt64(txn["fv"], System.Globalization.CultureInfo.InvariantCulture));
-        Assert.Equal(2000UL, Convert.ToUInt64(txn["lv"], System.Globalization.CultureInfo.InvariantCulture));
+        Assert.Equal(995UL, Convert.ToUInt64(txn["fv"], System.Globalization.CultureInfo.InvariantCulture));
+        Assert.Equal(1995UL, Convert.ToUInt64(txn["lv"], System.Globalization.CultureInfo.InvariantCulture));
         Assert.Equal(Genesis, (byte[])txn["gh"]);
         Assert.Equal(Sender, (byte[])txn["snd"]);
         Assert.Equal("appl", (string)txn["type"]);
@@ -127,6 +127,18 @@ public class AlgodArc200MetadataSourceTests
         var metadata = await Source(handler).TryReadAsync(42, Sender, 1000, CancellationToken.None);
 
         Assert.Equal(new Arc200Metadata(null, null, null, null), metadata);
+    }
+
+    [Fact]
+    public async Task A_Rejected_Call_Is_The_Applications_Answer_While_Throttling_Is_Not()
+    {
+        var rejected = await Source(new Handler(_ => new HttpResponseMessage(HttpStatusCode.BadRequest))).TryReadAsync(42, Sender, 1000, CancellationToken.None);
+        Assert.Equal(new Arc200Metadata(null, null, null, null), rejected);
+
+        foreach (var status in new[] { HttpStatusCode.TooManyRequests, HttpStatusCode.Forbidden, HttpStatusCode.BadGateway, HttpStatusCode.RequestTimeout })
+        {
+            Assert.Null(await Source(new Handler(_ => new HttpResponseMessage(status))).TryReadAsync(42, Sender, 1000, CancellationToken.None));
+        }
     }
 
     [Fact]

@@ -1,5 +1,6 @@
 using System.Numerics;
 using System.Text;
+using AvmBalanceIndexer.Domain.Tokens;
 using AvmBalanceIndexer.Indexing.Normalization;
 
 namespace AvmBalanceIndexer.Indexing.Tests;
@@ -38,6 +39,10 @@ public class Arc200MetadataTests
         Assert.True(Arc200Metadata.TryDecodeText(Log(Padded("Ünï", 8)), 8, out var text));
         Assert.Equal("Ünï", text);
     }
+
+    [Fact]
+    public void Control_Characters_Make_A_Name_Absent() =>
+        Assert.False(Arc200Metadata.TryDecodeText(Log(Padded("Bad" + (char)10 + "Name", 32)), 32, out _));
 
     [Fact]
     public void An_All_Zero_Name_Is_Absent() =>
@@ -81,7 +86,7 @@ public class Arc200MetadataTests
     [Fact]
     public void Only_A_Record_With_All_Four_Values_Is_Complete()
     {
-        Assert.True(new Arc200Metadata("N", "S", 6, 1).Complete);
+        Assert.True(new Arc200Metadata("N", "S", 6, Amount.From(1)).Complete);
         Assert.False(new Arc200Metadata("N", "S", 6, null).Complete);
         Assert.False(new Arc200Metadata(null, null, null, null).Complete);
     }

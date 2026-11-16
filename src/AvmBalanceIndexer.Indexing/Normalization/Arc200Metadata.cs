@@ -1,5 +1,6 @@
 using System.Numerics;
 using System.Text;
+using AvmBalanceIndexer.Domain.Tokens;
 using AvmBalanceIndexer.Indexing.Adapters;
 
 namespace AvmBalanceIndexer.Indexing.Normalization;
@@ -12,13 +13,13 @@ namespace AvmBalanceIndexer.Indexing.Normalization;
 /// <param name="Symbol">The token symbol, at most 8 bytes of UTF-8.</param>
 /// <param name="Decimals">The number of decimals (0 to 255).</param>
 /// <param name="TotalSupply">The total supply at the time of the lookup.</param>
-public sealed record Arc200Metadata(string? Name, string? Symbol, int? Decimals, BigInteger? TotalSupply)
+public sealed record Arc200Metadata(string? Name, string? Symbol, int? Decimals, Amount? TotalSupply)
 {
     private static readonly byte[] ReturnPrefix = [0x15, 0x1f, 0x7c, 0x75];
 
-    /// <summary>The four method signatures in the order name, symbol, decimals, totalSupply.</summary>
-    public static IReadOnlyList<string> Signatures { get; } =
-        ["arc200_name()byte[32]", "arc200_symbol()byte[8]", "arc200_decimals()uint8", "arc200_totalSupply()uint256"];
+    /// <summary>The four read-only methods in the order name, symbol, decimals, totalSupply, with the byte size of what each returns.</summary>
+    public static IReadOnlyList<(string Signature, int Size)> Methods { get; } =
+        [("arc200_name()byte[32]", 32), ("arc200_symbol()byte[8]", 8), ("arc200_decimals()uint8", 1), ("arc200_totalSupply()uint256", 32)];
 
     /// <summary>True when all four methods answered with well-formed values (the standard is then considered verified).</summary>
     public bool Complete => Name is not null && Symbol is not null && Decimals is not null && TotalSupply is not null;
@@ -52,7 +53,9 @@ public sealed record Arc200Metadata(string? Name, string? Symbol, int? Decimals,
         try
         {
             text = new UTF8Encoding(false, throwOnInvalidBytes: true).GetString(value);
-            return true;
+
+            // The API serves this as verified token metadata: a name with control characters (newlines, escapes) is not one.
+            return !text.Any(char.IsControl);
         }
         catch (ArgumentException)
         {

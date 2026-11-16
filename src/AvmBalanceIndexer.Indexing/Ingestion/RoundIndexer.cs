@@ -4,7 +4,6 @@ using AvmBalanceIndexer.Domain.Storage;
 using AvmBalanceIndexer.Domain.Tokens;
 using AvmBalanceIndexer.Indexing.Adapters;
 using AvmBalanceIndexer.Indexing.Normalization;
-using System.Globalization;
 using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
@@ -552,10 +551,12 @@ public sealed partial class RoundIndexer(
     private async Task ReadPendingMetadataAsync(BlockData block, CancellationToken cancellationToken)
     {
         var now = _time.GetUtcNow();
-        if (now < _arc200LookupsPausedUntil)
+        if (now < _arc200LookupsPausedUntil || block.Block.FeeSink is not { } feeSink)
         {
             return;
         }
+
+        var sender = feeSink.Bytes;
 
         var due = _arc200Pending.Where(pair => pair.Value <= now).Select(static pair => pair.Key).Take(MetadataLookupsPerBlock).ToList();
         if (due.Count == 0)
@@ -584,7 +585,7 @@ public sealed partial class RoundIndexer(
             {
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 timeout.CancelAfter(MetadataLookupTimeout);
-                metadata = await arc200Metadata!.TryReadAsync(applicationId, block.Block.FeeSink!.Bytes, latest, timeout.Token).ConfigureAwait(false);
+                metadata = await arc200Metadata!.TryReadAsync(applicationId, sender, latest, timeout.Token).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OutOfMemoryException && !cancellationToken.IsCancellationRequested)
             {
@@ -611,18 +612,21 @@ public sealed partial class RoundIndexer(
                 }
 
                 _arc200Pending.Remove(applicationId);
+                _arc200EmptyAnswers.Remove(applicationId);
                 _knownArc200.Add(applicationId);
                 continue;
             }
 
-            _arc200Pending.Remove(applicationId);
-            _knownArc200.Add(applicationId);
-
+            // The sets change only after the write: a failing write leaves the token pending, so the next block tries again.
             var key = TokenKey.Arc200(applicationId);
             if (await storage.GetAsync(key, cancellationToken).ConfigureAwait(false) is { } stored)
             {
                 await storage.UpsertAsync(WithMetadata(stored, metadata), cancellationToken).ConfigureAwait(false);
             }
+
+            _arc200Pending.Remove(applicationId);
+            _arc200EmptyAnswers.Remove(applicationId);
+            _knownArc200.Add(applicationId);
         }
     }
 
@@ -635,7 +639,7 @@ public sealed partial class RoundIndexer(
             StandardVerified = metadata.Complete,
             MetadataJson = JsonSerializer.Serialize(new Dictionary<string, string?>
             {
-                ["totalSupply"] = metadata.TotalSupply?.ToString(CultureInfo.InvariantCulture),
+                ["totalSupply"] = metadata.TotalSupply?.ToString(),
                 ["metadataSource"] = "simulate",
             }),
         };
