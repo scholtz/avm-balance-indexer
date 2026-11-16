@@ -144,6 +144,13 @@ public class AlgodArc200MetadataSourceTests
         }
     }
 
+    [Theory]
+    [InlineData("http://gw.test/algod", "http://gw.test/algod/v2/transactions/simulate")]
+    [InlineData("http://gw.test/algod/", "http://gw.test/algod/v2/transactions/simulate")]
+    [InlineData("http://gw.test", "http://gw.test/v2/transactions/simulate")]
+    public void A_Gateway_Path_Without_A_Trailing_Slash_Keeps_Its_Last_Segment(string configured, string expected) =>
+        Assert.Equal(expected, new Uri(AlgorandChainFactory.WithTrailingSlash(new Uri(configured)), "v2/transactions/simulate").AbsoluteUri);
+
     [Fact]
     public async Task A_Hanging_Node_Is_Given_Up_On_After_The_Timeout()
     {

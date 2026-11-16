@@ -83,8 +83,15 @@ public static class AlgorandChainFactory
             -1,
             CreateHandler());
         http.Timeout = TimeSpan.FromSeconds(30);
+
+        // A relative request URI replaces the last path segment of a base address without a trailing slash (a gateway such as /algod).
+        http.BaseAddress = http.BaseAddress is null ? null : WithTrailingSlash(http.BaseAddress);
+
         return new AlgodArc200MetadataSource(http, ResolveGenesisHash(profile, options), loggerFactory.CreateLogger<AlgodArc200MetadataSource>(), ownsClient: true);
     }
+
+    internal static Uri WithTrailingSlash(Uri address) =>
+        address.AbsolutePath.EndsWith('/') ? address : new UriBuilder(address) { Path = address.AbsolutePath + "/" }.Uri;
 
     private static AlgorandChainAdapter CreateCore(AlgorandChainOptions options, HttpClient blockHttpClient, ILoggerFactory loggerFactory, IndexingMetrics metrics, IDisposable[] owned)
     {

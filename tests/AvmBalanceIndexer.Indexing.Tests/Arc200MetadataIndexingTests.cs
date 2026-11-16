@@ -143,6 +143,41 @@ public class Arc200MetadataIndexingTests
     }
 
     [Fact]
+    public async Task A_Token_That_Answers_Nothing_Is_Asked_A_Few_Times_And_Then_Left_Alone()
+    {
+        var source = new FakeSource(_ => new Arc200Metadata(null, null, null, null));
+        var storage = new InMemoryChainStorage(new ChainContext(ChainId.AlgorandTestnet));
+        var options = new IndexerOptions { Arc200MetadataRetryInterval = TimeSpan.FromMilliseconds(100), FetchConcurrency = 2 };
+        var indexer = new RoundIndexer(Adapter(Blocks(40)), new AlgoEffectNormalizer(), storage, Options.Create(options), NullLogger<RoundIndexer>.Instance, arc200Metadata: source);
+
+        for (ulong stop = 2; stop <= 20; stop += 2)
+        {
+            await indexer.RunAsync(stop, CancellationToken.None);
+            await Task.Delay(350);
+        }
+
+        Assert.Equal(3, source.Calls);
+        Assert.Null((await storage.GetAsync(Key, CancellationToken.None))!.Name);
+    }
+
+    [Fact]
+    public async Task A_Failed_Lookup_Pauses_All_Lookups_So_A_Down_Node_Does_Not_Cost_Every_Block_A_Timeout()
+    {
+        var chain = new TestChain();
+        var zero = new Address(new byte[Address.Length]);
+        TestPayment Transfer(ulong application) => new(Alice, Alice, 0, Application: new TestApplication(application, [TestChain.Arc200TransferLog(zero, Alice, 1)]));
+        var blocks = new[] { chain.Block(1, [Transfer(1), Transfer(2), Transfer(3)], rewards: RewardsAt(1)), chain.Block(2, [Transfer(4)], rewards: RewardsAt(2)) };
+        var source = new FakeSource(_ => null);
+        var indexer = new RoundIndexer(
+            Adapter(blocks), new AlgoEffectNormalizer(), new InMemoryChainStorage(new ChainContext(ChainId.AlgorandTestnet)),
+            Options.Create(new IndexerOptions()), NullLogger<RoundIndexer>.Instance, arc200Metadata: source);
+
+        await indexer.RunAsync(2, CancellationToken.None);
+
+        Assert.Equal(1, source.Calls); // four tokens were pending; the first failure paused the rest
+    }
+
+    [Fact]
     public async Task A_Token_With_Stored_Metadata_Is_Not_Asked_Again_After_A_Restart()
     {
         var source = new FakeSource(_ => Full);

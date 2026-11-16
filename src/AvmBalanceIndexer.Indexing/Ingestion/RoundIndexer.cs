@@ -39,6 +39,11 @@ public sealed partial class RoundIndexer(
 
     /// <summary>ARC-200 tokens whose record is written but whose metadata is still to be read, with the time of the next attempt.</summary>
     private readonly Dictionary<ulong, DateTimeOffset> _arc200Pending = [];
+
+    /// <summary>How often a token answered none of the four methods; after <see cref="MaxEmptyAnswers"/> it is left alone (not an ARC-200 token, or no metadata).</summary>
+    private readonly Dictionary<ulong, int> _arc200EmptyAnswers = [];
+    private DateTimeOffset _arc200LookupsPausedUntil;
+    private const int MaxEmptyAnswers = 3;
     private static readonly TimeSpan MetadataLookupTimeout = TimeSpan.FromSeconds(10);
     private const int MetadataLookupsPerBlock = 2;
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
@@ -536,6 +541,9 @@ public sealed partial class RoundIndexer(
         }
     }
 
+    /// <summary>After a failed lookup all lookups rest this long: the retry interval, at most a minute.</summary>
+    private TimeSpan MetadataPause() => _options.Arc200MetadataRetryInterval < TimeSpan.FromMinutes(1) ? _options.Arc200MetadataRetryInterval : TimeSpan.FromMinutes(1);
+
     /// <summary>
     /// Reads the metadata of the pending tokens that are due, a few per block. It is enrichment: a failure, a hang (bounded here
     /// as well as in the source) or an unreachable node leaves the record as it is and is retried after
@@ -544,7 +552,31 @@ public sealed partial class RoundIndexer(
     private async Task ReadPendingMetadataAsync(BlockData block, CancellationToken cancellationToken)
     {
         var now = _time.GetUtcNow();
+        if (now < _arc200LookupsPausedUntil)
+        {
+            return;
+        }
+
         var due = _arc200Pending.Where(pair => pair.Value <= now).Select(static pair => pair.Key).Take(MetadataLookupsPerBlock).ToList();
+        if (due.Count == 0)
+        {
+            return;
+        }
+
+        ulong latest;
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(MetadataLookupTimeout);
+            latest = await adapter.GetLatestRoundAsync(timeout.Token).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException && !cancellationToken.IsCancellationRequested)
+        {
+            LogMetadataUnavailable(logger, 0, ex.Message);
+            _arc200LookupsPausedUntil = now + MetadataPause();
+            return;
+        }
+
         foreach (var applicationId in due)
         {
             Arc200Metadata? metadata = null;
@@ -552,7 +584,6 @@ public sealed partial class RoundIndexer(
             {
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 timeout.CancelAfter(MetadataLookupTimeout);
-                var latest = await adapter.GetLatestRoundAsync(timeout.Token).ConfigureAwait(false);
                 metadata = await arc200Metadata!.TryReadAsync(applicationId, block.Block.FeeSink!.Bytes, latest, timeout.Token).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OutOfMemoryException && !cancellationToken.IsCancellationRequested)
@@ -562,16 +593,30 @@ public sealed partial class RoundIndexer(
 
             if (metadata is null)
             {
+                // The node could not be asked: a slow or down algod must not cost every block a timeout, so pause all lookups for a while.
                 _arc200Pending[applicationId] = now + _options.Arc200MetadataRetryInterval;
+                _arc200LookupsPausedUntil = now + MetadataPause();
+                return;
+            }
+
+            if (metadata.Name is null && metadata.Symbol is null && metadata.Decimals is null && metadata.TotalSupply is null)
+            {
+                // Nothing answered: the application may not exist on this node yet (it lags the relays) or does not implement ARC-200.
+                var empty = _arc200EmptyAnswers.GetValueOrDefault(applicationId) + 1;
+                _arc200EmptyAnswers[applicationId] = empty;
+                if (empty < MaxEmptyAnswers)
+                {
+                    _arc200Pending[applicationId] = now + (_options.Arc200MetadataRetryInterval * empty);
+                    continue;
+                }
+
+                _arc200Pending.Remove(applicationId);
+                _knownArc200.Add(applicationId);
                 continue;
             }
 
             _arc200Pending.Remove(applicationId);
             _knownArc200.Add(applicationId);
-            if (metadata.Name is null && metadata.Symbol is null && metadata.Decimals is null && metadata.TotalSupply is null)
-            {
-                continue; // the application answers none of the methods: nothing to store
-            }
 
             var key = TokenKey.Arc200(applicationId);
             if (await storage.GetAsync(key, cancellationToken).ConfigureAwait(false) is { } stored)
