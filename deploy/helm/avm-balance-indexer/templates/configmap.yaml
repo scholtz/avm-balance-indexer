@@ -25,6 +25,7 @@ data:
   {{- end }}
   Logging__Format: {{ .Values.logging.format | quote }}
   Serilog__MinimumLevel__Default: {{ .Values.logging.level | quote }}
+  Indexer__TipStaleAfter: {{ .Values.worker.tipStaleAfter | quote }}
   Worker__HealthPort: {{ .Values.worker.healthPort | quote }}
   Api__RateLimitPerMinute: {{ .Values.api.rateLimitPerMinute | quote }}
   Api__RequestTimeoutSeconds: {{ .Values.api.requestTimeoutSeconds | quote }}

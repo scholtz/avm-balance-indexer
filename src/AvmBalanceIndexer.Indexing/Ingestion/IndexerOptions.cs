@@ -31,6 +31,15 @@ public sealed class IndexerOptions : IValidatableObject
     public TimeSpan FollowPollInterval { get; set; } = TimeSpan.FromSeconds(2);
 
     /// <summary>
+    /// When algod's latest round has not advanced for this long (blocks come every ~3 s), the idle writer stops refreshing the
+    /// published status, so the API reports it as stalled instead of healthy while the chain or the node is stuck. The API reports
+    /// <c>Stalled</c> this value plus <c>Api:StalledAfterSeconds</c> after the last advance, so keep it below what an outage may last.
+    /// A chain that produces blocks only on demand (a dev or sandbox network) needs a large value (up to 1 h) or 0, which turns the check off.
+    /// </summary>
+    [Range(typeof(TimeSpan), "00:00:00", "01:00:00")]
+    public TimeSpan TipStaleAfter { get; set; } = TimeSpan.FromSeconds(60);
+
+    /// <summary>
     /// Upper bound of cached account balances. The cache keeps two generations of half this size each, and a round that
     /// touches more accounts than one generation holds bypasses it. Storage always supplies what is not cached.
     /// </summary>
@@ -65,6 +74,13 @@ public sealed class IndexerOptions : IValidatableObject
 
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
+        if (TipStaleAfter != TimeSpan.Zero && TipStaleAfter < TimeSpan.FromSeconds(10))
+        {
+            yield return new ValidationResult(
+                "Indexer:TipStaleAfter must be 0 (off) or at least 10 seconds: blocks come every few seconds.",
+                [nameof(TipStaleAfter)]);
+        }
+
         if (RetryMaxBackoff < RetryInitialBackoff)
         {
             yield return new ValidationResult(

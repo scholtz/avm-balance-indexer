@@ -87,6 +87,113 @@ public class BatchedIndexingTests
     }
 
     [Fact]
+    public async Task A_Stuck_Algod_Stops_The_Heartbeat_And_Resumes_When_It_Advances()
+    {
+        // algod keeps answering the same latest round: the writer is caught up, but the chain or the node is stuck (#185).
+        var storage = new RecordingStorage(new ChainContext(ChainId.AlgorandTestnet));
+        var adapter = Adapter();
+        adapter.Latest = LastRound - 1;
+        var options = new IndexerOptions { FetchConcurrency = 2, FollowPollInterval = TimeSpan.FromMilliseconds(10), TipStaleAfter = TimeSpan.FromMilliseconds(2000) };
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var run = Indexer(storage, adapter, options).RunAsync(null, stop.Token);
+
+        async Task<ChainStatus> Status() => (await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!;
+        async Task WaitFor(Func<ChainStatus, bool> condition)
+        {
+            while (!condition(await Status()))
+            {
+                await Task.Delay(10, stop.Token);
+            }
+        }
+
+        // caught up and the tip has only just been seen: the heartbeat moves the timestamp
+        await WaitFor(s => s.IndexedRound == LastRound - 1);
+        var first = (await Status()).UpdatedAt;
+        await WaitFor(s => s.UpdatedAt > first);
+
+        // the tip stays: after the stale period the timestamp stops moving
+        await Task.Delay(TimeSpan.FromMilliseconds(2500), stop.Token);
+        var frozen = (await Status()).UpdatedAt;
+        await Task.Delay(TimeSpan.FromMilliseconds(400), stop.Token);
+        Assert.Equal(frozen, (await Status()).UpdatedAt);
+
+        // algod advances: the writer indexes the new round and the heartbeat resumes
+        adapter.Latest = LastRound;
+        await WaitFor(s => s.IndexedRound == LastRound);
+        var resumed = (await Status()).UpdatedAt;
+        await WaitFor(s => s.UpdatedAt > resumed);
+
+        await stop.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+    }
+
+    [Theory]
+    [InlineData("00:00:00", true)]
+    [InlineData("00:00:10", true)]
+    [InlineData("00:00:01", false)]
+    public void TipStaleAfter_Is_Off_Or_At_Least_Ten_Seconds(string value, bool valid)
+    {
+        var options = new IndexerOptions { TipStaleAfter = TimeSpan.Parse(value, System.Globalization.CultureInfo.InvariantCulture) };
+
+        Assert.Equal(valid, !options.Validate(new System.ComponentModel.DataAnnotations.ValidationContext(options)).Any());
+    }
+
+    [Fact]
+    public async Task A_Tip_Stale_Period_Of_Zero_Keeps_The_Heartbeat_Going_With_A_Stuck_Algod()
+    {
+        var storage = new RecordingStorage(new ChainContext(ChainId.AlgorandTestnet));
+        var adapter = Adapter();
+        adapter.Latest = LastRound - 1;
+        var options = new IndexerOptions { FetchConcurrency = 2, FollowPollInterval = TimeSpan.FromMilliseconds(10), TipStaleAfter = TimeSpan.Zero };
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var run = Indexer(storage, adapter, options).RunAsync(null, stop.Token);
+        while ((await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!.IndexedRound < LastRound - 1)
+        {
+            await Task.Delay(10, stop.Token);
+        }
+
+        var first = (await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!.UpdatedAt;
+        await Task.Delay(TimeSpan.FromMilliseconds(300), stop.Token);
+        var later = (await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!.UpdatedAt;
+        await stop.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+
+        Assert.True(later > first);
+    }
+
+    [Fact]
+    public async Task A_Restart_Does_Not_Make_A_Stuck_Tip_Look_Fresh()
+    {
+        // The published status already names the stuck round as target: a restarted or failed-over writer must not heartbeat for
+        // another full stale period (#185).
+        var storage = new RecordingStorage(new ChainContext(ChainId.AlgorandTestnet));
+        var adapter = Adapter();
+        adapter.Latest = LastRound - 1;
+        var options = new IndexerOptions { FetchConcurrency = 2, FollowPollInterval = TimeSpan.FromMilliseconds(10), TipStaleAfter = TimeSpan.FromMilliseconds(1500) };
+        using var first = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var firstRun = Indexer(storage, adapter, options).RunAsync(null, first.Token);
+        while ((await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!.IndexedRound < LastRound - 1)
+        {
+            await Task.Delay(10, first.Token);
+        }
+
+        await Task.Delay(TimeSpan.FromMilliseconds(2200), first.Token); // the tip is stale
+        await first.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => firstRun);
+        var published = (await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!.UpdatedAt;
+        await Task.Delay(TimeSpan.FromMilliseconds(1600)); // the last heartbeat is older than the stale period now
+
+        using var second = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var secondRun = Indexer(storage, adapter, options).RunAsync(null, second.Token);
+        await Task.Delay(TimeSpan.FromMilliseconds(500), second.Token);
+        var later = (await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!.UpdatedAt;
+        await second.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => secondRun);
+
+        Assert.Equal(published, later);
+    }
+
+    [Fact]
     public async Task A_Writer_Resuming_At_The_Tip_Fetches_Its_Seed_Block_With_The_Tip_Hint()
     {
         // The seed block (the last published round) is re-fetched on every start; at the tip relays can serve it (#169, ADR 0019).
