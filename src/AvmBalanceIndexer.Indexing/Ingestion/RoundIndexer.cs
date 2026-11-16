@@ -213,7 +213,7 @@ public sealed partial class RoundIndexer(
     private static bool LinksTo(ChainStatus previous, BlockData block) =>
         block.PreviousHash.AsSpan().SequenceEqual(previous.IndexedBlockHash.Span);
 
-    /// <summary>Remembers when algod's latest round last advanced (a lower answer, as from another node behind a balancer, is not an advance).</summary>
+    /// <summary>Remembers when algod's latest round last advanced (any change of the answer counts, also a lower one from another node behind a balancer; a balancer that alternates a stuck and a moving node cannot be told apart).</summary>
     private void NoteLatest(ulong latest, ChainStatus published)
     {
         if (_latestAdvancedAt is null)

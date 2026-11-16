@@ -74,6 +74,13 @@ public sealed class IndexerOptions : IValidatableObject
 
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
+        if (TipStaleAfter != TimeSpan.Zero && TipStaleAfter < TimeSpan.FromSeconds(10))
+        {
+            yield return new ValidationResult(
+                "Indexer:TipStaleAfter must be 0 (off) or at least 10 seconds: blocks come every few seconds.",
+                [nameof(TipStaleAfter)]);
+        }
+
         if (RetryMaxBackoff < RetryInitialBackoff)
         {
             yield return new ValidationResult(

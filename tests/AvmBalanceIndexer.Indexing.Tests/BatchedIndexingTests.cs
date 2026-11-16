@@ -127,6 +127,40 @@ public class BatchedIndexingTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
     }
 
+    [Theory]
+    [InlineData("00:00:00", true)]
+    [InlineData("00:00:10", true)]
+    [InlineData("00:00:01", false)]
+    public void TipStaleAfter_Is_Off_Or_At_Least_Ten_Seconds(string value, bool valid)
+    {
+        var options = new IndexerOptions { TipStaleAfter = TimeSpan.Parse(value, System.Globalization.CultureInfo.InvariantCulture) };
+
+        Assert.Equal(valid, !options.Validate(new System.ComponentModel.DataAnnotations.ValidationContext(options)).Any());
+    }
+
+    [Fact]
+    public async Task A_Tip_Stale_Period_Of_Zero_Keeps_The_Heartbeat_Going_With_A_Stuck_Algod()
+    {
+        var storage = new RecordingStorage(new ChainContext(ChainId.AlgorandTestnet));
+        var adapter = Adapter();
+        adapter.Latest = LastRound - 1;
+        var options = new IndexerOptions { FetchConcurrency = 2, FollowPollInterval = TimeSpan.FromMilliseconds(10), TipStaleAfter = TimeSpan.Zero };
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var run = Indexer(storage, adapter, options).RunAsync(null, stop.Token);
+        while ((await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!.IndexedRound < LastRound - 1)
+        {
+            await Task.Delay(10, stop.Token);
+        }
+
+        var first = (await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!.UpdatedAt;
+        await Task.Delay(TimeSpan.FromMilliseconds(300), stop.Token);
+        var later = (await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!.UpdatedAt;
+        await stop.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+
+        Assert.True(later > first);
+    }
+
     [Fact]
     public async Task A_Restart_Does_Not_Make_A_Stuck_Tip_Look_Fresh()
     {
