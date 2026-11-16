@@ -32,7 +32,9 @@ public sealed class IndexerOptions : IValidatableObject
 
     /// <summary>
     /// When algod's latest round has not advanced for this long (blocks come every ~3 s), the idle writer stops refreshing the
-    /// published status, so the API reports it as stalled instead of healthy while the chain or the node is stuck.
+    /// published status, so the API reports it as stalled instead of healthy while the chain or the node is stuck. The API reports
+    /// <c>Stalled</c> this value plus <c>Api:StalledAfterSeconds</c> after the last advance, so keep it below what an outage may last.
+    /// A chain that produces blocks only on demand (a dev or sandbox network) needs a large value (up to 1 h).
     /// </summary>
     [Range(typeof(TimeSpan), "00:00:10", "01:00:00")]
     public TimeSpan TipStaleAfter { get; set; } = TimeSpan.FromSeconds(60);

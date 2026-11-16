@@ -38,7 +38,7 @@ public sealed partial class RoundIndexer(
     private long _roundsCommitted;
     private bool _writeFailed;
     private ulong _lastLatest;
-    private DateTimeOffset _latestAdvancedAt;
+    private long? _latestAdvancedAt; // monotonic timestamp (TimeProvider.GetTimestamp), unaffected by clock steps
     private bool _tipStale;
 
     /// <summary>Total rounds this instance has committed; lets a supervisor tell progress from a stall without reading storage.</summary>
@@ -55,6 +55,9 @@ public sealed partial class RoundIndexer(
     public async Task<IndexingResult> RunAsync(ulong? stopAfterRound, CancellationToken cancellationToken)
     {
         _writeFailed = false;
+        _lastLatest = 0;
+        _latestAdvancedAt = null;
+        _tipStale = false;
         _pendingMalformedArc200Logs = 0;
         var chain = adapter.Profile.Chain;
         var status = await storage.GetAsync(chain, cancellationToken).ConfigureAwait(false);
@@ -213,10 +216,10 @@ public sealed partial class RoundIndexer(
     /// <summary>Remembers when algod's latest round last advanced (a lower answer, as from another node behind a balancer, is not an advance).</summary>
     private void NoteLatest(ulong latest)
     {
-        if (latest > _lastLatest || _latestAdvancedAt == default)
+        if (latest > _lastLatest || _latestAdvancedAt is null)
         {
             _lastLatest = latest;
-            _latestAdvancedAt = _time.GetUtcNow();
+            _latestAdvancedAt = _time.GetTimestamp();
         }
     }
 
@@ -226,10 +229,11 @@ public sealed partial class RoundIndexer(
     /// </summary>
     private bool TipIsStale(ulong latest)
     {
-        var stale = _time.GetUtcNow() - _latestAdvancedAt > _options.TipStaleAfter;
+        var quiet = _time.GetElapsedTime(_latestAdvancedAt!.Value);
+        var stale = quiet > _options.TipStaleAfter;
         if (stale && !_tipStale)
         {
-            LogTipStale(logger, latest, _latestAdvancedAt);
+            LogTipStale(logger, latest, _time.GetUtcNow() - quiet);
         }
         else if (!stale && _tipStale)
         {

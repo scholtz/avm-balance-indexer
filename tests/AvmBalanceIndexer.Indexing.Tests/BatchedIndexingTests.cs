@@ -93,7 +93,7 @@ public class BatchedIndexingTests
         var storage = new RecordingStorage(new ChainContext(ChainId.AlgorandTestnet));
         var adapter = Adapter();
         adapter.Latest = LastRound - 1;
-        var options = new IndexerOptions { FetchConcurrency = 2, FollowPollInterval = TimeSpan.FromMilliseconds(10), TipStaleAfter = TimeSpan.FromMilliseconds(400) };
+        var options = new IndexerOptions { FetchConcurrency = 2, FollowPollInterval = TimeSpan.FromMilliseconds(10), TipStaleAfter = TimeSpan.FromMilliseconds(2000) };
         using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var run = Indexer(storage, adapter, options).RunAsync(null, stop.Token);
 
@@ -106,15 +106,15 @@ public class BatchedIndexingTests
             }
         }
 
-        // caught up with a tip that moves: the heartbeat keeps the timestamp moving
+        // caught up and the tip has only just been seen: the heartbeat moves the timestamp
         await WaitFor(s => s.IndexedRound == LastRound - 1);
         var first = (await Status()).UpdatedAt;
         await WaitFor(s => s.UpdatedAt > first);
 
         // the tip stays: after the stale period the timestamp stops moving
-        await Task.Delay(TimeSpan.FromMilliseconds(900), stop.Token);
+        await Task.Delay(TimeSpan.FromMilliseconds(2500), stop.Token);
         var frozen = (await Status()).UpdatedAt;
-        await Task.Delay(TimeSpan.FromMilliseconds(300), stop.Token);
+        await Task.Delay(TimeSpan.FromMilliseconds(400), stop.Token);
         Assert.Equal(frozen, (await Status()).UpdatedAt);
 
         // algod advances: the writer indexes the new round and the heartbeat resumes
