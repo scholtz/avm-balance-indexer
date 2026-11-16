@@ -39,3 +39,7 @@ Name, symbol, decimals and total supply are read from the application through al
 is true only when all four methods answered with well-formed values. This is enrichment, not ledger state: it never influences effects,
 balances or divergence checks, a failed lookup is retried after `Indexer:Arc200MetadataRetryInterval` (10 minutes), and the values are
 those at the time of the lookup, so a replay or a rebuilt database may store different metadata. `Indexer:Arc200Metadata` turns it off.
+A lookup is triggered by the token appearing in a block, so an existing token without metadata that never transfers again stays
+without it (reading storage for such tokens would need a new storage contract member). An application that answers none of the methods
+is asked three times with growing intervals and then left alone until a restart; a partial answer is stored and completed the same way.
+Only a 400 answer of simulate counts as the application's answer; throttling, a wrong token or a gateway error mean "could not ask".

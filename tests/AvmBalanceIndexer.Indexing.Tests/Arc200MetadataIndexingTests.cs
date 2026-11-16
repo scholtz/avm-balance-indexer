@@ -182,14 +182,17 @@ public class Arc200MetadataIndexingTests
         var source = new FakeSource(_ => Full);
         var storage = new FailingTokenWrites(new ChainContext(ChainId.AlgorandTestnet));
         var indexer = new RoundIndexer(
-            Adapter(Blocks(6)), new AlgoEffectNormalizer(), storage, Options.Create(new IndexerOptions()), NullLogger<RoundIndexer>.Instance, arc200Metadata: source);
+            Adapter(Blocks(6)), new AlgoEffectNormalizer(), storage, Options.Create(new IndexerOptions { Arc200MetadataRetryInterval = TimeSpan.FromSeconds(1) }), NullLogger<RoundIndexer>.Instance, arc200Metadata: source);
 
-        // Round 2's lookup finds the token record's write failing; the exception ends the run (the supervisor restarts it) ...
+        // The enrichment write fails: the round is still indexed (enrichment never fails a round) and the token stays pending ...
         storage.FailTokenWrites = true;
-        await Assert.ThrowsAsync<InvalidOperationException>(() => indexer.RunAsync(4, CancellationToken.None));
+        await indexer.RunAsync(4, CancellationToken.None);
+        Assert.Equal(4UL, (await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!.IndexedRound);
+        Assert.Null((await storage.GetAsync(Key, CancellationToken.None))!.Name);
 
-        // ... and the same indexer instance still asks again and stores the metadata once writes work.
+        // ... and the same indexer instance asks again and stores the metadata once writes work and the pause is over.
         storage.FailTokenWrites = false;
+        await Task.Delay(TimeSpan.FromSeconds(1.2));
         await indexer.RunAsync(6, CancellationToken.None);
 
         Assert.Equal("Voi Token", (await storage.GetAsync(Key, CancellationToken.None))!.Name);
@@ -197,14 +200,12 @@ public class Arc200MetadataIndexingTests
 
     private sealed class FailingTokenWrites(ChainContext context) : InMemoryChainStorage(context)
     {
-        private int _writes;
-
         public bool FailTokenWrites { get; set; }
 
         public override Task UpsertAsync(TokenInfo token, CancellationToken cancellationToken)
         {
-            // The first write is the token's creation record; only the enrichment write fails.
-            return FailTokenWrites && Interlocked.Increment(ref _writes) > 1
+            // Only the enrichment write (a record that carries metadata) fails, not the creation record.
+            return FailTokenWrites && token.Key.Kind == TokenKind.Arc200 && token.Name is not null
                 ? throw new InvalidOperationException("storage down")
                 : base.UpsertAsync(token, cancellationToken);
         }

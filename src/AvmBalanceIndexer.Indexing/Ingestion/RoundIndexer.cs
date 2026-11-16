@@ -617,11 +617,30 @@ public sealed partial class RoundIndexer(
                 continue;
             }
 
-            // The sets change only after the write: a failing write leaves the token pending, so the next block tries again.
-            var key = TokenKey.Arc200(applicationId);
-            if (await storage.GetAsync(key, cancellationToken).ConfigureAwait(false) is { } stored)
+            // The sets change only after the write: a failing write leaves the token pending, and (enrichment never fails the round)
+            // lookups rest for a while.
+            try
             {
-                await storage.UpsertAsync(WithMetadata(stored, metadata), cancellationToken).ConfigureAwait(false);
+                var key = TokenKey.Arc200(applicationId);
+                if (await storage.GetAsync(key, cancellationToken).ConfigureAwait(false) is { } stored)
+                {
+                    await storage.UpsertAsync(WithMetadata(stored, metadata), cancellationToken).ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException && !cancellationToken.IsCancellationRequested)
+            {
+                LogMetadataUnavailable(logger, applicationId, ex.Message);
+                _arc200LookupsPausedUntil = now + MetadataPause();
+                return;
+            }
+
+            // A partial answer is kept, and asked again a few times (a lagging node may have answered only some methods).
+            var attempts = _arc200EmptyAnswers.GetValueOrDefault(applicationId) + 1;
+            if (!metadata.Complete && attempts < MaxEmptyAnswers)
+            {
+                _arc200EmptyAnswers[applicationId] = attempts;
+                _arc200Pending[applicationId] = now + (_options.Arc200MetadataRetryInterval * attempts);
+                continue;
             }
 
             _arc200Pending.Remove(applicationId);

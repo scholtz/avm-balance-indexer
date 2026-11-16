@@ -16,7 +16,7 @@ public sealed partial class AlgodArc200MetadataSource(HttpClient http, ReadOnlyM
     : IArc200MetadataSource, IDisposable
 {
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(5);
-    private const ulong ValidityWindow = 1000;
+    private const ulong ValidityWindow = 100;
     private const ulong FirstValidSlack = 5;
 
     /// <summary>Disposes the HTTP client when this source created it.</summary>
@@ -46,7 +46,7 @@ public sealed partial class AlgodArc200MetadataSource(HttpClient http, ReadOnlyM
         {
             throw;
         }
-        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or JsonException or FormatException or InvalidOperationException or IndexOutOfRangeException or KeyNotFoundException or MessagePackSerializationException)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             LogLookupFailed(logger, applicationId, ex.Message);
             return null;
@@ -63,11 +63,11 @@ public sealed partial class AlgodArc200MetadataSource(HttpClient http, ReadOnlyM
         using var response = await http.PostAsync(new Uri("v2/transactions/simulate", UriKind.Relative), content, timeout.Token).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
-            // Throttling, a timeout or a server error says nothing about the application; any other rejection (400 for a call that
-            // cannot be simulated) is that application's answer, and must not hold up the lookups of the others.
-            return response.StatusCode is HttpStatusCode.TooManyRequests or HttpStatusCode.Forbidden or HttpStatusCode.RequestTimeout || (int)response.StatusCode >= 500
-                ? throw new HttpRequestException($"algod answered {(int)response.StatusCode}", null, response.StatusCode)
-                : [];
+            // Only 400 (a call that cannot be simulated) is the application's answer. Everything else (a wrong token 401, a gateway
+            // 404, throttling, a server error) says nothing about the application and must not make every token look empty.
+            return response.StatusCode == HttpStatusCode.BadRequest
+                ? []
+                : throw new HttpRequestException($"algod answered {(int)response.StatusCode}", null, response.StatusCode);
         }
 
         var body = await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false);
