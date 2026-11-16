@@ -94,6 +94,7 @@ public static class ReadEndpoints
             .WithName("GetToken")
             .WithTags("Tokens")
             .WithSummary("Token metadata")
+            .WithDescription("Name, symbol, decimals and the standard of a token. An ARC-200 token has them read from its application at indexing time (the values at the time of that lookup, not historical; null until it succeeded). standardVerified tells whether all four ARC-200 read methods (name, symbol, decimals, total supply) answered with well-formed values.")
             .Produces<TokenResponse>()
             .WithErrors(StatusCodes.Status400BadRequest, StatusCodes.Status404NotFound)
             .WithCommonErrors();

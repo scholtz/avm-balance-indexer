@@ -60,6 +60,7 @@ class TokensApi:
     ) -> TokenResponse:
         """Token metadata
 
+        Name, symbol, decimals and the standard of a token. An ARC-200 token has them read from its application at indexing time (the values at the time of that lookup, not historical; null until it succeeded). standardVerified tells whether all four ARC-200 read methods (name, symbol, decimals, total supply) answered with well-formed values.
 
         :param chain: The chain this deployment serves. (required)
         :type chain: ChainId
@@ -139,6 +140,7 @@ class TokensApi:
     ) -> ApiResponse[TokenResponse]:
         """Token metadata
 
+        Name, symbol, decimals and the standard of a token. An ARC-200 token has them read from its application at indexing time (the values at the time of that lookup, not historical; null until it succeeded). standardVerified tells whether all four ARC-200 read methods (name, symbol, decimals, total supply) answered with well-formed values.
 
         :param chain: The chain this deployment serves. (required)
         :type chain: ChainId
@@ -218,6 +220,7 @@ class TokensApi:
     ) -> RESTResponseType:
         """Token metadata
 
+        Name, symbol, decimals and the standard of a token. An ARC-200 token has them read from its application at indexing time (the values at the time of that lookup, not historical; null until it succeeded). standardVerified tells whether all four ARC-200 read methods (name, symbol, decimals, total supply) answered with well-formed values.
 
         :param chain: The chain this deployment serves. (required)
         :type chain: ChainId

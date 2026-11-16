@@ -2392,6 +2392,12 @@ impl Client {
 
     ///Token metadata
     ///
+    ///Name, symbol, decimals and the standard of a token. An ARC-200 token has
+    /// them read from its application at indexing time (the values at the time
+    /// of that lookup, not historical; null until it succeeded).
+    /// standardVerified tells whether all four ARC-200 read methods (name,
+    /// symbol, decimals, total supply) answered with well-formed values.
+    ///
     ///Sends a `GET` request to `/v1/{chain}/tokens/{kind}/{tokenId}`
     ///
     ///Arguments:

@@ -67,6 +67,25 @@ public static class AlgorandChainFactory
     public static AlgorandChainAdapter Create(AlgorandChainOptions options, HttpClient blockHttpClient, ILoggerFactory loggerFactory, params IDisposable[] owned) =>
         CreateCore(options, blockHttpClient, loggerFactory, IndexingMetrics.None, owned);
 
+    /// <summary>Creates the ARC-200 metadata source for the configured chain; it uses the same algod URL and token as the adapter and disposes its client.</summary>
+    /// <param name="options">Chain settings.</param>
+    /// <param name="loggerFactory">Logger source.</param>
+    public static AlgodArc200MetadataSource CreateArc200MetadataSource(AlgorandChainOptions options, ILoggerFactory loggerFactory)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(loggerFactory);
+
+        var profile = ChainProfile.For(options.Chain);
+        var http = HttpClientConfigurator.ConfigureHttpClient(
+            string.IsNullOrWhiteSpace(options.AlgodUrl) ? profile.DefaultAlgodUrl : options.AlgodUrl,
+            options.AlgodToken ?? string.Empty,
+            string.Empty,
+            -1,
+            CreateHandler());
+        http.Timeout = TimeSpan.FromSeconds(30);
+        return new AlgodArc200MetadataSource(http, ResolveGenesisHash(profile, options), loggerFactory.CreateLogger<AlgodArc200MetadataSource>(), ownsClient: true);
+    }
+
     private static AlgorandChainAdapter CreateCore(AlgorandChainOptions options, HttpClient blockHttpClient, ILoggerFactory loggerFactory, IndexingMetrics metrics, IDisposable[] owned)
     {
         ArgumentNullException.ThrowIfNull(options);

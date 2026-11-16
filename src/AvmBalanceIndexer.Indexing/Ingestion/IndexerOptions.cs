@@ -31,6 +31,16 @@ public sealed class IndexerOptions : IValidatableObject
     public TimeSpan FollowPollInterval { get; set; } = TimeSpan.FromSeconds(2);
 
     /// <summary>
+    /// Reads name, symbol, decimals and total supply of ARC-200 tokens from their applications through algod's <c>simulate</c>
+    /// (enrichment: best effort, never part of the ledger state). Turn it off for air-gapped deployments or benchmark runs.
+    /// </summary>
+    public bool Arc200Metadata { get; set; } = true;
+
+    /// <summary>How long to wait before asking again for the metadata of a token whose lookup failed.</summary>
+    [Range(typeof(TimeSpan), "00:00:00.100", "1.00:00:00")]
+    public TimeSpan Arc200MetadataRetryInterval { get; set; } = TimeSpan.FromMinutes(10);
+
+    /// <summary>
     /// When algod's latest round has not advanced for this long (blocks come every ~3 s), the idle writer stops refreshing the
     /// published status, so the API reports it as stalled instead of healthy while the chain or the node is stuck. The API reports
     /// <c>Stalled</c> this value plus <c>Api:StalledAfterSeconds</c> after the last advance, so keep it below what an outage may last.

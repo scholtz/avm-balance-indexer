@@ -4,7 +4,9 @@ using AvmBalanceIndexer.Domain.Storage;
 using AvmBalanceIndexer.Domain.Tokens;
 using AvmBalanceIndexer.Indexing.Adapters;
 using AvmBalanceIndexer.Indexing.Normalization;
+using System.Globalization;
 using System.Runtime.ExceptionServices;
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -25,7 +27,8 @@ public sealed partial class RoundIndexer(
     IOptions<IndexerOptions> options,
     ILogger<RoundIndexer> logger,
     TimeProvider? timeProvider = null,
-    IndexingMetrics? metrics = null)
+    IndexingMetrics? metrics = null,
+    IArc200MetadataSource? arc200Metadata = null)
 {
     private readonly IndexerOptions _options = options.Value;
     private readonly IndexingMetrics _metrics = metrics ?? IndexingMetrics.None;
@@ -33,6 +36,11 @@ public sealed partial class RoundIndexer(
     /// <summary>Malformed ARC-200 logs of the queued, not yet published rounds: counted when they are published, so a replay does not count twice.</summary>
     private int _pendingMalformedArc200Logs;
     private readonly HashSet<ulong> _knownArc200 = [];
+
+    /// <summary>ARC-200 tokens whose record is written but whose metadata is still to be read, with the time of the next attempt.</summary>
+    private readonly Dictionary<ulong, DateTimeOffset> _arc200Pending = [];
+    private static readonly TimeSpan MetadataLookupTimeout = TimeSpan.FromSeconds(10);
+    private const int MetadataLookupsPerBlock = 2;
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
     private static readonly TimeSpan FlushGracePeriod = TimeSpan.FromSeconds(10);
     private long _roundsCommitted;
@@ -415,8 +423,14 @@ public sealed partial class RoundIndexer(
             await storage.UpsertAsync(token, cancellationToken).ConfigureAwait(false);
             if (token.Key.Kind == TokenKind.Arc200)
             {
-                _knownArc200.Add(token.Key.TokenId);
+                TrackArc200Metadata(token.Key.TokenId);
             }
+        }
+
+        // Metadata is read near the tip only: a backfill would ask for every token ever seen, at the pace of indexing.
+        if (_arc200Pending.Count > 0 && targetRound - block.Round <= (ulong)_options.FollowingThresholdRounds)
+        {
+            await ReadPendingMetadataAsync(block, cancellationToken).ConfigureAwait(false);
         }
 
         var state = targetRound - block.Round <= (ulong)_options.FollowingThresholdRounds ? IngestionState.Following : IngestionState.Backfilling;
@@ -486,14 +500,100 @@ public sealed partial class RoundIndexer(
             return false;
         }
 
-        if (await storage.GetAsync(token.Key, cancellationToken).ConfigureAwait(false) is null)
+        if (_arc200Pending.ContainsKey(token.Key.TokenId))
+        {
+            return false;
+        }
+
+        var stored = await storage.GetAsync(token.Key, cancellationToken).ConfigureAwait(false);
+        if (stored is null)
         {
             return true;
         }
 
-        _knownArc200.Add(token.Key.TokenId);
+        if (stored.Name is null && stored.Decimals is null)
+        {
+            TrackArc200Metadata(token.Key.TokenId);
+        }
+        else
+        {
+            _knownArc200.Add(token.Key.TokenId);
+        }
+
         return false;
     }
+
+    /// <summary>A token written without metadata is read later when the lookup is on; otherwise it is simply known.</summary>
+    private void TrackArc200Metadata(ulong applicationId)
+    {
+        if (arc200Metadata is not null && _options.Arc200Metadata)
+        {
+            _arc200Pending.TryAdd(applicationId, DateTimeOffset.MinValue);
+        }
+        else
+        {
+            _knownArc200.Add(applicationId);
+        }
+    }
+
+    /// <summary>
+    /// Reads the metadata of the pending tokens that are due, a few per block. It is enrichment: a failure, a hang (bounded here
+    /// as well as in the source) or an unreachable node leaves the record as it is and is retried after
+    /// <see cref="IndexerOptions.Arc200MetadataRetryInterval"/>; it never fails the round and never influences effects.
+    /// </summary>
+    private async Task ReadPendingMetadataAsync(BlockData block, CancellationToken cancellationToken)
+    {
+        var now = _time.GetUtcNow();
+        var due = _arc200Pending.Where(pair => pair.Value <= now).Select(static pair => pair.Key).Take(MetadataLookupsPerBlock).ToList();
+        foreach (var applicationId in due)
+        {
+            Arc200Metadata? metadata = null;
+            try
+            {
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeout.CancelAfter(MetadataLookupTimeout);
+                var latest = await adapter.GetLatestRoundAsync(timeout.Token).ConfigureAwait(false);
+                metadata = await arc200Metadata!.TryReadAsync(applicationId, block.Block.FeeSink!.Bytes, latest, timeout.Token).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException && !cancellationToken.IsCancellationRequested)
+            {
+                LogMetadataUnavailable(logger, applicationId, ex.Message);
+            }
+
+            if (metadata is null)
+            {
+                _arc200Pending[applicationId] = now + _options.Arc200MetadataRetryInterval;
+                continue;
+            }
+
+            _arc200Pending.Remove(applicationId);
+            _knownArc200.Add(applicationId);
+            if (metadata.Name is null && metadata.Symbol is null && metadata.Decimals is null && metadata.TotalSupply is null)
+            {
+                continue; // the application answers none of the methods: nothing to store
+            }
+
+            var key = TokenKey.Arc200(applicationId);
+            if (await storage.GetAsync(key, cancellationToken).ConfigureAwait(false) is { } stored)
+            {
+                await storage.UpsertAsync(WithMetadata(stored, metadata), cancellationToken).ConfigureAwait(false);
+            }
+        }
+    }
+
+    private static TokenInfo WithMetadata(TokenInfo stored, Arc200Metadata metadata) =>
+        stored with
+        {
+            Name = metadata.Name ?? stored.Name,
+            Symbol = metadata.Symbol ?? stored.Symbol,
+            Decimals = metadata.Decimals ?? stored.Decimals,
+            StandardVerified = metadata.Complete,
+            MetadataJson = JsonSerializer.Serialize(new Dictionary<string, string?>
+            {
+                ["totalSupply"] = metadata.TotalSupply?.ToString(CultureInfo.InvariantCulture),
+                ["metadataSource"] = "simulate",
+            }),
+        };
 
     private async Task<AssetDirectory> LoadReferencedAssetsAsync(BlockData block, CancellationToken cancellationToken)
     {
@@ -530,6 +630,9 @@ public sealed partial class RoundIndexer(
 
     [LoggerMessage(EventId = 1205, Level = LogLevel.Information, Message = "algod advances again (latest round {Round}); the status is refreshed again")]
     private static partial void LogTipAdvancing(ILogger logger, ulong round);
+
+    [LoggerMessage(EventId = 1206, Level = LogLevel.Debug, Message = "ARC-200 metadata of application {ApplicationId} could not be read now: {Reason}")]
+    private static partial void LogMetadataUnavailable(ILogger logger, ulong applicationId, string reason);
 
     [LoggerMessage(EventId = 1202, Level = LogLevel.Debug, Message = "Block {Round} is not available on archival nodes yet; waiting")]
     private static partial void LogWaitingForBlock(ILogger logger, ulong round);

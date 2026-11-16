@@ -114,6 +114,30 @@ public class Arc200RoundsTests(ITestOutputHelper output)
     }
 
     /// <summary>Rebuilds the transfer events from the deltas: a debit followed by its credit, or a lone mint or burn.</summary>
+    [LiveFact]
+    public async Task Voi_Arc200_Metadata_Is_Read_From_The_Application_Through_Simulate()
+    {
+        using var reference = ReferenceNode.Voi();
+        var options = new AlgorandChainOptions { Chain = ChainId.Voi, MaxAttempts = 40, BaseRetryDelay = TimeSpan.FromMilliseconds(200), MaxRetryDelay = TimeSpan.FromSeconds(3) };
+        using var adapter = AlgorandChainFactory.Create(options, NullLoggerFactory.Instance);
+        using var source = AlgorandChainFactory.CreateArc200MetadataSource(options, NullLoggerFactory.Instance);
+        using var deadline = new CancellationTokenSource(Budget);
+        var token = deadline.Token;
+
+        // An application the ARC indexer knows has traffic, so it implements the standard.
+        var tip = await adapter.GetLatestRoundAsync(token);
+        var round = (await reference.RecentArc200RoundsAsync(ListedTransfers, token))[0];
+        var application = (await reference.Arc200TransfersInRoundAsync(round, token))[0].ContractId;
+        var header = await adapter.FetchBlockAsync(tip, token);
+
+        var metadata = await source.TryReadAsync(application, header.Block.FeeSink!.Bytes, tip, token);
+
+        output.WriteLine($"application {application}: {metadata}");
+        Assert.NotNull(metadata);
+        Assert.NotNull(metadata.Decimals);
+        Assert.False(string.IsNullOrWhiteSpace(metadata.Name));
+    }
+
     private static List<(ulong Contract, Address From, Address To, BigInteger Amount)> Transfers(IReadOnlyList<BalanceDelta> deltas)
     {
         var result = new List<(ulong, Address, Address, BigInteger)>();

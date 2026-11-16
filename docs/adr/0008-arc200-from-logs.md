@@ -31,4 +31,11 @@ movement, so the logs are the one common source. They are also written by the ap
 - `opted_in` is not meaningful for ARC-200 (it is true for any holding).
 
 - Mimir (the Voi ARC indexer) is the live oracle for the transfers; balances cannot be checked mid-chain without contract state.
-- Metadata (name, symbol, decimals) of ARC-200 tokens needs application calls and is not part of this decision.
+
+## Metadata (issue #175)
+
+Name, symbol, decimals and total supply are read from the application through algod `simulate` (one request per read-only method, sender
+= the fee sink, empty signatures allowed), once per token and near the tip only (a backfill leaves tokens pending). `StandardVerified`
+is true only when all four methods answered with well-formed values. This is enrichment, not ledger state: it never influences effects,
+balances or divergence checks, a failed lookup is retried after `Indexer:Arc200MetadataRetryInterval` (10 minutes), and the values are
+those at the time of the lookup, so a replay or a rebuilt database may store different metadata. `Indexer:Arc200Metadata` turns it off.
