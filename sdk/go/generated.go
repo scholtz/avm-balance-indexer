@@ -413,6 +413,8 @@ type ClientInterface interface {
 
 	// GetToken Token metadata
 	//
+	// Name, symbol, decimals and the standard of a token. An ARC-200 token has them read from its application at indexing time (the values at the time of that lookup, not historical; null until it succeeded). standardVerified tells whether all four ARC-200 read methods (name, symbol, decimals, total supply) answered with well-formed values.
+	//
 	// Corresponds with GET /v1/{chain}/tokens/{kind}/{tokenId} (the `GetToken` operationId).
 	GetToken(ctx context.Context, chain ChainId, kind TokenKind, tokenId uint64, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -556,6 +558,8 @@ func (c *GeneratedClient) GetChainStatus(ctx context.Context, chain ChainId, req
 }
 
 // GetToken Token metadata
+//
+// Name, symbol, decimals and the standard of a token. An ARC-200 token has them read from its application at indexing time (the values at the time of that lookup, not historical; null until it succeeded). standardVerified tells whether all four ARC-200 read methods (name, symbol, decimals, total supply) answered with well-formed values.
 //
 // Corresponds with GET /v1/{chain}/tokens/{kind}/{tokenId} (the `GetToken` operationId).
 func (c *GeneratedClient) GetToken(ctx context.Context, chain ChainId, kind TokenKind, tokenId uint64, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -1436,6 +1440,8 @@ type ClientWithResponsesInterface interface {
 
 	// GetTokenWithResponse Token metadata
 	//
+	// Name, symbol, decimals and the standard of a token. An ARC-200 token has them read from its application at indexing time (the values at the time of that lookup, not historical; null until it succeeded). standardVerified tells whether all four ARC-200 read methods (name, symbol, decimals, total supply) answered with well-formed values.
+	//
 	// Returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with GET /v1/{chain}/tokens/{kind}/{tokenId} (the `GetToken` operationId).
@@ -2315,6 +2321,8 @@ func (c *ClientWithResponses) GetChainStatusWithResponse(ctx context.Context, ch
 }
 
 // GetTokenWithResponse Token metadata
+//
+// Name, symbol, decimals and the standard of a token. An ARC-200 token has them read from its application at indexing time (the values at the time of that lookup, not historical; null until it succeeded). standardVerified tells whether all four ARC-200 read methods (name, symbol, decimals, total supply) answered with well-formed values.
 //
 // Returns a wrapper object for the known response body format(s).
 //

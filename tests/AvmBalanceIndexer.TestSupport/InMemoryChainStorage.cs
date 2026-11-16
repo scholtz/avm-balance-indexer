@@ -64,7 +64,7 @@ public partial class InMemoryChainStorage(ChainContext context) : IChainStorage
         }
     }
 
-    public Task UpsertAsync(TokenInfo token, CancellationToken cancellationToken)
+    public virtual Task UpsertAsync(TokenInfo token, CancellationToken cancellationToken)
     {
         lock (_gate)
         {

@@ -80,6 +80,9 @@ public static class HostingExtensions
             provider.GetRequiredService<IOptions<AlgorandChainOptions>>().Value,
             provider.GetRequiredService<ILoggerFactory>(),
             provider.GetRequiredService<IndexingMetrics>()));
+        services.AddSingleton<IArc200MetadataSource>(static provider => AlgorandChainFactory.CreateArc200MetadataSource(
+            provider.GetRequiredService<IOptions<AlgorandChainOptions>>().Value,
+            provider.GetRequiredService<ILoggerFactory>()));
         services.AddSingleton<IEffectNormalizer, AlgoEffectNormalizer>();
         services.AddSingleton<RoundIndexer>();
         return services;

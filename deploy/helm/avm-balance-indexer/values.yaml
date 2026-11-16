@@ -129,6 +129,8 @@ worker:
   replicaCount: 2
   # Port of /healthz/live and /healthz/ready.
   healthPort: 8081
+  # Read name, symbol, decimals and total supply of ARC-200 tokens from their applications through algod simulate (best effort).
+  arc200Metadata: true
   # An idle writer stops refreshing the status when algod's latest round has not advanced for this long (the API then reports Stalled).
   tipStaleAfter: "00:01:00"
   resources:

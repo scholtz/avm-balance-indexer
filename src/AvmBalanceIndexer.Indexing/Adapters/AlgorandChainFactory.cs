@@ -67,6 +67,35 @@ public static class AlgorandChainFactory
     public static AlgorandChainAdapter Create(AlgorandChainOptions options, HttpClient blockHttpClient, ILoggerFactory loggerFactory, params IDisposable[] owned) =>
         CreateCore(options, blockHttpClient, loggerFactory, IndexingMetrics.None, owned);
 
+    /// <summary>Creates the ARC-200 metadata source for the configured chain; it uses the same algod URL and token as the adapter and disposes its client.</summary>
+    /// <param name="options">Chain settings.</param>
+    /// <param name="loggerFactory">Logger source.</param>
+    public static AlgodArc200MetadataSource CreateArc200MetadataSource(AlgorandChainOptions options, ILoggerFactory loggerFactory)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(loggerFactory);
+
+        var profile = ChainProfile.For(options.Chain);
+        var http = CreateAlgodClient(options, profile);
+        http.Timeout = TimeSpan.FromSeconds(30);
+
+        // A relative request URI replaces the last path segment of a base address without a trailing slash (a gateway such as /algod).
+        http.BaseAddress = http.BaseAddress is null ? null : WithTrailingSlash(http.BaseAddress);
+
+        return new AlgodArc200MetadataSource(http, ResolveGenesisHash(profile, options), loggerFactory.CreateLogger<AlgodArc200MetadataSource>(), ownsClient: true);
+    }
+
+    private static HttpClient CreateAlgodClient(AlgorandChainOptions options, ChainProfile profile) =>
+        HttpClientConfigurator.ConfigureHttpClient(
+            string.IsNullOrWhiteSpace(options.AlgodUrl) ? profile.DefaultAlgodUrl : options.AlgodUrl,
+            options.AlgodToken ?? string.Empty,
+            string.Empty,
+            -1,
+            CreateHandler());
+
+    internal static Uri WithTrailingSlash(Uri address) =>
+        address.AbsolutePath.EndsWith('/') ? address : new UriBuilder(address) { Path = address.AbsolutePath + "/" }.Uri;
+
     private static AlgorandChainAdapter CreateCore(AlgorandChainOptions options, HttpClient blockHttpClient, ILoggerFactory loggerFactory, IndexingMetrics metrics, IDisposable[] owned)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -92,12 +121,7 @@ public static class AlgorandChainFactory
                 loggerFactory.CreateLogger<GossipBlockFetcher>(),
                 metrics: metrics);
 
-            algodHttp = HttpClientConfigurator.ConfigureHttpClient(
-                string.IsNullOrWhiteSpace(options.AlgodUrl) ? profile.DefaultAlgodUrl : options.AlgodUrl,
-                options.AlgodToken ?? string.Empty,
-                string.Empty,
-                -1,
-                CreateHandler());
+            algodHttp = CreateAlgodClient(options, profile);
             algodHttp.Timeout = TimeSpan.FromSeconds(60);
 
             IDisposable[] resources = hosts is IDisposable disposableHosts ? [.. owned, disposableHosts] : owned;
