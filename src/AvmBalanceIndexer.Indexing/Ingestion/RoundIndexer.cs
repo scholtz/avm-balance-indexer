@@ -98,7 +98,7 @@ public sealed partial class RoundIndexer(
             var target = latest;
             if (stopAfterRound is null)
             {
-                NoteLatest(latest);
+                NoteLatest(latest, status);
             }
 
             if (next > target)
@@ -214,12 +214,34 @@ public sealed partial class RoundIndexer(
         block.PreviousHash.AsSpan().SequenceEqual(previous.IndexedBlockHash.Span);
 
     /// <summary>Remembers when algod's latest round last advanced (a lower answer, as from another node behind a balancer, is not an advance).</summary>
-    private void NoteLatest(ulong latest)
+    private void NoteLatest(ulong latest, ChainStatus published)
     {
-        if (latest > _lastLatest || _latestAdvancedAt is null)
+        if (_latestAdvancedAt is null)
         {
+            // The first answer of this run: a restart or a failover must not make a stuck tip look fresh again. When the published
+            // status already names this round as the target, the tip has been there at least since that status was written.
+            _latestAdvancedAt = _time.GetTimestamp();
+            if (published.TargetRound == latest && published.State == IngestionState.Following)
+            {
+                var age = _time.GetUtcNow() - published.UpdatedAt;
+                if (age > TimeSpan.Zero)
+                {
+                    _latestAdvancedAt -= (long)(age.TotalSeconds * _time.TimestampFrequency);
+                }
+            }
+
+            _lastLatest = latest;
+        }
+        else if (latest != _lastLatest)
+        {
+            // Any change counts: a node behind a balancer or a rebuilt one may answer lower than the old maximum and still progress.
             _lastLatest = latest;
             _latestAdvancedAt = _time.GetTimestamp();
+            if (_tipStale)
+            {
+                _tipStale = false;
+                LogTipAdvancing(logger, latest);
+            }
         }
     }
 
@@ -230,14 +252,10 @@ public sealed partial class RoundIndexer(
     private bool TipIsStale(ulong latest)
     {
         var quiet = _time.GetElapsedTime(_latestAdvancedAt!.Value);
-        var stale = quiet > _options.TipStaleAfter;
+        var stale = _options.TipStaleAfter > TimeSpan.Zero && quiet > _options.TipStaleAfter;
         if (stale && !_tipStale)
         {
             LogTipStale(logger, latest, _time.GetUtcNow() - quiet);
-        }
-        else if (!stale && _tipStale)
-        {
-            LogTipAdvancing(logger, latest);
         }
 
         _tipStale = stale;

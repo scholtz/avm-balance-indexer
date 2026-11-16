@@ -128,6 +128,38 @@ public class BatchedIndexingTests
     }
 
     [Fact]
+    public async Task A_Restart_Does_Not_Make_A_Stuck_Tip_Look_Fresh()
+    {
+        // The published status already names the stuck round as target: a restarted or failed-over writer must not heartbeat for
+        // another full stale period (#185).
+        var storage = new RecordingStorage(new ChainContext(ChainId.AlgorandTestnet));
+        var adapter = Adapter();
+        adapter.Latest = LastRound - 1;
+        var options = new IndexerOptions { FetchConcurrency = 2, FollowPollInterval = TimeSpan.FromMilliseconds(10), TipStaleAfter = TimeSpan.FromMilliseconds(1500) };
+        using var first = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var firstRun = Indexer(storage, adapter, options).RunAsync(null, first.Token);
+        while ((await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!.IndexedRound < LastRound - 1)
+        {
+            await Task.Delay(10, first.Token);
+        }
+
+        await Task.Delay(TimeSpan.FromMilliseconds(2200), first.Token); // the tip is stale
+        await first.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => firstRun);
+        var published = (await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!.UpdatedAt;
+        await Task.Delay(TimeSpan.FromMilliseconds(1600)); // the last heartbeat is older than the stale period now
+
+        using var second = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var secondRun = Indexer(storage, adapter, options).RunAsync(null, second.Token);
+        await Task.Delay(TimeSpan.FromMilliseconds(500), second.Token);
+        var later = (await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!.UpdatedAt;
+        await second.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => secondRun);
+
+        Assert.Equal(published, later);
+    }
+
+    [Fact]
     public async Task A_Writer_Resuming_At_The_Tip_Fetches_Its_Seed_Block_With_The_Tip_Hint()
     {
         // The seed block (the last published round) is re-fetched on every start; at the tip relays can serve it (#169, ADR 0019).
