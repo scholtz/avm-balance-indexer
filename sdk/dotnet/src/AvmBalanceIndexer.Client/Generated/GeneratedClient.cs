@@ -1974,6 +1974,44 @@ namespace AvmBalanceIndexer.Client.Generated
 
     }
 
+    /// <summary>
+    /// The newest writer term: which build indexes the chain from which round on.
+    /// </summary>
+    [System.CodeDom.Compiler.GeneratedCode("NJsonSchema", "14.7.1.0 (NJsonSchema v11.6.1.0 (Newtonsoft.Json v13.0.0.0))")]
+    public partial class IndexedByInfo
+    {
+
+        /// <summary>
+        /// The version of the indexer build.
+        /// </summary>
+        [System.Text.Json.Serialization.JsonPropertyName("version")]
+        [System.ComponentModel.DataAnnotations.Required(AllowEmptyStrings = true)]
+        public string Version { get; set; } = default!;
+
+        /// <summary>
+        /// The first round this build wrote.
+        /// </summary>
+        [System.Text.Json.Serialization.JsonPropertyName("fromRound")]
+        public ulong FromRound { get; set; } = default!;
+
+        /// <summary>
+        /// When this build began writing.
+        /// </summary>
+        [System.Text.Json.Serialization.JsonPropertyName("since")]
+        [System.ComponentModel.DataAnnotations.Required(AllowEmptyStrings = true)]
+        public System.DateTimeOffset Since { get; set; } = default!;
+
+        private System.Collections.Generic.IDictionary<string, object>? _additionalProperties;
+
+        [System.Text.Json.Serialization.JsonExtensionData]
+        public System.Collections.Generic.IDictionary<string, object> AdditionalProperties
+        {
+            get { return _additionalProperties ?? (_additionalProperties = new System.Collections.Generic.Dictionary<string, object>()); }
+            set { _additionalProperties = value; }
+        }
+
+    }
+
     [System.CodeDom.Compiler.GeneratedCode("NJsonSchema", "14.7.1.0 (NJsonSchema v11.6.1.0 (Newtonsoft.Json v13.0.0.0))")]
     public partial class ScanHoldersResponse
     {
@@ -2151,6 +2189,9 @@ namespace AvmBalanceIndexer.Client.Generated
 
         [System.Text.Json.Serialization.JsonPropertyName("historicalQueries")]
         public HistoricalQueriesInfo HistoricalQueries { get; set; } = default!;
+
+        [System.Text.Json.Serialization.JsonPropertyName("indexedBy")]
+        public IndexedByInfo? IndexedBy { get; set; } = default!;
 
         private System.Collections.Generic.IDictionary<string, object>? _additionalProperties;
 

@@ -94,6 +94,15 @@ A fix in the normalizer or the tracker only changes rounds that are indexed afte
 keeps stalling until it is rebuilt (issue #115 was fixed in code, yet the TestNet worker kept failing on the old rows). Cassandra rows must not be edited (ADR 0003), so
 rebuild into a new keyspace.
 
+**Find the first affected round.** Every time a worker becomes the writer it records one row: the first round it will write, its build version and the time (issue #182).
+`GET /v1/{chain}/status` shows the newest one as `indexedBy`; the full list is a query on the database (rounds from a row's `from_round` up to the next row's `from_round - 1` were written by that build):
+
+- PostgreSQL: `SELECT * FROM indexing_term ORDER BY from_round;`
+- Cassandra: `SELECT * FROM <keyspace>.indexing_term WHERE chain = '<chain>';` (newest first)
+
+The versions are the image tags (ADR 0014). A deployment upgraded to this release gets its first row at the then indexed round + 1; rounds before that row were written by an unknown build.
+A restart of the same build without new rounds adds no row.
+
 Choose how to switch:
 
 - **The deployment is stalled or serves wrong data** (TestNet after #115): change the keyspace in the release values. The API switches to the rebuilt data at once and reports a low

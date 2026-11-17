@@ -246,6 +246,25 @@ pub mod types {
         }
     }
 
+    ///The newest writer term: which build indexes the chain from which round
+    /// on.
+    #[derive(:: serde :: Deserialize, :: serde :: Serialize, Clone, Debug)]
+    pub struct IndexedByInfo {
+        ///The first round this build wrote.
+        #[serde(rename = "fromRound")]
+        pub from_round: u64,
+        ///When this build began writing.
+        pub since: ::chrono::DateTime<::chrono::offset::Utc>,
+        ///The version of the indexer build.
+        pub version: ::std::string::String,
+    }
+
+    impl IndexedByInfo {
+        pub fn builder() -> builder::IndexedByInfo {
+            Default::default()
+        }
+    }
+
     ///`ScanHoldersResponse`
     #[derive(:: serde :: Deserialize, :: serde :: Serialize, Clone, Debug)]
     pub struct ScanHoldersResponse {
@@ -329,6 +348,11 @@ pub mod types {
             skip_serializing_if = "::std::option::Option::is_none"
         )]
         pub historical_queries: ::std::option::Option<HistoricalQueriesInfo>,
+        #[serde(
+            rename = "indexedBy",
+            skip_serializing_if = "::std::option::Option::is_none"
+        )]
+        pub indexed_by: ::std::option::Option<IndexedByInfo>,
         ///The newest round the API serves; null before the first round.
         #[serde(
             rename = "indexedRound",
@@ -1353,6 +1377,82 @@ pub mod types {
         }
 
         #[derive(Clone, Debug)]
+        pub struct IndexedByInfo {
+            from_round: ::std::result::Result<u64, ::std::string::String>,
+            since: ::std::result::Result<
+                ::chrono::DateTime<::chrono::offset::Utc>,
+                ::std::string::String,
+            >,
+            version: ::std::result::Result<::std::string::String, ::std::string::String>,
+        }
+
+        impl ::std::default::Default for IndexedByInfo {
+            fn default() -> Self {
+                Self {
+                    from_round: Err("no value supplied for from_round".to_string()),
+                    since: Err("no value supplied for since".to_string()),
+                    version: Err("no value supplied for version".to_string()),
+                }
+            }
+        }
+
+        impl IndexedByInfo {
+            pub fn from_round<T>(mut self, value: T) -> Self
+            where
+                T: ::std::convert::TryInto<u64>,
+                T::Error: ::std::fmt::Display,
+            {
+                self.from_round = value
+                    .try_into()
+                    .map_err(|e| format!("error converting supplied value for from_round: {e}"));
+                self
+            }
+            pub fn since<T>(mut self, value: T) -> Self
+            where
+                T: ::std::convert::TryInto<::chrono::DateTime<::chrono::offset::Utc>>,
+                T::Error: ::std::fmt::Display,
+            {
+                self.since = value
+                    .try_into()
+                    .map_err(|e| format!("error converting supplied value for since: {e}"));
+                self
+            }
+            pub fn version<T>(mut self, value: T) -> Self
+            where
+                T: ::std::convert::TryInto<::std::string::String>,
+                T::Error: ::std::fmt::Display,
+            {
+                self.version = value
+                    .try_into()
+                    .map_err(|e| format!("error converting supplied value for version: {e}"));
+                self
+            }
+        }
+
+        impl ::std::convert::TryFrom<IndexedByInfo> for super::IndexedByInfo {
+            type Error = super::error::ConversionError;
+            fn try_from(
+                value: IndexedByInfo,
+            ) -> ::std::result::Result<Self, super::error::ConversionError> {
+                Ok(Self {
+                    from_round: value.from_round?,
+                    since: value.since?,
+                    version: value.version?,
+                })
+            }
+        }
+
+        impl ::std::convert::From<super::IndexedByInfo> for IndexedByInfo {
+            fn from(value: super::IndexedByInfo) -> Self {
+                Self {
+                    from_round: Ok(value.from_round),
+                    since: Ok(value.since),
+                    version: Ok(value.version),
+                }
+            }
+        }
+
+        #[derive(Clone, Debug)]
         pub struct ScanHoldersResponse {
             complete: ::std::result::Result<bool, ::std::string::String>,
             id: ::std::result::Result<::uuid::Uuid, ::std::string::String>,
@@ -1737,6 +1837,10 @@ pub mod types {
                 ::std::option::Option<super::HistoricalQueriesInfo>,
                 ::std::string::String,
             >,
+            indexed_by: ::std::result::Result<
+                ::std::option::Option<super::IndexedByInfo>,
+                ::std::string::String,
+            >,
             indexed_round: ::std::result::Result<::std::option::Option<u64>, ::std::string::String>,
             lag: ::std::result::Result<::std::option::Option<u64>, ::std::string::String>,
             provider: ::std::result::Result<::std::string::String, ::std::string::String>,
@@ -1756,6 +1860,7 @@ pub mod types {
                     chain: Err("no value supplied for chain".to_string()),
                     health: Ok(Default::default()),
                     historical_queries: Ok(Default::default()),
+                    indexed_by: Ok(Default::default()),
                     indexed_round: Err("no value supplied for indexed_round".to_string()),
                     lag: Err("no value supplied for lag".to_string()),
                     provider: Err("no value supplied for provider".to_string()),
@@ -1796,6 +1901,16 @@ pub mod types {
                 self.historical_queries = value.try_into().map_err(|e| {
                     format!("error converting supplied value for historical_queries: {e}")
                 });
+                self
+            }
+            pub fn indexed_by<T>(mut self, value: T) -> Self
+            where
+                T: ::std::convert::TryInto<::std::option::Option<super::IndexedByInfo>>,
+                T::Error: ::std::fmt::Display,
+            {
+                self.indexed_by = value
+                    .try_into()
+                    .map_err(|e| format!("error converting supplied value for indexed_by: {e}"));
                 self
             }
             pub fn indexed_round<T>(mut self, value: T) -> Self
@@ -1881,6 +1996,7 @@ pub mod types {
                     chain: value.chain?,
                     health: value.health?,
                     historical_queries: value.historical_queries?,
+                    indexed_by: value.indexed_by?,
                     indexed_round: value.indexed_round?,
                     lag: value.lag?,
                     provider: value.provider?,
@@ -1898,6 +2014,7 @@ pub mod types {
                     chain: Ok(value.chain),
                     health: Ok(value.health),
                     historical_queries: Ok(value.historical_queries),
+                    indexed_by: Ok(value.indexed_by),
                     indexed_round: Ok(value.indexed_round),
                     lag: Ok(value.lag),
                     provider: Ok(value.provider),

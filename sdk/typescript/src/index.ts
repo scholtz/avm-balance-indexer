@@ -9,6 +9,7 @@ export type {
   HoldersResponse,
   HoldingDto,
   HoldingsResponse,
+  IndexedByInfo,
   ScanHoldersResponse,
   ScanRequest,
   ScanResponse,

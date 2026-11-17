@@ -87,6 +87,7 @@ builder.Services.AddChainStorage(builder.Configuration);
 builder.Services.AddAvmTelemetry(builder.Configuration, "avm-api", TelemetryExtensions.AspNetCoreMeters.ToArray());
 builder.Services.AddOptions<ScanOptions>().Bind(builder.Configuration.GetSection(ScanOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
 builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<IndexedByLookup>();
 builder.Services.AddExceptionHandler<ApiExceptionHandler>();
 builder.Services.AddProblemDetails();
 
@@ -248,6 +249,7 @@ v1.MapGet(
     async (
         ChainContext chain,
         IChainStorage storage,
+        IndexedByLookup indexedBy,
         TimeProvider clock,
         CancellationToken cancellationToken) =>
     {
@@ -271,7 +273,8 @@ v1.MapGet(
             status.UpdatedAt,
             elapsed > TimeSpan.FromSeconds(api.StalledAfterSeconds) ? "Stalled" : "Healthy",
             age,
-            historicalQueries));
+            historicalQueries,
+            await indexedBy.GetAsync(cancellationToken)));
     })
     .WithName("GetChainStatus")
     .Produces<StatusResponse>()

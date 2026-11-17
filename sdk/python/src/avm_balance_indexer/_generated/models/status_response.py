@@ -21,6 +21,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from avm_balance_indexer._generated.models.historical_queries_info import HistoricalQueriesInfo
+from avm_balance_indexer._generated.models.indexed_by_info import IndexedByInfo
 from typing import Optional, Set
 from typing_extensions import Self
 from pydantic_core import to_jsonable_python
@@ -39,7 +40,8 @@ class StatusResponse(BaseModel):
     health: Optional[StrictStr] = Field(default=None, description="The API's view of ingestion: `NotStarted`, `Healthy`, or `Stalled` when the writer has not updated the status for longer than `Api:StalledAfterSeconds`.")
     status_age_seconds: Optional[StrictInt] = Field(default=None, description="Whole seconds since the writer last updated the status; never negative, null before the first round.", alias="statusAgeSeconds")
     historical_queries: Optional[HistoricalQueriesInfo] = Field(default=None, alias="historicalQueries")
-    __properties: ClassVar[List[str]] = ["chain", "provider", "state", "indexedRound", "targetRound", "lag", "updatedAt", "health", "statusAgeSeconds", "historicalQueries"]
+    indexed_by: Optional[IndexedByInfo] = Field(default=None, alias="indexedBy")
+    __properties: ClassVar[List[str]] = ["chain", "provider", "state", "indexedRound", "targetRound", "lag", "updatedAt", "health", "statusAgeSeconds", "historicalQueries", "indexedBy"]
 
     model_config = ConfigDict(
         validate_by_name=True,
@@ -83,6 +85,9 @@ class StatusResponse(BaseModel):
         # override the default output from pydantic by calling `to_dict()` of historical_queries
         if self.historical_queries:
             _dict['historicalQueries'] = self.historical_queries.to_dict()
+        # override the default output from pydantic by calling `to_dict()` of indexed_by
+        if self.indexed_by:
+            _dict['indexedBy'] = self.indexed_by.to_dict()
         # set to None if indexed_round (nullable) is None
         # and model_fields_set contains the field
         if self.indexed_round is None and "indexed_round" in self.model_fields_set:
@@ -108,6 +113,11 @@ class StatusResponse(BaseModel):
         if self.status_age_seconds is None and "status_age_seconds" in self.model_fields_set:
             _dict['statusAgeSeconds'] = None
 
+        # set to None if indexed_by (nullable) is None
+        # and model_fields_set contains the field
+        if self.indexed_by is None and "indexed_by" in self.model_fields_set:
+            _dict['indexedBy'] = None
+
         return _dict
 
     @classmethod
@@ -129,7 +139,8 @@ class StatusResponse(BaseModel):
             "updatedAt": obj.get("updatedAt"),
             "health": obj.get("health"),
             "statusAgeSeconds": obj.get("statusAgeSeconds"),
-            "historicalQueries": HistoricalQueriesInfo.from_dict(obj["historicalQueries"]) if obj.get("historicalQueries") is not None else None
+            "historicalQueries": HistoricalQueriesInfo.from_dict(obj["historicalQueries"]) if obj.get("historicalQueries") is not None else None,
+            "indexedBy": IndexedByInfo.from_dict(obj["indexedBy"]) if obj.get("indexedBy") is not None else None
         })
         return _obj
 

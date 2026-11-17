@@ -24,8 +24,13 @@ public sealed partial class IndexerWorker(
     IWriterLeaseProvider leases,
     IStorageFailureClassifier failures,
     WorkerHealth health,
-    ILogger<IndexerWorker> logger) : BackgroundService
+    ILogger<IndexerWorker> logger,
+    TimeProvider? clock = null,
+    string? buildVersion = null) : BackgroundService
 {
+    private readonly TimeProvider _clock = clock ?? TimeProvider.System;
+    private readonly string _version = buildVersion ?? BuildVersion.Current;
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         health.ReportRoundsSource(() => indexer.RoundsCommitted);
@@ -93,6 +98,7 @@ public sealed partial class IndexerWorker(
             }
 
             var lost = false;
+            var recorded = true;
             await using (lease.ConfigureAwait(false))
             {
                 health.BecameLeader();
@@ -100,7 +106,23 @@ public sealed partial class IndexerWorker(
                 using var term = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, lease.Lost);
                 try
                 {
-                    await FollowAsync(term.Token).ConfigureAwait(false);
+                    // Nothing is indexed before the term is on record (ADR 0021): a database that cannot take the record is a wait.
+                    try
+                    {
+                        await RecordTermAsync(term.Token).ConfigureAwait(false);
+                    }
+                    catch (Exception ex) when (IsTransient(ex, term.Token) && !term.Token.IsCancellationRequested)
+                    {
+                        recorded = false;
+                        health.ReportTransientFailure();
+                        health.BecameStandby();
+                        LogTermNotRecorded(logger, ex, chain.Chain);
+                    }
+
+                    if (recorded)
+                    {
+                        await FollowAsync(term.Token).ConfigureAwait(false);
+                    }
                 }
                 catch (Exception ex) when (lease.Lost.IsCancellationRequested && !stoppingToken.IsCancellationRequested
                     && (ex is OperationCanceledException or ChainDivergenceException || IsTransient(ex, stoppingToken)))
@@ -117,12 +139,26 @@ public sealed partial class IndexerWorker(
                 }
             }
 
+            if (!recorded)
+            {
+                await Task.Delay(settings.LeaseRetryInterval, stoppingToken).ConfigureAwait(false);
+                continue;
+            }
+
             if (lost)
             {
                 // A lease that keeps failing must not turn into a tight acquire/lose loop.
                 await Task.Delay(settings.LeaseRetryInterval, stoppingToken).ConfigureAwait(false);
             }
         }
+    }
+
+    private async Task RecordTermAsync(CancellationToken cancellationToken)
+    {
+        var status = await storage.GetAsync(chain.Chain, cancellationToken).ConfigureAwait(false);
+        var fromRound = status is null ? 0 : status.IndexedRound + 1;
+        await storage.AppendAsync(new IndexingTerm(fromRound, _version, _clock.GetUtcNow()), cancellationToken).ConfigureAwait(false);
+        LogTerm(logger, chain.Chain, fromRound, _version);
     }
 
     /// <summary>The published round for the fatal log; the database may be the very reason indexing stopped, so this never throws.</summary>
@@ -212,6 +248,12 @@ public sealed partial class IndexerWorker(
 
     [LoggerMessage(EventId = 1304, Level = LogLevel.Information, Message = "This replica is now the writer of {Chain}")]
     private static partial void LogLeading(ILogger logger, string chain);
+
+    [LoggerMessage(EventId = 1313, Level = LogLevel.Information, Message = "This replica writes {Chain} from round {FromRound} with build {Version}")]
+    private static partial void LogTerm(ILogger logger, string chain, ulong fromRound, string version);
+
+    [LoggerMessage(EventId = 1314, Level = LogLevel.Warning, Message = "The writer term for {Chain} could not be recorded; indexing waits and the replica tries again")]
+    private static partial void LogTermNotRecorded(ILogger logger, Exception exception, string chain);
 
     [LoggerMessage(EventId = 1305, Level = LogLevel.Warning, Message = "The writer lease for {Chain} was lost; indexing stopped and this replica goes back to standby")]
     private static partial void LogLeaseLost(ILogger logger, string chain);

@@ -275,6 +275,61 @@ public class IndexerWorkerTests : IDisposable
     }
 
     [Fact]
+    public async Task A_Writer_Records_Its_Build_Before_It_Writes_The_First_Round_And_Again_After_A_Restart()
+    {
+        var storage = new RecordingStorage();
+        var (first, _) = Create(storage, Scenario.Adapter(Scenario.Blocks(new TestChain()).Take(3).ToList()), maxFailures: 10, version: "v1");
+        await first.StartAsync(CancellationToken.None);
+        await WaitForRoundAsync(storage, 3);
+        await first.StopAsync(CancellationToken.None);
+
+        var term = Assert.Single(await storage.ListAsync(CancellationToken.None));
+        Assert.Equal((0UL, "v1"), (term.FromRound, term.Version));
+        Assert.Equal([null], storage.IndexedRoundsAtAppend);
+
+        // A new build takes over at the next round; the same build restarting without writing adds nothing.
+        var (second, _) = Create(storage, Scenario.Adapter(Scenario.Blocks(new TestChain()).Take(3).ToList()), maxFailures: 10, version: "v2");
+        await second.StartAsync(CancellationToken.None);
+        await WaitUntilAsync(() => storage.IndexedRoundsAtAppend.Count == 2);
+        await second.StopAsync(CancellationToken.None);
+
+        var terms = await storage.ListAsync(CancellationToken.None);
+        Assert.Equal([(4UL, "v2"), (0UL, "v1")], terms.Select(t => (t.FromRound, t.Version)).ToArray());
+    }
+
+    [Fact]
+    public async Task A_Standby_Replica_Records_No_Term()
+    {
+        var storage = NewStorage();
+        var leader = await storage.TryAcquireAsync(CancellationToken.None);
+        Assert.NotNull(leader);
+
+        var (worker, _) = Create(storage, Scenario.Adapter(), maxFailures: 10, version: "v1");
+        await worker.StartAsync(CancellationToken.None);
+        await Task.Delay(150);
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.Empty(await storage.ListAsync(CancellationToken.None));
+        await leader.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task A_Failing_Term_Record_Is_Retried_And_Nothing_Is_Indexed_Before_It_Succeeds()
+    {
+        var storage = new RecordingStorage { FailAppends = 2 };
+        var (worker, lifetime) = Create(storage, Scenario.Adapter(), maxFailures: 10, version: "v1");
+
+        await worker.StartAsync(CancellationToken.None);
+        await WaitForRoundAsync(storage, Scenario.LastRound);
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.False(lifetime.StopRequested);
+        Assert.Equal(3, storage.AppendAttempts);
+        Assert.Equal([null], storage.IndexedRoundsAtAppend);
+        Assert.Single(await storage.ListAsync(CancellationToken.None));
+    }
+
+    [Fact]
     public async Task Losing_The_Lease_Stops_Indexing_And_The_Replica_Resumes_When_It_Gets_The_Lease_Again()
     {
         var storage = NewStorage();
@@ -405,7 +460,7 @@ public class IndexerWorkerTests : IDisposable
 
     private static InMemoryChainStorage NewStorage() => new(new ChainContext(ChainId.AlgorandTestnet));
 
-    private static (IndexerWorker Worker, FakeLifetime Lifetime) Create(InMemoryChainStorage storage, IChainAdapter adapter, int maxFailures, WorkerHealth? health = null, ILogger<IndexerWorker>? logger = null)
+    private static (IndexerWorker Worker, FakeLifetime Lifetime) Create(InMemoryChainStorage storage, IChainAdapter adapter, int maxFailures, WorkerHealth? health = null, ILogger<IndexerWorker>? logger = null, string? version = null)
     {
         var options = Options.Create(new IndexerOptions
         {
@@ -418,7 +473,7 @@ public class IndexerWorkerTests : IDisposable
         });
         var indexer = new RoundIndexer(adapter, new AlgoEffectNormalizer(), storage, options, NullLogger<RoundIndexer>.Instance);
         var lifetime = new FakeLifetime();
-        return (new IndexerWorker(indexer, storage, new ChainContext(ChainId.AlgorandTestnet), options, lifetime, storage, storage, health ?? new WorkerHealth(), logger ?? NullLogger<IndexerWorker>.Instance), lifetime);
+        return (new IndexerWorker(indexer, storage, new ChainContext(ChainId.AlgorandTestnet), options, lifetime, storage, storage, health ?? new WorkerHealth(), logger ?? NullLogger<IndexerWorker>.Instance, buildVersion: version), lifetime);
     }
 
     private static async Task WaitForRoundAsync(InMemoryChainStorage storage, ulong round)
@@ -515,6 +570,38 @@ public class IndexerWorkerTests : IDisposable
             lock (_entries)
             {
                 _entries.Add((logLevel, formatter(state, exception), exception));
+            }
+        }
+    }
+
+    private sealed class RecordingStorage : InMemoryChainStorage
+    {
+        private int _attempts;
+
+        public RecordingStorage()
+            : base(new ChainContext(ChainId.AlgorandTestnet))
+        {
+        }
+
+        public int FailAppends { get; init; }
+
+        public int AppendAttempts => Volatile.Read(ref _attempts);
+
+        /// <summary>The published round at the moment each term was stored (null: nothing indexed yet).</summary>
+        public List<ulong?> IndexedRoundsAtAppend { get; } = [];
+
+        public override async Task AppendAsync(IndexingTerm term, CancellationToken cancellationToken)
+        {
+            if (Interlocked.Increment(ref _attempts) <= FailAppends)
+            {
+                throw new IOException("database is starting");
+            }
+
+            var status = await GetAsync(ChainId.AlgorandTestnet, cancellationToken);
+            await base.AppendAsync(term, cancellationToken);
+            lock (IndexedRoundsAtAppend)
+            {
+                IndexedRoundsAtAppend.Add(status?.IndexedRound);
             }
         }
     }

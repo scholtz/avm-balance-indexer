@@ -1127,4 +1127,50 @@ public abstract class StorageContractTests
         Assert.Equal(2, (await storage.GetEffectsAsync(Bob, Native, null, null, null, 10, CancellationToken.None)).Items.Count);
         Assert.Equal(3, (await storage.GetHoldersAtRoundAsync(Native, last, false, null, 10, CancellationToken.None)).Items.Count);
     }
+
+    [Fact]
+    public async Task An_Empty_Indexing_Log_Lists_Nothing()
+    {
+        var storage = await CreateStorageAsync();
+        Assert.Empty(await storage.ListAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Indexing_Terms_Are_Listed_Newest_First()
+    {
+        var storage = await CreateStorageAsync();
+        var t0 = new DateTimeOffset(2026, 11, 1, 10, 0, 0, TimeSpan.Zero);
+        await storage.AppendAsync(new IndexingTerm(0, "v1", t0), CancellationToken.None);
+        await storage.AppendAsync(new IndexingTerm(500, "v2", t0.AddDays(1)), CancellationToken.None);
+        await storage.AppendAsync(new IndexingTerm(900, "v2", t0.AddDays(2)), CancellationToken.None);
+
+        var terms = await storage.ListAsync(CancellationToken.None);
+
+        Assert.Equal(
+            [(900UL, "v2", t0.AddDays(2)), (500UL, "v2", t0.AddDays(1)), (0UL, "v1", t0)],
+            terms.Select(t => (t.FromRound, t.Version, t.StartedAt)).ToArray());
+    }
+
+    [Fact]
+    public async Task Of_Two_Builds_Recorded_At_One_Round_The_Later_Start_Is_Listed_First()
+    {
+        var storage = await CreateStorageAsync();
+        var t0 = new DateTimeOffset(2026, 11, 1, 10, 0, 0, TimeSpan.Zero);
+        await storage.AppendAsync(new IndexingTerm(500, "b-old", t0), CancellationToken.None);
+        await storage.AppendAsync(new IndexingTerm(500, "a-new", t0.AddHours(1)), CancellationToken.None);
+
+        Assert.Equal(["a-new", "b-old"], (await storage.ListAsync(CancellationToken.None)).Select(t => t.Version).ToArray());
+    }
+
+    [Fact]
+    public async Task The_Same_Indexing_Term_Is_Not_Recorded_Twice()
+    {
+        var storage = await CreateStorageAsync();
+        var t0 = new DateTimeOffset(2026, 11, 1, 10, 0, 0, TimeSpan.Zero);
+        await storage.AppendAsync(new IndexingTerm(500, "v2", t0), CancellationToken.None);
+        await storage.AppendAsync(new IndexingTerm(500, "v2", t0.AddHours(1)), CancellationToken.None);
+
+        var term = Assert.Single(await storage.ListAsync(CancellationToken.None));
+        Assert.Equal(t0, term.StartedAt);
+    }
 }
