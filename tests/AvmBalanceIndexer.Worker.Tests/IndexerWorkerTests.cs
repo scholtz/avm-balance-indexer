@@ -370,6 +370,22 @@ public class IndexerWorkerTests : IDisposable
     }
 
     [Fact]
+    public async Task A_Request_That_Was_Carried_Out_Needs_No_Block_And_Is_Not_Run_Again()
+    {
+        var storage = NewStorage();
+        var rebuild = new FakeRebuild(2, (_, _) => throw new InvalidOperationException("must not run")) { CarriedOut = true };
+        var adapter = Scenario.Adapter();
+        var (worker, lifetime) = Create(storage, adapter, maxFailures: 10, rebuild: rebuild);
+
+        await worker.StartAsync(CancellationToken.None);
+        await WaitForRoundAsync(storage, Scenario.LastRound);
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.False(lifetime.StopRequested);
+        Assert.Equal(0, rebuild.Calls);
+    }
+
+    [Fact]
     public async Task A_Refused_Rebuild_Stops_The_Worker_With_Exit_Code_1_And_Nothing_Is_Indexed()
     {
         var storage = NewStorage();
@@ -762,6 +778,10 @@ public class IndexerWorkerTests : IDisposable
         public PartialRebuildRequest? Request { get; } = new("avm_old", round);
 
         public SourceCursor? Source { get; init; }
+
+        public bool CarriedOut { get; init; }
+
+        public Task<bool> IsCarriedOutAsync(CancellationToken cancellationToken) => Task.FromResult(CarriedOut);
 
         public int Calls => Volatile.Read(ref _calls);
 

@@ -150,6 +150,16 @@ public sealed partial class CassandraChainStorage
         static PartialRebuildResult Refused(string reason) => new(PartialRebuildOutcome.Refused, reason);
     }
 
+    public async Task<bool> IsCarriedOutAsync(CancellationToken cancellationToken)
+    {
+        if (Request is not { } request || await ReadCursorAsync(serial: true, cancellationToken).ConfigureAwait(false) is null)
+        {
+            return false;
+        }
+
+        return await ReadForkRequestAsync(cancellationToken).ConfigureAwait(false) is { } stored && stored.Source == request.Source && stored.Round == unchecked((long)request.Round);
+    }
+
     public async Task<SourceCursor?> ReadSourceCursorAsync(CancellationToken cancellationToken)
     {
         if (Request is not { } request || await ReadCursorAsync(serial: false, cancellationToken).ConfigureAwait(false) is not null)
@@ -164,7 +174,8 @@ public sealed partial class CassandraChainStorage
         }
 
         var rows = (await ExecuteAsync($"SELECT chain, indexed_round, indexed_block_hash FROM {request.Source}.chain_status", cancellationToken).ConfigureAwait(false)).ToArray();
-        return rows is [var row] && string.Equals(row.GetValue<string>("chain"), _chain, StringComparison.Ordinal)
+        // A source row without a hash (written by an older build) cannot be checked against the chain.
+        return rows is [var row] && string.Equals(row.GetValue<string>("chain"), _chain, StringComparison.Ordinal) && !row.IsNull("indexed_block_hash")
             ? new SourceCursor((ulong)row.GetValue<long>("indexed_round"), row.GetValue<byte[]>("indexed_block_hash"))
             : null;
     }

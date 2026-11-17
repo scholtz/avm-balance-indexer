@@ -355,6 +355,8 @@ jobs:
           if ! logs="$(kubectl -n "$NAMESPACE" logs -l "app.kubernetes.io/instance=${RELEASE},app.kubernetes.io/component=worker" --tail=-1 --prefix --max-log-requests 10 2>/dev/null)"; then
             echo "::warning::The worker logs could not be read; check there what happened to the partial rebuild from $source"; exit 0
           fi
+          # A worker that stopped on a refusal is restarted: its reason is in the log of the previous container.
+          logs="$logs"$'\n'"$(kubectl -n "$NAMESPACE" logs -l "app.kubernetes.io/instance=${RELEASE},app.kubernetes.io/component=worker" --previous --tail=-1 --prefix --max-log-requests 10 2>/dev/null || true)"
           lines="$(grep 'Partial rebuild of' <<< "$logs" | tail -n 5 || true)"
           [ -n "$lines" ] && cat <<< "$lines"
           if refused="$(grep -E 'The partial rebuild of .* is refused' <<< "$logs" | tail -n 1)" && [ -n "$refused" ]; then

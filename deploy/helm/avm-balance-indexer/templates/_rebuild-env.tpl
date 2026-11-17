@@ -37,8 +37,8 @@ Go's $ anchors at the end of the text, like \z in .NET.
 - name: Storage__Cassandra__ApiKeyspace
   value: {{ $c.apiKeyspace | quote }}
 {{- end }}
-{{- if $c.forkFrom.keyspace }}
-{{- $fork := $c.forkFrom }}
+{{- $fork := default dict $c.forkFrom }}
+{{- if $fork.keyspace }}
 {{- if ne $.Values.storage.provider "Cassandra" }}
 {{- fail "storage.cassandra.forkFrom is only carried out for storage.provider=Cassandra" }}
 {{- end }}

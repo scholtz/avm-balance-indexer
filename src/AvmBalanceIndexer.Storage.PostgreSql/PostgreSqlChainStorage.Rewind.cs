@@ -7,6 +7,19 @@ public sealed partial class PostgreSqlChainStorage
 {
     private const int RewindSteps = 8;
 
+    public async Task<bool> IsCarriedOutAsync(CancellationToken cancellationToken)
+    {
+        if (Request is not { } request)
+        {
+            return false;
+        }
+
+        await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = new NpgsqlCommand("SELECT 1 FROM maintenance_request WHERE request_id = @id", connection);
+        command.Parameters.AddWithValue("id", request.Source);
+        return await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is not null;
+    }
+
     /// <summary>The rewind is in place, so there is no other database to check.</summary>
     public Task<SourceCursor?> ReadSourceCursorAsync(CancellationToken cancellationToken) => Task.FromResult<SourceCursor?>(null);
 

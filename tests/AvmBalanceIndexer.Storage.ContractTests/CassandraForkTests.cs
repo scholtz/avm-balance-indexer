@@ -190,7 +190,10 @@ public class CassandraForkTests(CassandraFixture cassandra)
         var reference = await IndexedAsync(3);
         var hash = await HashOfAsync(reference, 3);
         var target = await TargetAsync(full, 3);
+        Assert.False(await target.IsCarriedOutAsync(CancellationToken.None));
         await ForkAsync(target, hash);
+        Assert.True(await target.IsCarriedOutAsync(CancellationToken.None));
+        Assert.False(await cassandra.WithFork(target, cassandra.KeyspaceOf(full), 2).IsCarriedOutAsync(CancellationToken.None));
         var session = await cassandra.SessionOfAsync(full);
         await session.ExecuteAsync(new SimpleStatement($"DROP KEYSPACE {cassandra.KeyspaceOf(full)}"));
 

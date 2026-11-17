@@ -7,6 +7,13 @@ public interface IPartialRebuild
     PartialRebuildRequest? Request { get; }
 
     /// <summary>
+    /// True when this request was carried out before (the stored request matches), so the caller can skip the rebuild without fetching anything:
+    /// a stale request left in the configuration must not depend on nodes that can no longer serve an old block.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    Task<bool> IsCarriedOutAsync(CancellationToken cancellationToken);
+
+    /// <summary>
     /// The round and block hash the source database stands at, so that the caller can check the source against the chain before the copy
     /// (blocks are hash-linked: the block of that round must have that hash). Null when there is nothing to check: the rebuild is in place,
     /// the request was carried out already, or the source cannot be read (then <see cref="RunAsync"/> says why).

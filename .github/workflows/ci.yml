@@ -194,6 +194,7 @@ jobs:
           if grep -q ForkFrom <<< "$a"; then echo "the API must not get forkFrom"; exit 1; fi
           if t "${fork[@]}" | grep -A3 'name: Api__ScansEnabled' | grep -q false; then echo "scans must stay on without apiKeyspace"; exit 1; fi
           if t | grep -q 'ForkFrom'; then echo "no forkFrom by default"; exit 1; fi
+          t --set storage.cassandra.forkFrom=null > /dev/null # a request that is removed from the values is not an error
           refused 'forkFrom.keyspace' --set storage.cassandra.keyspace=avm_new --set storage.cassandra.forkFrom.keyspace=AVM_NEW --set storage.cassandra.forkFrom.round=5 --set storage.cassandra.forkFrom.into=avm_new
           refused 'forkFrom.keyspace' --set storage.cassandra.keyspace=avm_new --set storage.cassandra.forkFrom.keyspace=system_auth --set storage.cassandra.forkFrom.round=5 --set storage.cassandra.forkFrom.into=avm_new
           refused 'forkFrom.keyspace' --set storage.cassandra.keyspace=avm_new --set storage.cassandra.forkFrom.keyspace=bad-name --set storage.cassandra.forkFrom.round=5 --set storage.cassandra.forkFrom.into=avm_new

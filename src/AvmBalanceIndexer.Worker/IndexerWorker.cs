@@ -174,6 +174,12 @@ public sealed partial class IndexerWorker(
             return;
         }
 
+        // A request that was carried out does nothing, and needs nothing from the nodes (a stale entry in the values must not stop a worker).
+        if (await rebuild.IsCarriedOutAsync(cancellationToken).ConfigureAwait(false))
+        {
+            return;
+        }
+
         // The source must be a keyspace built from the history the nodes serve: blocks are hash-linked, so the block of its published round
         // has the hash it stores. A mismatch is a different history, not a fetch failure.
         if (await rebuild.ReadSourceCursorAsync(cancellationToken).ConfigureAwait(false) is { } source
