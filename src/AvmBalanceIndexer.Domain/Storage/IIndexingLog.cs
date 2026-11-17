@@ -10,7 +10,7 @@ public sealed record IndexingTerm(ulong FromRound, string Version, DateTimeOffse
 public interface IIndexingLog
 {
     /// <summary>
-    /// Records a term. A term with the same round and version as the newest stored one is not stored again (the first time is kept), so a
+    /// Records a term. A term with the same round and version as a stored one is not stored again (the first time is kept), so a
     /// writer that restarts without indexing anything does not add a row per restart.
     /// </summary>
     /// <param name="term">The term.</param>

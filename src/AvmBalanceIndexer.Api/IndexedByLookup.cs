@@ -45,8 +45,9 @@ public sealed partial class IndexedByLookup(IChainStorage storage, TimeProvider 
                     LogUnreadable(logger, ex);
                 }
 
-                _snapshot = new Snapshot(null, now + FailureLifetime);
-                return null;
+                var lastGood = _snapshot?.Value;
+                _snapshot = new Snapshot(lastGood, now + FailureLifetime);
+                return lastGood;
             }
         }
         finally
@@ -58,7 +59,7 @@ public sealed partial class IndexedByLookup(IChainStorage storage, TimeProvider 
     /// <inheritdoc />
     public void Dispose() => _gate.Dispose();
 
-    [LoggerMessage(EventId = 1410, Level = LogLevel.Warning, Message = "The indexing terms could not be read; the status reports no indexedBy for a few seconds")]
+    [LoggerMessage(EventId = 1410, Level = LogLevel.Warning, Message = "The indexing terms could not be read; the status keeps the last known value for a few seconds")]
     private static partial void LogUnreadable(ILogger logger, Exception exception);
 
     private sealed record Snapshot(IndexedByInfo? Value, DateTimeOffset ValidUntil);
