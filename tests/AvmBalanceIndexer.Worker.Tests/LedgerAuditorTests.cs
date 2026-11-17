@@ -13,6 +13,7 @@ using Microsoft.Extensions.Options;
 
 namespace AvmBalanceIndexer.Worker.Tests;
 
+[Collection("ExitCode")]
 public sealed class LedgerAuditorTests : IDisposable
 {
     private static readonly TimeSpan Tick = TimeSpan.FromMilliseconds(5);

@@ -12,6 +12,8 @@ using Microsoft.Extensions.Options;
 
 namespace AvmBalanceIndexer.Worker.Tests;
 
+// Environment.ExitCode is process-wide: the classes that set and restore it must not run in parallel with each other.
+[Collection("ExitCode")]
 public class IndexerWorkerTests : IDisposable
 {
     private readonly int _previousExitCode = Environment.ExitCode;
