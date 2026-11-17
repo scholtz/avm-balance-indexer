@@ -47,6 +47,13 @@ public sealed partial class PostgreSqlChainStorage
             return new PartialRebuildResult(PartialRebuildOutcome.Refused, $"The database is at round {cursor.Value.Round}, before the requested round {request.Round}.");
         }
 
+        // At the round itself nothing is deleted, but the hash is the cursor's link to the next block: a different one is a different chain.
+        if (cursor.Value.Round == request.Round && !cursor.Value.Hash.AsSpan().SequenceEqual(blockHashAtRound.Span))
+        {
+            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            return new PartialRebuildResult(PartialRebuildOutcome.Refused, $"The database is at round {request.Round} with another block hash than the one given.");
+        }
+
         long deleted = 0;
         long holdings = 0;
         if (cursor.Value.Round > request.Round)
@@ -115,7 +122,7 @@ public sealed partial class PostgreSqlChainStorage
                    e.account, e.token_kind, e.token_id, e.balance_after AS amount, (e.effect_type <> 'AssetOptOut') AS opted_in, e.round
             FROM effects_by_account_token e
             JOIN rewind_affected a ON e.account = a.account AND e.token_kind = a.token_kind AND e.token_id = a.token_id
-            ORDER BY e.account, e.token_kind, e.token_id, e.round DESC, e.intra_round_order DESC, e.ordinal DESC
+            ORDER BY e.account, e.token_kind, e.token_id, e.round DESC, e.ordinal DESC, e.intra_round_order DESC
             """,
             [],
             cancellationToken).ConfigureAwait(false);
@@ -134,7 +141,7 @@ public sealed partial class PostgreSqlChainStorage
                 """,
                 [],
                 cancellationToken).ConfigureAwait(false);
-            holdings = await RewindAsync(
+            var written = await RewindAsync(
                 connection,
                 transaction,
                 $"""
@@ -145,12 +152,21 @@ public sealed partial class PostgreSqlChainStorage
                 """,
                 [],
                 cancellationToken).ConfigureAwait(false);
+            holdings = Math.Max(holdings, written);
         }
 
         progress?.Report(new PartialRebuildProgress("holdings", holdings, 3, RewindSteps));
 
         // The touched directory: pairs first seen after the round are gone, the others lose the part of their range after it.
-        await RewindAsync(connection, transaction, "DELETE FROM accounts_touched_by_token WHERE first_round > @r", parameters, cancellationToken).ConfigureAwait(false);
+        await RewindAsync(
+            connection,
+            transaction,
+            """
+            DELETE FROM accounts_touched_by_token t USING rewind_affected a
+            WHERE t.account = a.account AND t.token_kind = a.token_kind AND t.token_id = a.token_id AND t.first_round > @r
+            """,
+            parameters,
+            cancellationToken).ConfigureAwait(false);
         await RewindAsync(
             connection,
             transaction,

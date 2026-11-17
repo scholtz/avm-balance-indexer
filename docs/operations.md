@@ -109,7 +109,8 @@ The provider supports it with two settings, `Storage:PostgreSql:RewindTo:Round` 
 and the touched-account directory of the affected accounts from what remains, restores tokens (created after R: deleted; destroyed after R: alive again), deletes scans and build records after R,
 and sets the cursor to R with state `Backfilling`; readers see the old state until the commit. Before you run it take a backup or note the PITR position (there is no undo window), expect clients
 to see `indexedRound` drop from the tip to R (requests for rounds above R are refused as not indexed until the replay passes them), and expect the delete to take time on a big database
-(it reads the affected pairs from the token-oriented table, then deletes by primary-key prefix). A Warning log line with the number of deleted rows is written by the worker once the wiring
+(it reads the affected pairs from the token-oriented table, then deletes by primary-key prefix). A request that is refused (the database is behind the round, or the hash differs) is not recorded and stays armed:
+remove the setting after the run, or a later restart at a higher round would carry it out. A Warning log line with the number of deleted rows is written by the worker once the wiring
 of #179 calls it; until that is merged the provider has the operation but nothing starts it.
 
 Choose how to switch:

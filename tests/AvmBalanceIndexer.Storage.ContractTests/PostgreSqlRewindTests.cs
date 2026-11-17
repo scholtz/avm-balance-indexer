@@ -197,6 +197,18 @@ public class PostgreSqlRewindTests(PostgresFixture postgres)
     }
 
     [Fact]
+    public async Task A_Rewind_To_The_Indexed_Round_With_Another_Block_Hash_Is_Refused()
+    {
+        var full = await IndexedAsync(Scenario.LastRound);
+
+        var result = await WithRewind(full, "fix-1", Scenario.LastRound).RunAsync(new byte[32], null, CancellationToken.None);
+
+        Assert.Equal(PartialRebuildOutcome.Refused, result.Outcome);
+        var status = await full.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None);
+        Assert.NotEqual(new byte[32], status!.IndexedBlockHash.ToArray());
+    }
+
+    [Fact]
     public async Task A_Failing_Rewind_Leaves_The_Database_Unchanged()
     {
         var full = await IndexedAsync(Scenario.LastRound);
