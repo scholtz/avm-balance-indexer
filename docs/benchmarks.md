@@ -43,14 +43,14 @@ dotnet build src/AvmBalanceIndexer.Api -c Release && dotnet build tools/AvmBalan
 
 # PostgreSQL (any server; the tool creates and drops its own database)
 docker run -d --name bench-pg -e POSTGRES_PASSWORD=pw -p 5432:5432 postgres:17-alpine
-dotnet tools/AvmBalanceIndexer.Benchmark/bin/Release/net10.0/AvmBalanceIndexer.Benchmark.dll run --provider postgres   --postgres "Host=localhost;Username=postgres;Password=pw;Database=postgres"   --api-dll src/AvmBalanceIndexer.Api/bin/Release/net10.0/AvmBalanceIndexer.Api.dll --out results
+dotnet tools/AvmBalanceIndexer.Benchmark/bin/Release/net11.0/AvmBalanceIndexer.Benchmark.dll run --provider postgres   --postgres "Host=localhost;Username=postgres;Password=pw;Database=postgres"   --api-dll src/AvmBalanceIndexer.Api/bin/Release/net11.0/AvmBalanceIndexer.Api.dll --out results
 
 # Cassandra (the container name lets the tool flush memtables so the size is complete)
 docker run -d --name bench-cass -e CASSANDRA_DC=dc1 -e CASSANDRA_ENDPOINT_SNITCH=GossipingPropertyFileSnitch -p 9042:9042 cassandra:5.0
-dotnet tools/AvmBalanceIndexer.Benchmark/bin/Release/net10.0/AvmBalanceIndexer.Benchmark.dll run --provider cassandra   --cassandra localhost:9042 --cassandra-container bench-cass   --api-dll src/AvmBalanceIndexer.Api/bin/Release/net10.0/AvmBalanceIndexer.Api.dll --out results
+dotnet tools/AvmBalanceIndexer.Benchmark/bin/Release/net11.0/AvmBalanceIndexer.Benchmark.dll run --provider cassandra   --cassandra localhost:9042 --cassandra-container bench-cass   --api-dll src/AvmBalanceIndexer.Api/bin/Release/net11.0/AvmBalanceIndexer.Api.dll --out results
 
 # the comparison table
-dotnet tools/AvmBalanceIndexer.Benchmark/bin/Release/net10.0/AvmBalanceIndexer.Benchmark.dll report results/bench-algorand-mainnet-cassandra.json results/bench-algorand-mainnet-postgres.json
+dotnet tools/AvmBalanceIndexer.Benchmark/bin/Release/net11.0/AvmBalanceIndexer.Benchmark.dll report results/bench-algorand-mainnet-cassandra.json results/bench-algorand-mainnet-postgres.json
 ```
 
 `--chain voi` and `--rounds 100000` measure Voi, `--rounds` changes the size of the range (default 10000), `--last-round` pins its end, `AVM_BENCH_KEEP=1` keeps the database or keyspace afterwards.

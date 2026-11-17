@@ -61,7 +61,7 @@ docs/adr/                                architecture decision records
 
 ## Getting started
 
-Requires the .NET 10 SDK and Docker.
+Requires the .NET 11 SDK and Docker.
 
 ```sh
 docker compose up -d postgres

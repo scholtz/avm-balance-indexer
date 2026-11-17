@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:11.0 AS build
 WORKDIR /src
 ARG BUILD_VERSION=unknown
 COPY global.json Directory.Build.props Directory.Packages.props AvmBalanceIndexer.slnx ./
@@ -7,7 +7,7 @@ COPY src/ src/
 RUN dotnet restore src/AvmBalanceIndexer.Worker/AvmBalanceIndexer.Worker.csproj
 RUN dotnet publish src/AvmBalanceIndexer.Worker/AvmBalanceIndexer.Worker.csproj -c Release -o /app --no-restore -p:InformationalVersion=$BUILD_VERSION
 
-FROM mcr.microsoft.com/dotnet/runtime:10.0 AS runtime
+FROM mcr.microsoft.com/dotnet/runtime:11.0 AS runtime
 WORKDIR /app
 ENV DOTNET_EnableDiagnostics=0
 USER $APP_UID

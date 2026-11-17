@@ -9,7 +9,7 @@ Read first (in this order, skip what you already know): this file, `CONTRIBUTING
 
 ## Repo map
 
-.NET 10, `AvmBalanceIndexer.slnx`, central package versions (`Directory.Packages.props`), warnings are errors.
+.NET 11, `AvmBalanceIndexer.slnx`, central package versions (`Directory.Packages.props`), warnings are errors.
 
 | Project | Contains |
 |---|---|

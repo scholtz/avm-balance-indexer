@@ -1679,9 +1679,6 @@
   },
   "tags": [
     {
-      "name": "Status"
-    },
-    {
       "name": "Balances"
     },
     {
@@ -1691,10 +1688,13 @@
       "name": "Holders"
     },
     {
-      "name": "Tokens"
+      "name": "Scans"
     },
     {
-      "name": "Scans"
+      "name": "Status"
+    },
+    {
+      "name": "Tokens"
     }
   ]
 }

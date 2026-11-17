@@ -88,9 +88,9 @@ internal static class OpenApiRefinements
                 {
                     foreach (var media in body.Content.Values)
                     {
-                        if (media.Schema is OpenApiSchema { OneOf: { Count: 2 } oneOf } && oneOf.FirstOrDefault(static o => o is OpenApiSchemaReference) is { } reference)
+                        if (media is OpenApiMediaType concrete && media.Schema is OpenApiSchema { OneOf: { Count: 2 } oneOf } && oneOf.FirstOrDefault(static o => o is OpenApiSchemaReference) is { } reference)
                         {
-                            media.Schema = reference;
+                            concrete.Schema = reference;
                             body.Required = false;
                         }
                     }
