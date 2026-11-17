@@ -40,9 +40,11 @@ public sealed partial class CassandraChainStorage
             return Refused($"the source keyspace {source} does not exist");
         }
 
-        if (!sourceTables.Contains("chain_status") || !sourceTables.Contains("effects_by_account_token_bucket"))
+        // Every table the copy reads, checked before anything is written, so that a keyspace of an older layout is refused cleanly.
+        string[] required = ["chain_status", "effects_by_account_token_bucket", "effects_by_token_bucket", "effect_buckets_by_account_token", "accounts_touched_by_token", "token_by_id"];
+        if (required.FirstOrDefault(table => !sourceTables.Contains(table)) is { } absent)
         {
-            return Refused($"{source} is not a keyspace of this indexer (no chain_status or effect tables)");
+            return Refused($"{source} is not a complete keyspace of this indexer (the table {absent} is missing)");
         }
 
         // The token ranges below are Murmur3 tokens; another partitioner would make them select the wrong partitions.
@@ -132,16 +134,27 @@ public sealed partial class CassandraChainStorage
         publish.SetSerialConsistencyLevel(ConsistencyLevel.LocalSerial);
         var applied = (await ExecuteAsync(publish, cancellationToken).ConfigureAwait(false)).First().GetValue<bool>("[applied]");
         LastPublished = null;
-        return applied
-            ? new PartialRebuildResult(PartialRebuildOutcome.Done, string.Empty, copy.Effects, copy.Holdings)
-            : new PartialRebuildResult(PartialRebuildOutcome.AlreadyDone, $"{_keyspace} was published by another instance.");
+        if (applied)
+        {
+            return new PartialRebuildResult(PartialRebuildOutcome.Done, string.Empty, copy.Effects, copy.Holdings);
+        }
+
+        // Someone published first. Only another instance of this very request (same round and hash) makes that a success; a writer that
+        // started on the keyspace meanwhile leaves a mix of its rows and the copied ones.
+        var winner = await ReadCursorAsync(serial: true, cancellationToken).ConfigureAwait(false);
+        return winner is { } cursor && cursor.Round == request.Round && cursor.Hash.AsSpan().SequenceEqual(blockHashAtRound.Span)
+            ? new PartialRebuildResult(PartialRebuildOutcome.AlreadyDone, $"{_keyspace} was published by another instance of this request.")
+            : Refused($"{_keyspace} was published by something else while it was being filled; use a new keyspace name");
 
         static PartialRebuildResult Refused(string reason) => new(PartialRebuildOutcome.Refused, reason);
     }
 
     private async Task<(string Source, long Round)?> ReadForkRequestAsync(CancellationToken cancellationToken)
     {
-        var row = (await ExecuteAsync($"SELECT source, round FROM {Table("fork_progress")} WHERE stage = ? AND range = 0", cancellationToken, RequestStage).ConfigureAwait(false)).FirstOrDefault();
+        // SERIAL: the request row is only written with a lightweight transaction, and a read after losing one must see the winner's row.
+        var statement = await BindAsync($"SELECT source, round FROM {Table("fork_progress")} WHERE stage = ? AND range = 0", cancellationToken, RequestStage).ConfigureAwait(false);
+        statement.SetConsistencyLevel(ConsistencyLevel.LocalSerial);
+        var row = (await ExecuteAsync(statement, cancellationToken).ConfigureAwait(false)).FirstOrDefault();
         return row is null ? null : (row.GetValue<string>("source"), row.GetValue<long>("round"));
     }
 

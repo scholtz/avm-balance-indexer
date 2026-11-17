@@ -110,6 +110,33 @@ public class CassandraForkTests(CassandraFixture cassandra)
     }
 
     [Fact]
+    public async Task A_Source_Keyspace_Of_An_Older_Layout_Is_Refused_Before_Anything_Is_Written()
+    {
+        var full = await IndexedAsync(3);
+        var session = await cassandra.SessionOfAsync(full);
+        var old = $"avm_old_layout_{Guid.NewGuid():N}"[..40];
+        await session.ExecuteAsync(new SimpleStatement($"CREATE KEYSPACE {old} WITH replication = {{'class': 'SimpleStrategy', 'replication_factor': 1}}"));
+        try
+        {
+            await session.ExecuteAsync(new SimpleStatement($"CREATE TABLE {old}.chain_status (chain text PRIMARY KEY, indexed_round bigint, indexed_block_hash blob)"));
+            await session.ExecuteAsync(new SimpleStatement($"CREATE TABLE {old}.effects_by_account_token_bucket (account blob PRIMARY KEY)"));
+            await session.ExecuteAsync(new SimpleStatement($"INSERT INTO {old}.chain_status (chain, indexed_round, indexed_block_hash) VALUES ('{ChainId.AlgorandTestnet}', 3, 0x00)"));
+            var target = await cassandra.CreateStorageAsync(forkFrom: (old, 3));
+
+            var result = await ForkAsync(target, new byte[32]);
+
+            Assert.Equal(PartialRebuildOutcome.Refused, result.Outcome);
+            Assert.Contains("missing", result.Reason, StringComparison.Ordinal);
+            var rows = await (await cassandra.SessionOfAsync(target)).ExecuteAsync(new SimpleStatement($"SELECT stage FROM {cassandra.KeyspaceOf(target)}.fork_progress"));
+            Assert.Empty(rows);
+        }
+        finally
+        {
+            await session.ExecuteAsync(new SimpleStatement($"DROP KEYSPACE IF EXISTS {old}"));
+        }
+    }
+
+    [Fact]
     public async Task A_Source_Holding_Another_Block_Hash_At_The_Round_Is_Refused()
     {
         var full = await IndexedAsync(3);
