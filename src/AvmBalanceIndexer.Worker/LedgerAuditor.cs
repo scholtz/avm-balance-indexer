@@ -1,0 +1,273 @@
+using System.Globalization;
+using AvmBalanceIndexer.Domain.Chains;
+using AvmBalanceIndexer.Domain.Storage;
+using AvmBalanceIndexer.Indexing.Adapters;
+using AvmBalanceIndexer.Indexing.Ingestion;
+using Microsoft.Extensions.Options;
+
+namespace AvmBalanceIndexer.Worker;
+
+/// <summary>
+/// Audits the rounds the writer has published against the ledger (ADR 0021, "Finding R early"): the end-of-round balances of every account the
+/// ledger changed in a round must be what the database holds for that round. While the writer follows the tip every round is audited, while it
+/// backfills (also the replay after a partial rebuild) one round in <see cref="AuditOptions.BackfillSampleEvery"/>. The first disagreement is logged,
+/// recorded in the database (so that a restart does not index past it) and, by default, stops the worker.
+/// The audit reads rounds that are already published: it detects a bad round, it does not keep it from being served. A node that does not answer is
+/// never a failure; only a document that was read and disagrees is a mismatch.
+/// </summary>
+public sealed partial class LedgerAuditor(
+    ILedgerDeltaSource deltas,
+    IChainStorage storage,
+    ChainContext chain,
+    WorkerHealth health,
+    IOptions<WorkerOptions> options,
+    IHostApplicationLifetime lifetime,
+    ILogger<LedgerAuditor> logger,
+    TimeProvider? timeProvider = null) : BackgroundService
+{
+    private const int ReadsInFlight = 16;
+    private const int NoDeltasToSwitchOff = 20;
+    private const int FailuresBeforeSkipping = 5;
+    private static readonly TimeSpan WarnEvery = TimeSpan.FromMinutes(10);
+
+    private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
+    private ulong? _audited;
+    private ulong? _sampled;
+    private int _consecutiveNoDeltas;
+    private long _auditedRounds;
+    private int _failuresOfRound;
+    private ulong _failingRound;
+    private long? _lastWarning;
+
+    /// <summary>Tests pass a shorter pause than the configuration (whole seconds) allows.</summary>
+    internal TimeSpan? Interval { get; init; }
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        var settings = options.Value.Audit;
+        if (!settings.Enabled)
+        {
+            LogDisabled(logger, chain.Chain);
+            return;
+        }
+
+        LogStarted(logger, chain.Chain, settings.StopOnMismatch, settings.BackfillSampleEvery);
+        using var timer = new PeriodicTimer(Interval ?? TimeSpan.FromSeconds(Math.Max(1, settings.IntervalSeconds)));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))
+            {
+                try
+                {
+                    if (!await PassAsync(settings, stoppingToken).ConfigureAwait(false))
+                    {
+                        return;
+                    }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !stoppingToken.IsCancellationRequested)
+                {
+                    // The database or the node was not reachable: no statement about any round.
+                    health.AuditSkipped();
+                    Warn(ex);
+                }
+            }
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // Normal shutdown.
+        }
+    }
+
+    /// <summary>One look at the published status. False ends the service (the audit is off, or the worker was told to stop).</summary>
+    private async Task<bool> PassAsync(AuditOptions settings, CancellationToken cancellationToken)
+    {
+        if (health.State != WorkerState.Leader)
+        {
+            return true;
+        }
+
+        var status = await storage.GetAsync(chain.Chain, cancellationToken).ConfigureAwait(false);
+        if (status is null)
+        {
+            return true;
+        }
+
+        // History is not audited: the audit starts at the round the writer had published when it became active.
+        _audited ??= status.IndexedRound;
+        _sampled ??= status.IndexedRound;
+
+        if (status.State == IngestionState.Following)
+        {
+            var budget = Math.Max(1, settings.MaxRoundsPerPass);
+            for (var round = _audited.Value + 1; round <= status.IndexedRound && budget-- > 0; round++)
+            {
+                var step = await AuditRoundAsync(round, status.IndexedRound, settings, cancellationToken).ConfigureAwait(false);
+                if (step == Step.Stop)
+                {
+                    return false;
+                }
+
+                if (step == Step.Retry)
+                {
+                    break;
+                }
+
+                _audited = round;
+            }
+
+            return !NodeHasNoDeltas();
+        }
+
+        // Backfilling (also a replay after a partial rebuild): one round of every BackfillSampleEvery, at most one request per pass.
+        _audited = status.IndexedRound;
+        if (settings.BackfillSampleEvery > 0 && status.State == IngestionState.Backfilling)
+        {
+            var every = (ulong)settings.BackfillSampleEvery;
+            var next = ((_sampled.Value / every) + 1) * every;
+            if (next <= status.IndexedRound)
+            {
+                var step = await AuditRoundAsync(next, status.IndexedRound, settings, cancellationToken).ConfigureAwait(false);
+                if (step == Step.Stop)
+                {
+                    return false;
+                }
+
+                if (step != Step.Retry)
+                {
+                    _sampled = next;
+                }
+            }
+            else
+            {
+                _sampled = Math.Max(_sampled.Value, status.IndexedRound / every * every);
+            }
+        }
+
+        return !NodeHasNoDeltas();
+    }
+
+    private enum Step
+    {
+        Done,
+        Retry,
+        Stop,
+    }
+
+    private bool NodeHasNoDeltas()
+    {
+        if (_consecutiveNoDeltas < NoDeltasToSwitchOff || _auditedRounds > 0)
+        {
+            return false;
+        }
+
+        LogNoDeltas(logger, chain.Chain, NoDeltasToSwitchOff);
+        return true;
+    }
+
+    private async Task<Step> AuditRoundAsync(ulong round, ulong published, AuditOptions settings, CancellationToken cancellationToken)
+    {
+        LedgerDelta? delta;
+        try
+        {
+            delta = await deltas.TryGetAsync(round, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or InvalidDataException or TimeoutException || (ex is OperationCanceledException && !cancellationToken.IsCancellationRequested))
+        {
+            // Not a statement about the round: tried again at the next pass, and given up on only after a few failures of the same round.
+            Warn(ex);
+            if (_failingRound != round)
+            {
+                _failingRound = round;
+                _failuresOfRound = 0;
+            }
+
+            if (++_failuresOfRound < FailuresBeforeSkipping)
+            {
+                return Step.Retry;
+            }
+
+            health.AuditSkipped();
+            _failuresOfRound = 0;
+            return Step.Done;
+        }
+
+        if (delta is null)
+        {
+            // The node keeps deltas of recent rounds only (or none at all): skipped, not an error.
+            _consecutiveNoDeltas++;
+            health.AuditSkipped();
+            return Step.Done;
+        }
+
+        _consecutiveNoDeltas = 0;
+        var mismatches = await LedgerAudit.CompareAsync(storage, delta, round, ReadsInFlight, cancellationToken).ConfigureAwait(false);
+        _auditedRounds++;
+        health.ReportAudited(round);
+        if (mismatches.Count == 0)
+        {
+            return Step.Done;
+        }
+
+        var first = mismatches[0];
+        var description = string.Join("; ", mismatches.Take(5).Select(Describe)) + (mismatches.Count > 5 ? $"; and {mismatches.Count - 5} more" : string.Empty);
+        if (settings.IgnoreRounds.Contains(round))
+        {
+            health.AuditIgnoredMismatch();
+            LogIgnored(logger, chain.Chain, round, description);
+            return Step.Done;
+        }
+
+        health.AuditMismatch();
+        LogMismatch(logger, chain.Chain, round, mismatches.Count, ReferenceAddress(first.Account), first.Token.ToString(), first.Indexed.ToString(), first.Ledger.ToString(), description);
+        if (!settings.StopOnMismatch)
+        {
+            return Step.Done;
+        }
+
+        var reason = $"round {round}: {description}";
+        await storage.RecordAsync(new AuditStop(round, reason, published, _time.GetUtcNow(), false), cancellationToken).ConfigureAwait(false);
+        LogStop(logger, chain.Chain, round, published, round > 0 ? round - 1 : 0, reason);
+        Environment.ExitCode = 1;
+        lifetime.StopApplication();
+        return Step.Stop;
+    }
+
+    private static string ReferenceAddress(Address account) => new Algorand.Address(account.ToArray()).EncodeAsString();
+
+    private static string Describe(LedgerMismatch m) =>
+        string.Create(CultureInfo.InvariantCulture, $"{ReferenceAddress(m.Account)} {m.Token}: indexed {m.Indexed}, ledger {m.Ledger}");
+
+    /// <summary>A node that does not answer is logged at most once every ten minutes.</summary>
+    private void Warn(Exception exception)
+    {
+        var now = _time.GetTimestamp();
+        if (_lastWarning is { } last && _time.GetElapsedTime(last, now) < WarnEvery)
+        {
+            return;
+        }
+
+        _lastWarning = now;
+        LogUnavailable(logger, exception, chain.Chain);
+    }
+
+    [LoggerMessage(EventId = 1350, Level = LogLevel.Information, Message = "The ledger audit of {Chain} is switched off (Worker:Audit:Enabled)")]
+    private static partial void LogDisabled(ILogger logger, string chain);
+
+    [LoggerMessage(EventId = 1351, Level = LogLevel.Information, Message = "The ledger audit of {Chain} runs: every followed round and one backfilled round in {SampleEvery} are compared with the ledger deltas of the node; stop on a mismatch: {StopOnMismatch}")]
+    private static partial void LogStarted(ILogger logger, string chain, bool stopOnMismatch, int sampleEvery);
+
+    [LoggerMessage(EventId = 1352, Level = LogLevel.Information, Message = "The node of {Chain} offers no ledger deltas (none for {Count} rounds in a row); the audit is off")]
+    private static partial void LogNoDeltas(ILogger logger, string chain, int count);
+
+    [LoggerMessage(EventId = 1353, Level = LogLevel.Warning, Message = "The ledger deltas of {Chain} could not be read; the round is tried again, an unreachable node is no mismatch (logged at most every ten minutes)")]
+    private static partial void LogUnavailable(ILogger logger, Exception exception, string chain);
+
+    [LoggerMessage(EventId = 1354, Level = LogLevel.Error, Message = "Ledger audit of {Chain}: round {Round} disagrees with the ledger in {Count} balances; first: {Account} {Token}, indexed {Indexed}, ledger {Ledger} ({Details})")]
+    private static partial void LogMismatch(ILogger logger, string chain, ulong round, int count, string account, string token, string indexed, string ledger, string details);
+
+    [LoggerMessage(EventId = 1355, Level = LogLevel.Warning, Message = "Ledger audit of {Chain}: round {Round} disagrees with the ledger but is listed in Worker:Audit:IgnoreRounds ({Details})")]
+    private static partial void LogIgnored(ILogger logger, string chain, ulong round, string details);
+
+    [LoggerMessage(EventId = 1356, Level = LogLevel.Critical, Message = "Ledger audit of {Chain} failed at round {Round}: the ledger disagrees at that round and this writer has published up to {Published}; the last round that agreed is {Good}. Fix the cause, then rebuild from a round below {Round} (docs/operations.md). {Reason}")]
+    private static partial void LogStop(ILogger logger, string chain, ulong round, ulong published, ulong good, string reason);
+}

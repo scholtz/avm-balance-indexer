@@ -85,6 +85,20 @@ public static class AlgorandChainFactory
         return new AlgodArc200MetadataSource(http, ResolveGenesisHash(profile, options), loggerFactory.CreateLogger<AlgodArc200MetadataSource>(), ownsClient: true);
     }
 
+    /// <summary>Creates the ledger delta source for the configured chain (the ledger audit); it uses the same algod URL and token as the adapter and disposes its client.</summary>
+    /// <param name="options">Chain settings.</param>
+    /// <param name="loggerFactory">Logger source.</param>
+    public static AlgodLedgerDeltaSource CreateLedgerDeltaSource(AlgorandChainOptions options, ILoggerFactory loggerFactory)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(loggerFactory);
+
+        var http = CreateAlgodClient(options, ChainProfile.For(options.Chain));
+        http.Timeout = TimeSpan.FromSeconds(30);
+        http.BaseAddress = http.BaseAddress is null ? null : WithTrailingSlash(http.BaseAddress);
+        return new AlgodLedgerDeltaSource(http, loggerFactory.CreateLogger<AlgodLedgerDeltaSource>(), ownsClient: true);
+    }
+
     private static HttpClient CreateAlgodClient(AlgorandChainOptions options, ChainProfile profile) =>
         HttpClientConfigurator.ConfigureHttpClient(
             string.IsNullOrWhiteSpace(options.AlgodUrl) ? profile.DefaultAlgodUrl : options.AlgodUrl,

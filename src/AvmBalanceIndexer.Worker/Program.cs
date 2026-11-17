@@ -16,5 +16,6 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddHostedService<ScanExecutor>();
 builder.Services.AddHostedService<IndexerWorker>();
 builder.Services.AddHostedService<RetiredStorageCleaner>();
+builder.Services.AddHostedService<LedgerAuditor>();
 
 builder.Build().Run();

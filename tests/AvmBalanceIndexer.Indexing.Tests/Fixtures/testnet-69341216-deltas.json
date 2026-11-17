@@ -1,0 +1,290 @@
+{
+  "Accts": {
+    "Accts": [
+      {
+        "Addr": "//////////////////////////////////////////8=",
+        "AuthAddr": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "IncentiveEligible": false,
+        "LastHeartbeat": 0,
+        "LastProposed": 0,
+        "MicroAlgos": 2092118321,
+        "RewardedMicroAlgos": 0,
+        "RewardsBase": 0,
+        "SelectionID": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "StateProofID": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+        "Status": 2,
+        "TotalAppLocalStates": 0,
+        "TotalAppParams": 0,
+        "TotalAppSchema": {},
+        "TotalAssetParams": 0,
+        "TotalAssets": 0,
+        "TotalBoxBytes": 0,
+        "TotalBoxes": 0,
+        "TotalExtraAppPages": 0,
+        "VoteFirstValid": 0,
+        "VoteID": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "VoteKeyDilution": 0,
+        "VoteLastValid": 0
+      },
+      {
+        "Addr": "iRq82sBKvY/X202e/Ccug5JuDH1uQZfSm3gg8MzZkyk=",
+        "AuthAddr": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "IncentiveEligible": false,
+        "LastHeartbeat": 0,
+        "LastProposed": 0,
+        "MicroAlgos": 52634000,
+        "RewardedMicroAlgos": 0,
+        "RewardsBase": 27521,
+        "SelectionID": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "StateProofID": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+        "Status": 0,
+        "TotalAppLocalStates": 0,
+        "TotalAppParams": 0,
+        "TotalAppSchema": {},
+        "TotalAssetParams": 0,
+        "TotalAssets": 0,
+        "TotalBoxBytes": 0,
+        "TotalBoxes": 0,
+        "TotalExtraAppPages": 0,
+        "VoteFirstValid": 0,
+        "VoteID": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "VoteKeyDilution": 0,
+        "VoteLastValid": 0
+      },
+      {
+        "Addr": "B9rLS22e0UGxdXa9RZrmQh1IbaPU7yJHxAmjlrguoiE=",
+        "AuthAddr": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "IncentiveEligible": false,
+        "LastHeartbeat": 0,
+        "LastProposed": 0,
+        "MicroAlgos": 2016022333,
+        "RewardedMicroAlgos": 0,
+        "RewardsBase": 0,
+        "SelectionID": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "StateProofID": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+        "Status": 2,
+        "TotalAppLocalStates": 0,
+        "TotalAppParams": 0,
+        "TotalAppSchema": {},
+        "TotalAssetParams": 0,
+        "TotalAssets": 0,
+        "TotalBoxBytes": 0,
+        "TotalBoxes": 0,
+        "TotalExtraAppPages": 0,
+        "VoteFirstValid": 0,
+        "VoteID": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "VoteKeyDilution": 0,
+        "VoteLastValid": 0
+      },
+      {
+        "Addr": "PS8CY4IXBUj2tmoZIrFw6LgsdUIB5tSUErJEo0T80Ic=",
+        "AuthAddr": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "IncentiveEligible": false,
+        "LastHeartbeat": 60106912,
+        "LastProposed": 69341216,
+        "MicroAlgos": 328826213000815,
+        "RewardedMicroAlgos": 0,
+        "RewardsBase": 27521,
+        "SelectionID": "UKHkLHBxnQVAtIPTWAC7hG4hdDSVY8+NYxLgUKTlZ8c=",
+        "StateProofID": "7JD2y1ZfZHwENBeDG9riU8yJwtjn03AF7/W3iJuU7ncjyYN8VaMfdsStEDurgGoQVhYKKfiTHIfxhYQdN19G4A==",
+        "Status": 1,
+        "TotalAppLocalStates": 0,
+        "TotalAppParams": 0,
+        "TotalAppSchema": {},
+        "TotalAssetParams": 0,
+        "TotalAssets": 0,
+        "TotalBoxBytes": 0,
+        "TotalBoxes": 0,
+        "TotalExtraAppPages": 0,
+        "VoteFirstValid": 60106110,
+        "VoteID": "gAqulTug1aytiFfOJbK58jmnkxBemsDfCZXBPIz3cq0=",
+        "VoteKeyDilution": 3163,
+        "VoteLastValid": 70106110
+      }
+    ],
+    "AppResources": [
+      {
+        "Addr": "0nSihcG+KokZYcyyfygHP936HK9veSAojzQKoyLDAXA=",
+        "Aidx": 775884095,
+        "Params": {
+          "Deleted": false,
+          "Params": {
+            "approv": "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",
+            "clearp": "DYEBQw==",
+            "epp": 2,
+            "fbr": true,
+            "gs": {
+              "a\u0000": {
+                "tb": "%6\ufffd*a\u001b\ufffd}(gX\ufffd\ufffd/\ufffd\ufffdm\ufffd\ufffd=\ufffd\ufffdx\ufffd\u0019)\ufffd\ufffd\ufffd\ufffd\ufffd\u0019",
+                "tt": 1
+              },
+              "a\u0001": {
+                "tb": " \ufffd\ufffd\u001f\ufffdb\ufffd\ufffdS\u0011l\ufffd\ufffd\f\u0005lkZ\ufffdQ\ufffd\ufffd\u001f}\ufffd\ufffd5c\ufffd\ufffd\u0006^",
+                "tt": 1
+              },
+              "a\u0002": {
+                "tb": "\ufffd\ufffd\ufffd%\ufffd\u0007\u000f\ufffdY8ݮѺu\ufffd\u000bf\u0018\ufffd\ufffd|\ufffdI\u0004\ufffd\ufffd\ufffd3\ufffd\u0005\u001c",
+                "tt": 1
+              },
+              "a\u0003": {
+                "tb": "3ɬ\ufffdNw\ufffdz\ufffd<ݸݬ\ufffd\ufffd\ufffd\ufffd:\u0015RG\ufffd\ufffda\ufffd>4\u000e?k\ufffd",
+                "tt": 1
+              },
+              "a\u0004": {
+                "tb": "L\u0010w\u0018\ufffdd\ufffd\ufffd{_w\u0010S5\u001d6\ufffd<~\ufffd\n\u000e\ufffd\ufffdg\ufffd\ufffdRi\ufffdF",
+                "tt": 1
+              },
+              "ag": {
+                "tt": 2,
+                "ui": 10000
+              },
+              "f\u0000": {
+                "tb": "\u0002\u0000\u0003\u0001\u0000\u0000\u0000}\u0000\u0000\u0000\u0000\u0004\ufffdG0\u0000\u0000\u000f*\ufffd#\ufffd\ufffd\u0000\u0000\u0000\u0000\u0004\"\u0010 j\ufffd\u001bc\u0000\u0000\u0000\ufffd\u0000\u0000\u0007\ufffd\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000",
+                "tt": 1
+              },
+              "f\u0001": {
+                "tb": "\u0002\u0000\u0003\u0000\u0000\u0000\u0000\u0016\u0000\u0000\u0000\u0000;\ufffd \ufffd\u0000\u0000z\u001b\ufffd\ufffd\u0010D\u0000\u0000\u0000\u0000\u0004!\ufffd\u0013j\ufffd\ufffd\ufffd\u0000\u0000\u0000{\u0000\u0000\u00006\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000",
+                "tt": 1
+              },
+              "f\u0002": {
+                "tb": "\u0002\u0000\u0003\u0002\u0000\u0000\u0000\ufffd\u0000\u0000\u0000\u0000\u0004\ufffd1q\u0000\u0000\u000e\ufffd\u0000.\ufffd\ufffd\u0000\u0000\u0000\u0000\u0004\"\f\u001fj\ufffd\u0010\ufffd\u0000\u0000\u0000\u0000\u0000\u0000\u0002\u0000\u0002\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000",
+                "tt": 1
+              },
+              "f\u0003": {
+                "tb": "\u0002\u0000\u0003\u0002\u0000\u0000\u0000q\u0000\u0000\u0000\u000e\ufffd\ufffd\ufffd\ufffd\u00000b]\ufffdeg7\u0000\u0000\u0000\u0000\u0004\"\u0010\u001ej\ufffd\u001b^\u0000\u0000\u0000T\u0000\u0000\u0007\ufffd\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000",
+                "tt": 1
+              },
+              "f\u0004": {
+                "tb": "\u0002\u0000\u0003\u0001\u0000\u0000\u0000|\u0000\u0000\u0000\u0000l\u0000w\ufffd\u0000\u0001Z\ufffd\ufffdL\ufffd\u0018\u0000\u0000\u0000\u0000\u0004\"\u0010\u0014j\ufffd\u001bC\u0000\u0000\u0000\u001e\u0000\u0000\u0007\ufffd\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000",
+                "tt": 1
+              },
+              "fs": {
+                "tt": 2,
+                "ui": 9
+              },
+              "ft": {
+                "tt": 2,
+                "ui": 5000
+              },
+              "gd": {
+                "tb": "\ufffdvw\ufffd\ufffd\ufffd\ufffd*\ufffd\ufffdKۢGx\ufffdC\n%\u0004^\ufffd\ufffd\ufffd\ufffd\ufffd+Q\ufffd\ufffd\ufffd\ufffd",
+                "tt": 1
+              },
+              "gl": {
+                "tt": 2,
+                "ui": 69265420
+              },
+              "gv": {
+                "tb": "\u0003\u0002\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0001Q\ufffd\u0000\u0000\u0000\u0000\u0000\u0003\ufffd\ufffd",
+                "tt": 1
+              },
+              "hb": {
+                "tt": 2,
+                "ui": 24
+              },
+              "hn": {
+                "tt": 2,
+                "ui": 24
+              },
+              "mf": {
+                "tt": 2,
+                "ui": 10000
+              },
+              "mr": {
+                "tt": 2,
+                "ui": 3
+              },
+              "np": {
+                "tt": 2,
+                "ui": 5
+              },
+              "nu": {
+                "tt": 2
+              },
+              "pz": {
+                "tt": 2
+              },
+              "ra": {
+                "tt": 2,
+                "ui": 50000000
+              },
+              "rf": {
+                "tb": "\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000",
+                "tt": 1
+              },
+              "rl": {
+                "tt": 2,
+                "ui": 35000000
+              },
+              "rt": {
+                "tb": "\u0000\u0000\u0000\u0000\u0004\"\u0010\u001f\u0000\u0000\u0000\u0000\u0004\"\u0010\u001e\u0001\u0000\u0000\u0000\u0000\u0000\u0000\u0004\"\u0010\u001e\u0000\u0000\u0000\u0000\u0004\"\u0010\u001f\u0000\u0000\u0000\u0000\u0004\"\u0010\u001d\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\ufffd",
+                "tt": 1
+              },
+              "rw": {
+                "tt": 2,
+                "ui": 2
+              },
+              "s\u0000": {
+                "tb": "\u0000\u0000\u0000\u0000\u0004\ufffdG0\u0000\u0000\u0000\u0000\u0000\u0004\ufffdG0\u0001\u0000\u0000\u0000\u0000\u0004\ufffdn@\u0002\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\u0003\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\u0004\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\u0005\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\u0006\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\u0007\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\b",
+                "tt": 1
+              },
+              "s\u0001": {
+                "tb": "\u0000\u0000\u0000\u0000;\ufffd \ufffd\u0001\u0000\u0000\u0000\u0000;\ufffd \ufffd\u0002\u0000\u0000\u0000\u0000;\ufffdxd\u0000\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\u0003\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\u0004\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\u0005\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\u0006\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\u0007\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\b",
+                "tt": 1
+              },
+              "s\u0002": {
+                "tb": "\u0000\u0000\u0000\u0000\u0004\ufffd\u0014O\u0002\u0000\u0000\u0000\u0000\u0004\ufffd1q\u0001\u0000\u0000\u0000\u0000\u0004\ufffd?!\u0000\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\u0003\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\u0004\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\u0005\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\u0006\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\u0007\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\b",
+                "tt": 1
+              },
+              "s\u0003": {
+                "tb": "\u0000\u0000\u0000\u000e\ufffd\ufffdb\ufffd\u0000\u0000\u0000\u0000\u000e\ufffd\ufffd\ufffd\ufffd\u0001\u0000\u0000\u0000\u000e\ufffd$\ufffd\ufffd\u0002\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\u0003\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\u0004\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\u0005\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\u0006\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\u0007\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\b",
+                "tt": 1
+              },
+              "s\u0004": {
+                "tb": "\u0000\u0000\u0000\u0000k\ufffd\b\ufffd\u0002\u0000\u0000\u0000\u0000l\u0000w\ufffd\u0000\u0000\u0000\u0000\u0000l\u0000w\ufffd\u0001\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\u0003\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\u0004\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\u0005\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\u0006\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\u0007\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\b",
+                "tt": 1
+              },
+              "v\u0000": {
+                "tb": "i&n[\ufffd\bn\ufffdE\ufffd\tr\ufffd\u000b\ufffdL\ufffd{\ufffd?j\ufffd\ufffd\u001c-\ufffd\ufffd\ufffd\ufffdŮ",
+                "tt": 1
+              },
+              "v\u0001": {
+                "tb": "\ufffdӘ|\u0010z\ufffd\ufffdu\ufffd(S\ufffd\f\ufffdu\ufffdэU]J[\ufffd\ufffd\u001c5\ufffd\ufffd)\ufffd",
+                "tt": 1
+              },
+              "v\u0002": {
+                "tb": "\u000b\u001b\ufffdklT4\ufffd\ufffd\ufffd\ufffdԍ\ufffd\u0017\ufffdL\f\ufffd\ufffdp\ufffds\ufffdK\ufffd\u0014@\ufffdJ\ufffd\ufffd",
+                "tt": 1
+              },
+              "w\u0000": {
+                "tb": ",7\ufffd\u0019C\ufffdJ9\ufffdF0l\ufffd\ufffd̽\ufffd\ufffdw\u001b\ufffd+\u0015\ufffd\u001d\ufffdO\ufffd`\rx\u000b\u0001\u0000\u0000\u0000\u0000\u0004\ufffdG0\u0000\u0000\u0000\u0000;\ufffdxd\u0000\u0000\u0000\u0000\u0004\ufffd?!\u0000\u0000\u0000\u000e\ufffd\ufffdb\ufffd\u0000\u0000\u0000\u0000l\u0000w\ufffd",
+                "tt": 1
+              },
+              "w\u0001": {
+                "tb": "\ufffd\u001a\ufffd\ufffd\ufffdJ\ufffd\ufffd\ufffd\ufffdM\ufffd\ufffd'.\ufffd\ufffdn\f}nA\ufffdқx \ufffd\ufffdٓ)\u0001\u0000\u0000\u0000\u0000\u0004\ufffdG0\u0000\u0000\u0000\u0000;\ufffd \ufffd\u0000\u0000\u0000\u0000\u0004\ufffd1q\u0000\u0000\u0000\u000e\ufffd\ufffd\ufffd\ufffd\u0000\u0000\u0000\u0000l\u0000w\ufffd",
+                "tt": 1
+              },
+              "w\u0002": {
+                "tb": "\ufffd\ufffdiX\ufffd\ufffd\ufffd\ufffdG\ufffd\u0014\ufffd\"\ufffd0\u001b\ufffd\u0002\ufffd>\u001a\ufffd\ufffd\u0002\u0016\ufffd+\ufffd3m\ufffd\ufffd\u0001\u0000\u0000\u0000\u0000\u0004\ufffdn@\u0000\u0000\u0000\u0000;\ufffd \ufffd\u0000\u0000\u0000\u0000\u0004\ufffd\u0014O\u0000\u0000\u0000\u000e\ufffd$\ufffd\ufffd\u0000\u0000\u0000\u0000k\ufffd\b\ufffd",
+                "tt": 1
+              }
+            },
+            "gsch": {
+              "nbs": 48,
+              "nui": 16
+            }
+          }
+        },
+        "State": {
+          "Deleted": false,
+          "LocalState": null
+        }
+      }
+    ],
+    "AssetResources": null
+  },
+  "Creatables": null,
+  "KvMods": {
+    1: {"Data": "AA==", "OldData": null}
+  }
+}

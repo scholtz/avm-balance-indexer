@@ -157,6 +157,19 @@ jobs:
         run: |
           t() { helm template ci deploy/helm/avm-balance-indexer -f deploy/helm/values/stage-testnet.yaml --set cassandra.embedded.node=ci-node "$@"; }
           t | grep -q 'Storage__Cassandra__RetiredKeyspaceQuietMinutes: "60"'
+          # Ledger audit (ADR 0021, #181): on in the stage values, log-only on MainNet, the acknowledged round and the ignored rounds only when set.
+          t | grep -q 'Worker__Audit__Enabled: "true"'
+          t | grep -q 'Worker__Audit__StopOnMismatch: "true"'
+          t | grep -q 'Worker__Audit__BackfillSampleEvery: "1000"'
+          if t | grep -q 'Worker__Audit__AcknowledgeRound'; then echo "no acknowledged round by default"; exit 1; fi
+          if t | grep -q 'Worker__Audit__IgnoreRounds'; then echo "no ignored rounds by default"; exit 1; fi
+          helm template ci deploy/helm/avm-balance-indexer -f deploy/helm/values/prod-algorand.yaml --set cassandra.embedded.node=ci-node | grep -q 'Worker__Audit__StopOnMismatch: "false"'
+          out=$(t --set worker.audit.acknowledgeRound=4300500 --set "worker.audit.ignoreRounds={11,22}" --set worker.audit.enabled=false --set worker.audit.backfillSampleEvery=0)
+          echo "$out" | grep -q 'Worker__Audit__AcknowledgeRound: "4300500"'
+          echo "$out" | grep -q 'Worker__Audit__IgnoreRounds__0: "11"'
+          echo "$out" | grep -q 'Worker__Audit__IgnoreRounds__1: "22"'
+          echo "$out" | grep -q 'Worker__Audit__Enabled: "false"'
+          echo "$out" | grep -q 'Worker__Audit__BackfillSampleEvery: "0"'
           out=$(t --set storage.cassandra.keyspace=avm_new --set "storage.cassandra.retiredKeyspaces={avm_old_1,avm_old_2}" --set cassandra.embedded.autoSnapshotTtl=7d --set storage.cassandra.retiredKeyspaceQuietMinutes=240)
           echo "$out" | grep -q 'Storage__Cassandra__RetiredKeyspaceQuietMinutes: "240"'
           # The worker-only settings are env entries of the worker deployment (name and value on two lines), not part of the shared ConfigMap.
@@ -178,6 +191,10 @@ jobs:
             grep -q "$words" <<< "$err" || { echo "failed for another reason: $err"; exit 1; }
           }
           refused 'storage.cassandra.keyspace' -f /tmp/newline-keyspace.yaml
+          refused 'worker.audit.ignoreRounds' --set "worker.audit.ignoreRounds={0}"
+          refused 'worker.audit.ignoreRounds' --set "worker.audit.ignoreRounds={1.5}"
+          refused 'worker.audit.acknowledgeRound' --set worker.audit.acknowledgeRound=-4
+          refused 'worker.audit.backfillSampleEvery' --set worker.audit.backfillSampleEvery=-1
           refused 'storage.cassandra.keyspace' --set storage.cassandra.keyspace=1bad
           refused 'storage.cassandra.keyspace' --set storage.cassandra.keyspace=bad-name
           refused 'storage.cassandra.localDatacenter' --set "storage.cassandra.localDatacenter=dc'1"

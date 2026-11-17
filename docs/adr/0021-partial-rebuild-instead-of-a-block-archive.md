@@ -1,6 +1,6 @@
 # 0021 Partial rebuild instead of a block archive
 
-Status: accepted as the design (issue #176). Implemented for Cassandra: the copy (#178), the worker, the chart values, the deploy step and the runbook (#179). Implemented in the PostgreSQL provider (#180, the rewind in one transaction), but not started by the worker for PostgreSQL deployments (no chart values yet). Build records (#182) are implemented (the `indexing_term` table and `indexedBy` in the status). Not implemented yet: #181 (ledger audit) and #168 (the status reports a frozen keyspace as stalled).
+Status: accepted as the design (issue #176). Implemented for Cassandra: the copy (#178), the worker, the chart values, the deploy step and the runbook (#179). Implemented in the PostgreSQL provider (#180, the rewind in one transaction), but not started by the worker for PostgreSQL deployments (no chart values yet). Build records (#182) are implemented (the `indexing_term` table and `indexedBy` in the status). The ledger audit (#181) is implemented: absolute comparison of published rounds with `/v2/deltas` (every followed round, sampled while backfilling), the stop is recorded in the database and released by a rebuild. Not implemented yet: #168 (the status reports a frozen keyspace as stalled).
 
 ## Context
 A fix in the normalizer or the balance tracker only changes rounds indexed afterwards. Rows already written cannot be edited

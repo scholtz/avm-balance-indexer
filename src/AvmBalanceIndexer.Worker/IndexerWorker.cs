@@ -27,7 +27,8 @@ public sealed partial class IndexerWorker(
     ILogger<IndexerWorker> logger,
     TimeProvider? clock = null,
     string? buildVersion = null,
-    IEnumerable<IPartialRebuild>? partialRebuilds = null) : BackgroundService
+    IEnumerable<IPartialRebuild>? partialRebuilds = null,
+    IOptions<WorkerOptions>? workerOptions = null) : BackgroundService
 {
     private readonly TimeProvider _clock = clock ?? TimeProvider.System;
     private readonly string _version = buildVersion ?? BuildVersion.Current;
@@ -141,6 +142,27 @@ public sealed partial class IndexerWorker(
     }
 
     /// <summary>
+    /// A stop of the ledger audit that is recorded in the database and not acknowledged keeps every writer from indexing past the bad round (ADR 0021),
+    /// also after a restart: it is the fatal path again, with the same words. Acknowledging a round (<c>Worker:Audit:AcknowledgeRound</c>) is the
+    /// operator's decision that the round is fine. A rebuild releases the stop (it deletes the stops after its round).
+    /// </summary>
+    private async Task CheckAuditStopAsync(CancellationToken cancellationToken)
+    {
+        if (workerOptions?.Value.Audit.AcknowledgeRound is { } acknowledge && await storage.AcknowledgeAsync(acknowledge, cancellationToken).ConfigureAwait(false))
+        {
+            LogAuditAcknowledged(logger, chain.Chain, acknowledge);
+        }
+
+        if (await storage.GetAsync(cancellationToken).ConfigureAwait(false) is { } stop)
+        {
+            throw new InvalidOperationException(
+                $"Ledger audit of {chain.Chain} failed at round {stop.Round}: the ledger disagrees at that round and the writer had published up to {stop.PublishedRound}; "
+                + $"the last round that agreed is {(stop.Round > 0 ? stop.Round - 1 : 0)}. Fix the cause, then rebuild from a round below {stop.Round} (docs/operations.md), "
+                + $"or acknowledge the round (worker.audit.acknowledgeRound) when the ledger side is the one that is wrong. {stop.Reason}");
+        }
+    }
+
+    /// <summary>
     /// A configured partial rebuild (ADR 0021) runs before the first round of a writer term, whenever there is a request: the storage decides
     /// whether it was carried out already (<see cref="PartialRebuildOutcome.AlreadyDone"/>) or must be refused. A refusal stops the worker:
     /// indexing from genesis into the database because the rebuild was refused would be the opposite of what the operator asked for.
@@ -246,6 +268,7 @@ public sealed partial class IndexerWorker(
                 // before anything is indexed (ADR 0021): a database that cannot take the record is a wait like any other transient failure.
                 if (!prepared)
                 {
+                    await CheckAuditStopAsync(stoppingToken).ConfigureAwait(false);
                     await PrepareAsync(stoppingToken).ConfigureAwait(false);
                     await RecordTermAsync(stoppingToken).ConfigureAwait(false);
                     prepared = true;
@@ -313,6 +336,9 @@ public sealed partial class IndexerWorker(
 
     [LoggerMessage(EventId = 1304, Level = LogLevel.Information, Message = "This replica is now the writer of {Chain}")]
     private static partial void LogLeading(ILogger logger, string chain);
+
+    [LoggerMessage(EventId = 1317, Level = LogLevel.Warning, Message = "The stop of the ledger audit of {Chain} at round {Round} was acknowledged by the configuration; indexing continues")]
+    private static partial void LogAuditAcknowledged(ILogger logger, string chain, ulong round);
 
     [LoggerMessage(EventId = 1315, Level = LogLevel.Information, Message = "Partial rebuild of {Chain} from {Source}: {Stage}, {Rows} rows, {Done}/{Total} ranges")]
     private static partial void LogRebuildProgress(ILogger logger, string chain, string source, string stage, long rows, int done, int total);

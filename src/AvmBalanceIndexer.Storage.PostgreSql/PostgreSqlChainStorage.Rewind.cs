@@ -212,6 +212,8 @@ public sealed partial class PostgreSqlChainStorage
         await RewindAsync(connection, transaction, "DELETE FROM scan_result WHERE job_id IN (SELECT id FROM scan_job WHERE round > @r)", parameters, cancellationToken).ConfigureAwait(false);
         await RewindAsync(connection, transaction, "DELETE FROM scan_job WHERE round > @r", parameters, cancellationToken).ConfigureAwait(false);
         await RewindAsync(connection, transaction, "DELETE FROM indexing_term WHERE from_round > @r", parameters, cancellationToken).ConfigureAwait(false);
+        // A rebuild releases the stop of the ledger audit (ADR 0021): the rounds after R, bad or not, are indexed again and audited again.
+        await RewindAsync(connection, transaction, "DELETE FROM audit_stop WHERE round > @r", parameters, cancellationToken).ConfigureAwait(false);
         progress?.Report(new PartialRebuildProgress("scans and build records", 0, 6, RewindSteps));
         return (deleted, holdings);
     }

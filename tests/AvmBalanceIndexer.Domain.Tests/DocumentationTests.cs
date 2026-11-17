@@ -23,6 +23,7 @@ public partial class DocumentationTests
         ["Algorand"] = "AlgorandChainOptions",
         ["Indexer"] = "IndexerOptions",
         ["Worker"] = "WorkerOptions",
+        ["Worker:Audit"] = "AuditOptions",
         ["Scans"] = "ScanOptions",
         ["Api"] = "ApiOptions",
     };
