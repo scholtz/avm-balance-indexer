@@ -29,6 +29,7 @@ public static class CassandraStorageExtensions
         services.AddSingleton<IScanJobStore>(static provider => provider.GetRequiredService<CassandraChainStorage>());
         services.AddSingleton<IWriterLeaseProvider>(static provider => provider.GetRequiredService<CassandraChainStorage>());
         services.AddSingleton<IRetiredStorage>(static provider => provider.GetRequiredService<CassandraChainStorage>());
+        services.AddSingleton<IPartialRebuild>(static provider => provider.GetRequiredService<CassandraChainStorage>());
         return services;
     }
 }
@@ -66,6 +67,42 @@ internal sealed partial class CassandraOptionsValidator : IValidateOptions<Stora
             {
                 yield return $"Storage:Cassandra:RetiredKeyspaces holds '{retired}', a Cassandra system keyspace.";
             }
+        }
+    }
+
+    /// <summary>A fork reads its source and must never name the keyspace it fills, a system keyspace, or one this deployment drops.</summary>
+    internal static IEnumerable<string> ForkErrors(CassandraOptions settings)
+    {
+        if (settings.ForkFrom is not { } fork)
+        {
+            yield break;
+        }
+
+        if (!IsValidIdentifier(fork.Keyspace))
+        {
+            yield return $"Storage:Cassandra:ForkFrom:Keyspace holds '{fork.Keyspace}', which is not a keyspace name (a letter, then letters, digits and underscores, at most 48 characters).";
+        }
+        else if (string.Equals(fork.Keyspace, settings.Keyspace, StringComparison.OrdinalIgnoreCase))
+        {
+            yield return $"Storage:Cassandra:ForkFrom:Keyspace is '{fork.Keyspace}', the keyspace this deployment fills (Storage:Cassandra:Keyspace).";
+        }
+        else if (fork.Keyspace.StartsWith("system", StringComparison.OrdinalIgnoreCase))
+        {
+            yield return $"Storage:Cassandra:ForkFrom:Keyspace holds '{fork.Keyspace}', a Cassandra system keyspace.";
+        }
+        else if ((settings.RetiredKeyspaces ?? []).Any(retired => string.Equals(retired, fork.Keyspace, StringComparison.OrdinalIgnoreCase)))
+        {
+            yield return $"Storage:Cassandra:ForkFrom:Keyspace '{fork.Keyspace}' is also in Storage:Cassandra:RetiredKeyspaces, which drops it.";
+        }
+
+        if (fork.Round < 0)
+        {
+            yield return "Storage:Cassandra:ForkFrom:Round must be 0 or greater.";
+        }
+
+        if (!string.Equals(fork.Into, settings.Keyspace, StringComparison.OrdinalIgnoreCase))
+        {
+            yield return $"Storage:Cassandra:ForkFrom:Into must name the keyspace this deployment fills ('{settings.Keyspace}'), so that a request left in the configuration cannot fill another one.";
         }
     }
 
@@ -109,6 +146,7 @@ internal sealed partial class CassandraOptionsValidator : IValidateOptions<Stora
         }
 
         errors.AddRange(RetiredKeyspaceErrors(settings));
+        errors.AddRange(ForkErrors(settings));
         if (settings.RetiredKeyspaceQuietMinutes is < 0 or > 43200)
         {
             errors.Add("Storage:Cassandra:RetiredKeyspaceQuietMinutes must be between 0 and 43200 (30 days).");

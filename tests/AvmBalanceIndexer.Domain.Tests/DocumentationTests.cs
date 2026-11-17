@@ -19,6 +19,7 @@ public partial class DocumentationTests
         ["Storage:PostgreSql"] = "PostgreSqlOptions",
         ["Storage:PostgreSql:RewindTo"] = "PostgreSqlRewindOptions",
         ["Storage:Cassandra"] = "CassandraOptions",
+        ["Storage:Cassandra:ForkFrom"] = "CassandraForkOptions",
         ["Algorand"] = "AlgorandChainOptions",
         ["Indexer"] = "IndexerOptions",
         ["Worker"] = "WorkerOptions",

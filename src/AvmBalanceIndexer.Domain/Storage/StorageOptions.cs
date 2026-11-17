@@ -39,6 +39,19 @@ public sealed class PostgreSqlRewindOptions
     public long Round { get; set; } = -1;
 }
 
+/// <summary>A request to fill a new keyspace from an earlier one up to a round. The source is only read.</summary>
+public sealed class CassandraForkOptions
+{
+    /// <summary>The keyspace that is copied.</summary>
+    public string Keyspace { get; set; } = string.Empty;
+
+    /// <summary>The last round that is taken over; indexing continues after it.</summary>
+    public long Round { get; set; } = -1;
+
+    /// <summary>The keyspace this request is for (<c>Storage:Cassandra:Keyspace</c>); a request for another keyspace is refused, so a stale request cannot fill the wrong one.</summary>
+    public string Into { get; set; } = string.Empty;
+}
+
 public sealed class CassandraOptions
 {
     public string[] ContactPoints { get; set; } = [];
@@ -61,6 +74,9 @@ public sealed class CassandraOptions
     /// provided it holds only this chain's data and nobody writes to it (ADR 0020). The drop cannot be undone.
     /// </summary>
     public string[] RetiredKeyspaces { get; set; } = [];
+
+    /// <summary>Fills <see cref="Keyspace"/> from an earlier keyspace up to a round (partial rebuild, ADR 0021); null for none.</summary>
+    public CassandraForkOptions? ForkFrom { get; set; }
 
     /// <summary>
     /// How long the status of a retired keyspace must have been untouched before it is dropped. A writer keeps it moving, so this

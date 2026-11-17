@@ -5,6 +5,7 @@ using AvmBalanceIndexer.Indexing.Ingestion;
 using AvmBalanceIndexer.Indexing.Normalization;
 using AvmBalanceIndexer.Storage.PostgreSql;
 using AvmBalanceIndexer.TestSupport;
+using static AvmBalanceIndexer.TestSupport.RebuildAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Npgsql;
@@ -16,7 +17,6 @@ namespace AvmBalanceIndexer.Storage.ContractTests;
 public class PostgreSqlRewindTests(PostgresFixture postgres)
 {
     private static readonly TokenKey Native = TokenKey.Native;
-    private static readonly Address[] Accounts = [Scenario.Alice, Scenario.Bob, Scenario.Carol, Scenario.Dave];
 
     private static RoundIndexer Indexer(PostgreSqlChainStorage storage) =>
         new(
@@ -36,48 +36,6 @@ public class PostgreSqlRewindTests(PostgresFixture postgres)
     /// <summary>The same database, configured to rewind (a second storage object over the same data source).</summary>
     private PostgreSqlChainStorage WithRewind(PostgreSqlChainStorage storage, string id, ulong round) =>
         new(postgres.DataSourceOf(storage), new ChainContext(ChainId.AlgorandTestnet), 4, rewind: new PartialRebuildRequest(id, round));
-
-    private static async Task<byte[]> HashOfAsync(PostgreSqlChainStorage reference, ulong round) =>
-        round == (await reference.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!.IndexedRound
-            ? (await reference.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!.IndexedBlockHash.ToArray()
-            : throw new InvalidOperationException("The reference must be indexed to the round.");
-
-    private static async Task AssertSameAsync(PostgreSqlChainStorage actual, PostgreSqlChainStorage expected, ulong upTo)
-    {
-        var a = await actual.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None);
-        var e = await expected.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None);
-        Assert.Equal(e!.IndexedRound, a!.IndexedRound);
-        Assert.Equal(e.IndexedBlockHash.ToArray(), a.IndexedBlockHash.ToArray());
-
-        foreach (var account in Accounts)
-        {
-            Assert.Equal(await HoldingsAsync(expected, account), await HoldingsAsync(actual, account));
-            Assert.Equal(await EffectsAsync(expected, account), await EffectsAsync(actual, account));
-            for (ulong round = 0; round <= upTo; round++)
-            {
-                Assert.Equal(
-                    (await expected.GetBalanceAtRoundAsync(account, Native, round, CancellationToken.None)).Value,
-                    (await actual.GetBalanceAtRoundAsync(account, Native, round, CancellationToken.None)).Value);
-            }
-        }
-
-        for (ulong round = 0; round <= upTo; round++)
-        {
-            Assert.Equal(await HoldersAsync(expected, round), await HoldersAsync(actual, round));
-        }
-    }
-
-    private static async Task<string[]> HoldingsAsync(PostgreSqlChainStorage storage, Address account) =>
-        [.. (await storage.GetHoldingsAsync(account, true, null, 100, CancellationToken.None)).Items
-            .Select(static h => $"{h.Token.Kind}:{h.Token.TokenId}={h.Amount.Value}/{h.OptedIn}/{h.LastChangedRound}")];
-
-    private static async Task<string[]> EffectsAsync(PostgreSqlChainStorage storage, Address account) =>
-        [.. (await storage.GetEffectsAsync(account, Native, null, null, null, 100, CancellationToken.None)).Items
-            .Select(static x => $"{x.Id.Round}.{x.Id.IntraRoundOrder}.{x.Id.Ordinal}.{x.Id.TransactionId}:{x.Type}:{x.Delta}->{x.BalanceAfter.Value}")];
-
-    private static async Task<string[]> HoldersAsync(PostgreSqlChainStorage storage, ulong round) =>
-        [.. (await storage.GetHoldersAtRoundAsync(Native, round, true, null, 100, CancellationToken.None)).Items
-            .Select(static h => $"{h.Account}={h.Amount.Value}")];
 
     [Theory]
     [InlineData(1UL)]
@@ -114,11 +72,11 @@ public class PostgreSqlRewindTests(PostgresFixture postgres)
     {
         var full = await IndexedAsync(Scenario.LastRound);
         var reference = await IndexedAsync(3);
-        Assert.NotEmpty(await HoldingsAsync(full, Scenario.Dave)); // Dave first appears in round 4
+        Assert.NotEmpty((await full.GetHoldingsAsync(Scenario.Dave, true, null, 100, CancellationToken.None)).Items); // Dave first appears in round 4
 
         await WithRewind(full, "fix-1", 3).RunAsync(await HashOfAsync(reference, 3), null, CancellationToken.None);
 
-        Assert.Empty(await HoldingsAsync(full, Scenario.Dave));
+        Assert.Empty((await full.GetHoldingsAsync(Scenario.Dave, true, null, 100, CancellationToken.None)).Items);
         Assert.DoesNotContain(
             (await full.GetHoldersAtRoundAsync(Native, 3, true, null, 100, CancellationToken.None)).Items,
             h => h.Account == Scenario.Dave);
