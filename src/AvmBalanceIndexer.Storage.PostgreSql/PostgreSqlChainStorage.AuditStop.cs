@@ -4,7 +4,7 @@ namespace AvmBalanceIndexer.Storage.PostgreSql;
 
 public sealed partial class PostgreSqlChainStorage
 {
-    public async Task RecordAsync(AuditStop auditStop, CancellationToken cancellationToken)
+    public async Task RecordAuditStopAsync(AuditStop auditStop, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(auditStop);
         await using var command = _dataSource.CreateCommand(
@@ -16,7 +16,7 @@ public sealed partial class PostgreSqlChainStorage
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<AuditStop?> GetAsync(CancellationToken cancellationToken)
+    public async Task<AuditStop?> GetAuditStopAsync(CancellationToken cancellationToken)
     {
         await using var command = _dataSource.CreateCommand(
             "SELECT round, reason, published_round, recorded_at, acknowledged FROM audit_stop WHERE NOT acknowledged ORDER BY round LIMIT 1");
@@ -26,9 +26,9 @@ public sealed partial class PostgreSqlChainStorage
             : null;
     }
 
-    public async Task<bool> AcknowledgeAsync(ulong round, CancellationToken cancellationToken)
+    public async Task<bool> AcknowledgeAuditStopAsync(ulong round, CancellationToken cancellationToken)
     {
-        await using var command = _dataSource.CreateCommand("UPDATE audit_stop SET acknowledged = true WHERE round = @round");
+        await using var command = _dataSource.CreateCommand("UPDATE audit_stop SET acknowledged = true WHERE round = @round AND NOT acknowledged");
         command.Parameters.AddWithValue("round", unchecked((long)round));
         return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) > 0;
     }

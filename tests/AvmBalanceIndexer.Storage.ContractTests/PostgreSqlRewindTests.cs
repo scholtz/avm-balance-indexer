@@ -232,12 +232,12 @@ public class PostgreSqlRewindTests(PostgresFixture postgres)
         await full.AppendAsync(new IndexingTerm(0, "v1", at), CancellationToken.None);
         await full.AppendAsync(new IndexingTerm(4, "v2", at.AddDays(1)), CancellationToken.None);
 
-        await full.RecordAsync(new AuditStop(4, "bad balance", 5, at, false), CancellationToken.None);
+        await full.RecordAuditStopAsync(new AuditStop(4, "bad balance", 5, at, false), CancellationToken.None);
 
         await WithRewind(full, "fix-1", 3).RunAsync(await HashOfAsync(reference, 3), null, CancellationToken.None);
 
         Assert.Equal(["v1"], (await full.ListAsync(CancellationToken.None)).Select(static t => t.Version).ToArray());
         // A rebuild releases the stop of the ledger audit.
-        Assert.Null(await full.GetAsync(CancellationToken.None));
+        Assert.Null(await full.GetAuditStopAsync(CancellationToken.None));
     }
 }

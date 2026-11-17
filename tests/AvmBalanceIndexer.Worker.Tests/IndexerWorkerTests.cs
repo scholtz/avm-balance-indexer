@@ -391,7 +391,7 @@ public class IndexerWorkerTests : IDisposable
     public async Task A_Recorded_Audit_Stop_Keeps_The_Worker_From_Indexing_Also_After_A_Restart()
     {
         var storage = NewStorage();
-        await storage.RecordAsync(new AuditStop(4, "round 4: bob indexed 7000, ledger 7001", 9, DateTimeOffset.UtcNow, false), CancellationToken.None);
+        await storage.RecordAuditStopAsync(new AuditStop(4, "round 4: bob indexed 7000, ledger 7001", 9, DateTimeOffset.UtcNow, false), CancellationToken.None);
 
         for (var start = 0; start < 2; start++)
         {
@@ -414,7 +414,7 @@ public class IndexerWorkerTests : IDisposable
     public async Task An_Acknowledged_Audit_Stop_Lets_The_Worker_Index_Again()
     {
         var storage = NewStorage();
-        await storage.RecordAsync(new AuditStop(4, "round 4: a difference on the side of the oracle", 9, DateTimeOffset.UtcNow, false), CancellationToken.None);
+        await storage.RecordAuditStopAsync(new AuditStop(4, "round 4: a difference on the side of the oracle", 9, DateTimeOffset.UtcNow, false), CancellationToken.None);
         var audit = new WorkerOptions { Audit = new AuditOptions { AcknowledgeRound = 4 } };
         var (worker, lifetime) = Create(storage, Scenario.Adapter(), maxFailures: 10, workerOptions: audit);
 
@@ -423,7 +423,7 @@ public class IndexerWorkerTests : IDisposable
         await worker.StopAsync(CancellationToken.None);
 
         Assert.False(lifetime.StopRequested);
-        Assert.Null(await storage.GetAsync(CancellationToken.None));
+        Assert.Null(await storage.GetAuditStopAsync(CancellationToken.None));
     }
 
     [Fact]

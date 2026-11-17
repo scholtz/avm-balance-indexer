@@ -45,7 +45,7 @@ public partial class InMemoryChainStorage(ChainContext context) : IChainStorage
         }
     }
 
-    public Task RecordAsync(AuditStop auditStop, CancellationToken cancellationToken)
+    public Task RecordAuditStopAsync(AuditStop auditStop, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(auditStop);
         lock (_gate)
@@ -59,7 +59,7 @@ public partial class InMemoryChainStorage(ChainContext context) : IChainStorage
         return Task.CompletedTask;
     }
 
-    public Task<AuditStop?> GetAsync(CancellationToken cancellationToken)
+    public Task<AuditStop?> GetAuditStopAsync(CancellationToken cancellationToken)
     {
         lock (_gate)
         {
@@ -67,11 +67,11 @@ public partial class InMemoryChainStorage(ChainContext context) : IChainStorage
         }
     }
 
-    public Task<bool> AcknowledgeAsync(ulong round, CancellationToken cancellationToken)
+    public Task<bool> AcknowledgeAuditStopAsync(ulong round, CancellationToken cancellationToken)
     {
         lock (_gate)
         {
-            var index = _stops.FindIndex(s => s.Round == round);
+            var index = _stops.FindIndex(s => s.Round == round && !s.Acknowledged);
             if (index >= 0)
             {
                 _stops[index] = _stops[index] with { Acknowledged = true };

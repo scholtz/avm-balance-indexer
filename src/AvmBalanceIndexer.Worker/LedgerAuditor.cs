@@ -28,6 +28,7 @@ public sealed partial class LedgerAuditor(
     private const int ReadsInFlight = 16;
     private const int NoDeltasToSwitchOff = 20;
     private const int FailuresBeforeSkipping = 5;
+    private const ulong NodeLagRounds = 20;
     private static readonly TimeSpan WarnEvery = TimeSpan.FromMinutes(10);
 
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
@@ -37,6 +38,7 @@ public sealed partial class LedgerAuditor(
     private long _auditedRounds;
     private int _failuresOfRound;
     private ulong _failingRound;
+    private ulong? _reportedMismatch;
     private long? _lastWarning;
 
     /// <summary>Tests pass a shorter pause than the configuration (whole seconds) allows.</summary>
@@ -119,7 +121,13 @@ public sealed partial class LedgerAuditor(
         }
 
         // Backfilling (also a replay after a partial rebuild): one round of every BackfillSampleEvery, at most one request per pass.
+        // A rebuild moves the published round back: the replay is sampled from there.
         _audited = status.IndexedRound;
+        if (status.IndexedRound < _sampled)
+        {
+            _sampled = status.IndexedRound;
+        }
+
         if (settings.BackfillSampleEvery > 0 && status.State == IngestionState.Backfilling)
         {
             var every = (ulong)settings.BackfillSampleEvery;
@@ -193,7 +201,24 @@ public sealed partial class LedgerAuditor(
 
         if (delta is null)
         {
-            // The node keeps deltas of recent rounds only (or none at all): skipped, not an error.
+            // A 404 for one of the newest published rounds can only mean that the node (behind a load balancer, or simply a little behind the
+            // block source) has not reached it yet: tried again like a failure. For an older round the node keeps no deltas (or none at all).
+            if (published - round < NodeLagRounds)
+            {
+                if (_failingRound != round)
+                {
+                    _failingRound = round;
+                    _failuresOfRound = 0;
+                }
+
+                if (++_failuresOfRound < FailuresBeforeSkipping)
+                {
+                    return Step.Retry;
+                }
+
+                _failuresOfRound = 0;
+            }
+
             _consecutiveNoDeltas++;
             health.AuditSkipped();
             return Step.Done;
@@ -217,15 +242,21 @@ public sealed partial class LedgerAuditor(
             return Step.Done;
         }
 
-        health.AuditMismatch();
-        LogMismatch(logger, chain.Chain, round, mismatches.Count, ReferenceAddress(first.Account), first.Token.ToString(), first.Indexed.ToString(), first.Ledger.ToString(), description);
+        // Counted and logged once, also when recording the stop fails and the round is looked at again.
+        if (_reportedMismatch != round)
+        {
+            _reportedMismatch = round;
+            health.AuditMismatch();
+            LogMismatch(logger, chain.Chain, round, mismatches.Count, ReferenceAddress(first.Account), first.Token.ToString(), first.Indexed.ToString(), first.Ledger.ToString(), description);
+        }
+
         if (!settings.StopOnMismatch)
         {
             return Step.Done;
         }
 
         var reason = $"round {round}: {description}";
-        await storage.RecordAsync(new AuditStop(round, reason, published, _time.GetUtcNow(), false), cancellationToken).ConfigureAwait(false);
+        await storage.RecordAuditStopAsync(new AuditStop(round, reason, published, _time.GetUtcNow(), false), cancellationToken).ConfigureAwait(false);
         LogStop(logger, chain.Chain, round, published, round > 0 ? round - 1 : 0, reason);
         Environment.ExitCode = 1;
         lifetime.StopApplication();

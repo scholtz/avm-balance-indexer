@@ -17,15 +17,15 @@ public interface IAuditStop
     /// <summary>Records a auditStop. A round that has a record keeps the first one (a restart that audits the same round again changes nothing).</summary>
     /// <param name="auditStop">The auditStop.</param>
     /// <param name="cancellationToken">Cancels the write.</param>
-    Task RecordAsync(AuditStop auditStop, CancellationToken cancellationToken);
+    Task RecordAuditStopAsync(AuditStop auditStop, CancellationToken cancellationToken);
 
     /// <summary>The unacknowledged auditStop with the smallest round, or null when there is none.</summary>
     /// <param name="cancellationToken">Cancels the read.</param>
-    Task<AuditStop?> GetAsync(CancellationToken cancellationToken);
+    Task<AuditStop?> GetAuditStopAsync(CancellationToken cancellationToken);
 
     /// <summary>Marks the auditStop of a round as acknowledged.</summary>
     /// <param name="round">The round of the auditStop.</param>
     /// <param name="cancellationToken">Cancels the write.</param>
     /// <returns>False when no auditStop is recorded for that round.</returns>
-    Task<bool> AcknowledgeAsync(ulong round, CancellationToken cancellationToken);
+    Task<bool> AcknowledgeAuditStopAsync(ulong round, CancellationToken cancellationToken);
 }

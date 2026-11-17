@@ -4,7 +4,7 @@ namespace AvmBalanceIndexer.Storage.Cassandra;
 
 public sealed partial class CassandraChainStorage
 {
-    public async Task RecordAsync(AuditStop auditStop, CancellationToken cancellationToken)
+    public async Task RecordAuditStopAsync(AuditStop auditStop, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(auditStop);
 
@@ -20,7 +20,7 @@ public sealed partial class CassandraChainStorage
         await ExecuteConditionalAsync(insert, cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<AuditStop?> GetAsync(CancellationToken cancellationToken)
+    public async Task<AuditStop?> GetAuditStopAsync(CancellationToken cancellationToken)
     {
         var rows = await ExecuteAsync($"SELECT round, reason, published_round, recorded_at, acknowledged FROM {Table("audit_stop")} WHERE chain = ?", cancellationToken, _chain).ConfigureAwait(false);
         return rows
@@ -30,10 +30,10 @@ public sealed partial class CassandraChainStorage
             .FirstOrDefault();
     }
 
-    public async Task<bool> AcknowledgeAsync(ulong round, CancellationToken cancellationToken)
+    public async Task<bool> AcknowledgeAuditStopAsync(ulong round, CancellationToken cancellationToken)
     {
         var update = await BindAsync(
-            $"UPDATE {Table("audit_stop")} SET acknowledged = true WHERE chain = ? AND round = ? IF EXISTS",
+            $"UPDATE {Table("audit_stop")} SET acknowledged = true WHERE chain = ? AND round = ? IF acknowledged = false",
             cancellationToken,
             _chain,
             unchecked((long)round)).ConfigureAwait(false);

@@ -119,7 +119,7 @@ public sealed class LedgerAuditorTests : IDisposable
         Assert.Equal([3UL, 4UL, 5UL], ledger.Requested.Distinct().Order().ToArray());
         Assert.Equal(0, rig.Health.AuditMismatches);
         Assert.False(rig.Lifetime.StopRequested);
-        Assert.Null(await storage.GetAsync(CancellationToken.None));
+        Assert.Null(await storage.GetAuditStopAsync(CancellationToken.None));
     }
 
     [Fact]
@@ -136,7 +136,7 @@ public sealed class LedgerAuditorTests : IDisposable
         await UntilAsync(() => rig.Lifetime.StopRequested);
 
         Assert.Equal(1, Environment.ExitCode);
-        var stop = await storage.GetAsync(CancellationToken.None);
+        var stop = await storage.GetAuditStopAsync(CancellationToken.None);
         Assert.Equal(4UL, stop!.Round);
         Assert.Equal(Scenario.LastRound, stop.PublishedRound);
         Assert.Contains("indexed 7000, ledger 7001", stop.Reason, StringComparison.Ordinal);
@@ -166,7 +166,7 @@ public sealed class LedgerAuditorTests : IDisposable
 
         Assert.Equal(1, rig.Health.AuditMismatches);
         Assert.False(rig.Lifetime.StopRequested);
-        Assert.Null(await storage.GetAsync(CancellationToken.None));
+        Assert.Null(await storage.GetAuditStopAsync(CancellationToken.None));
         Assert.Contains(rig.Logger.Entries, static e => e.Level == LogLevel.Error);
         Assert.DoesNotContain(rig.Logger.Entries, static e => e.Level == LogLevel.Critical);
     }
@@ -278,6 +278,22 @@ public sealed class LedgerAuditorTests : IDisposable
         Assert.Single(rig.Logger.Entries, static e => e.Level == LogLevel.Warning); // logged at most every ten minutes
     }
 
+    [Fact]
+    public async Task A_404_For_A_Young_Round_Is_Tried_Again_It_Is_Not_Skipped_Nor_Counts_Toward_Switching_Off()
+    {
+        var (storage, ledger) = await AtRoundTwoAsync();
+        ledger.NotYetAvailable = 3; // the node is a few rounds behind the block source
+        await using var rig = Start(storage, ledger, new AuditOptions());
+        await Task.Delay(100);
+
+        await FinishTheScenarioAsync(storage);
+        await UntilAsync(() => rig.Health.LastAuditedRound == (long)Scenario.LastRound);
+
+        Assert.True(ledger.Requested.Count(static r => r == 3) >= 4);
+        Assert.Equal(0, rig.Health.AuditSkippedCount);
+        Assert.DoesNotContain(rig.Logger.Entries, static e => e.Message.Contains("no ledger deltas", StringComparison.Ordinal));
+    }
+
     private static string ReferenceNodeEncode(Address account) => new Algorand.Address(account.ToArray()).EncodeAsString();
 
     private sealed class FakeDeltas : ILedgerDeltaSource
@@ -285,6 +301,7 @@ public sealed class LedgerAuditorTests : IDisposable
         private readonly object _gate = new();
         private readonly List<ulong> _requested = [];
         private int _failures;
+        private int _notYet;
 
         public Dictionary<ulong, LedgerDelta> Rounds { get; } = [];
 
@@ -293,6 +310,9 @@ public sealed class LedgerAuditorTests : IDisposable
         public bool AlwaysNull { get; init; }
 
         public int FailuresBeforeSuccess { get; set; }
+
+        /// <summary>Answers 404 (null) this many times first, as a node that has not reached a young round yet.</summary>
+        public int NotYetAvailable { get; set; }
 
         public IReadOnlyList<ulong> Requested
         {
@@ -314,6 +334,15 @@ public sealed class LedgerAuditorTests : IDisposable
                 {
                     _failures++;
                     throw new HttpRequestException("rate limited", null, HttpStatusCode.TooManyRequests);
+                }
+            }
+
+            lock (_gate)
+            {
+                if (_notYet < NotYetAvailable)
+                {
+                    _notYet++;
+                    return Task.FromResult<LedgerDelta?>(null);
                 }
             }
 

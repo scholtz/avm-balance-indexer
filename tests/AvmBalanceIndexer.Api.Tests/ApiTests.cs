@@ -327,11 +327,11 @@ public sealed class ApiTests : IDisposable
 
     private sealed class ThrowingStorage(Exception? failure = null) : IChainStorage
     {
-        public Task RecordAsync(AuditStop auditStop, CancellationToken cancellationToken) => throw new InvalidOperationException();
+        public Task RecordAuditStopAsync(AuditStop auditStop, CancellationToken cancellationToken) => throw new InvalidOperationException();
 
-        public Task<AuditStop?> GetAsync(CancellationToken cancellationToken) => throw new InvalidOperationException();
+        public Task<AuditStop?> GetAuditStopAsync(CancellationToken cancellationToken) => throw new InvalidOperationException();
 
-        public Task<bool> AcknowledgeAsync(ulong round, CancellationToken cancellationToken) => throw new InvalidOperationException();
+        public Task<bool> AcknowledgeAuditStopAsync(ulong round, CancellationToken cancellationToken) => throw new InvalidOperationException();
 
         public Task AppendAsync(IndexingTerm term, CancellationToken cancellationToken) => throw new InvalidOperationException();
 

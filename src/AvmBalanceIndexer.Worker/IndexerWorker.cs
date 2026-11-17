@@ -148,12 +148,12 @@ public sealed partial class IndexerWorker(
     /// </summary>
     private async Task CheckAuditStopAsync(CancellationToken cancellationToken)
     {
-        if (workerOptions?.Value.Audit.AcknowledgeRound is { } acknowledge && await storage.AcknowledgeAsync(acknowledge, cancellationToken).ConfigureAwait(false))
+        if (workerOptions?.Value.Audit.AcknowledgeRound is { } acknowledge && await storage.AcknowledgeAuditStopAsync(acknowledge, cancellationToken).ConfigureAwait(false))
         {
             LogAuditAcknowledged(logger, chain.Chain, acknowledge);
         }
 
-        if (await storage.GetAsync(cancellationToken).ConfigureAwait(false) is { } stop)
+        if (await storage.GetAuditStopAsync(cancellationToken).ConfigureAwait(false) is { } stop)
         {
             throw new InvalidOperationException(
                 $"Ledger audit of {chain.Chain} failed at round {stop.Round}: the ledger disagrees at that round and the writer had published up to {stop.PublishedRound}; "
