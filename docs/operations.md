@@ -103,6 +103,14 @@ rebuild into a new keyspace.
 The versions are the image tags (ADR 0014). A deployment upgraded to this release gets its first row at the then indexed round + 1; rounds before that row were written by an unknown build.
 A restart of the same build without new rounds adds no row.
 
+**Cassandra: fill a new keyspace from the old one (issue #178, ADR 0021).** Instead of indexing from genesis, a new keyspace takes over everything of the old one up to a round R
+(`Storage:Cassandra:ForkFrom:Keyspace`, `:Round` and `:Into`, which must name the new keyspace so that a request left in the values cannot fill another one) and indexing continues after R.
+The old keyspace is only read. The copy scans the old keyspace in 256 token ranges per table, filters by round on the client, derives the holdings from the newest copied effect of every
+account and token, and publishes the cursor last (a lightweight transaction), so nothing is visible before the end. Progress is kept in `fork_progress`: a copy that stopped is repeated
+from its finished ranges. The new keyspace is bound to its request: another source or round on the same keyspace is refused ("use a new keyspace name"), and a keyspace that already follows the
+chain without a matching request is refused too. Rows of a round that was never published are not taken over (R must not exceed the source's published round). Until #179 wires it into the
+worker and the chart, the provider has the operation but nothing starts it.
+
 **PostgreSQL: rewind in place (issue #180, ADR 0021).** PostgreSQL has transactions, so a database is rewound to a round R in one transaction instead of being rebuilt next to the old one.
 The provider supports it with two settings, `Storage:PostgreSql:RewindTo:Round` and `Storage:PostgreSql:RewindTo:RequestId` (use a new request id for every rewind: it is recorded in
 `maintenance_request` in the same transaction, so the rewind runs once even when the values stay in the configuration). The rewind deletes the effects after R, recomputes the holdings

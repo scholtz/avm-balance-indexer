@@ -11,7 +11,7 @@ namespace AvmBalanceIndexer.Storage.Cassandra;
 /// transaction that advances the publication cursor. Readers only trust data at or below the published round;
 /// a crash before publication leaves rows that the replay of the same round overwrites with identical values.
 /// </summary>
-public sealed partial class CassandraChainStorage : IChainStorage
+public sealed partial class CassandraChainStorage : IChainStorage, IPartialRebuild
 {
     /// <summary>
     /// Number of shards of the token-oriented tables (accounts are assigned by hash). Part of the on-disk layout:
@@ -38,6 +38,9 @@ public sealed partial class CassandraChainStorage : IChainStorage
     private readonly ConcurrentDictionary<string, Task<PreparedStatement>> _prepared = new();
     private readonly object _cursorLock = new();
     private (ulong Round, byte[] Hash)? _lastPublished;
+
+    /// <inheritdoc />
+    public PartialRebuildRequest? Request { get; }
 
     private (ulong Round, byte[] Hash)? LastPublished
     {
@@ -71,6 +74,9 @@ public sealed partial class CassandraChainStorage : IChainStorage
             ? throw new ArgumentException(error, nameof(options))
             : [.. (options.RetiredKeyspaces ?? []).Select(static name => name.ToLowerInvariant()).Distinct(StringComparer.Ordinal)];
         _retirementQuietPeriod = TimeSpan.FromMinutes(options.RetiredKeyspaceQuietMinutes);
+        Request = CassandraOptionsValidator.ForkErrors(options).FirstOrDefault() is { } forkError
+            ? throw new ArgumentException(forkError, nameof(options))
+            : options.ForkFrom is { } fork ? new PartialRebuildRequest(fork.Keyspace.ToLowerInvariant(), (ulong)fork.Round) : null;
         _writeConcurrency = options.WriteConcurrency is >= 1 and <= 4096
             ? options.WriteConcurrency
             : throw new ArgumentOutOfRangeException(nameof(options), "WriteConcurrency must be between 1 and 4096.");

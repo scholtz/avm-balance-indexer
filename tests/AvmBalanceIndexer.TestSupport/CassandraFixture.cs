@@ -102,7 +102,7 @@ public sealed class CassandraFixture : IAsyncLifetime
     };
 
     /// <summary>Creates a fresh keyspace, applies the schema (unless told not to) and returns the storage bound to it.</summary>
-    public async Task<CassandraChainStorage> CreateStorageAsync(string chain = ChainId.AlgorandTestnet, bool applySchema = true, TimeSpan? readDeadline = null, TimeSpan? leaseTtl = null, int? writeConcurrency = null, string[]? retiredKeyspaces = null, int retiredQuietMinutes = 0, bool upperCaseKeyspace = false)
+    public async Task<CassandraChainStorage> CreateStorageAsync(string chain = ChainId.AlgorandTestnet, bool applySchema = true, TimeSpan? readDeadline = null, TimeSpan? leaseTtl = null, int? writeConcurrency = null, string[]? retiredKeyspaces = null, int retiredQuietMinutes = 0, bool upperCaseKeyspace = false, (string Keyspace, ulong Round)? forkFrom = null)
     {
         await EnsureStartedAsync().ConfigureAwait(false);
         await RetireOldKeyspacesAsync().ConfigureAwait(false);
@@ -114,6 +114,11 @@ public sealed class CassandraFixture : IAsyncLifetime
         }
 
         options.RetiredKeyspaces = retiredKeyspaces ?? [];
+        if (forkFrom is { } fork)
+        {
+            options.ForkFrom = new CassandraForkOptions { Keyspace = fork.Keyspace, Round = (long)fork.Round, Into = options.Keyspace };
+        }
+
         options.RetiredKeyspaceQuietMinutes = retiredQuietMinutes;
         if (writeConcurrency is { } concurrency)
         {
@@ -162,6 +167,20 @@ public sealed class CassandraFixture : IAsyncLifetime
                 // Best effort: a keyspace that could not be dropped is only clutter.
             }
         }
+    }
+
+    /// <summary>
+    /// A second storage object over the same keyspace as <paramref name="existing"/>, configured with another fork request (the schema is
+    /// there already): what a restart with changed values looks like.
+    /// </summary>
+    public CassandraChainStorage WithFork(CassandraChainStorage existing, string keyspace, ulong round)
+    {
+        var (source, options) = _storages[existing];
+        var changed = System.Text.Json.JsonSerializer.Deserialize<CassandraOptions>(System.Text.Json.JsonSerializer.Serialize(options))!;
+        changed.ForkFrom = new CassandraForkOptions { Keyspace = keyspace, Round = (long)round, Into = options.Keyspace };
+        var storage = new CassandraChainStorage(source, new ChainContext(ChainId.AlgorandTestnet), changed);
+        _storages[storage] = (source, changed);
+        return storage;
     }
 
     /// <summary>Keyspace a storage created by this fixture lives in.</summary>

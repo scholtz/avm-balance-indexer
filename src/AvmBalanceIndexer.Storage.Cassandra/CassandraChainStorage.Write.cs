@@ -166,58 +166,64 @@ public sealed partial class CassandraChainStorage
 
         await RunBoundedAsync(statements, static statement => statement(), cancellationToken, _writeConcurrency).ConfigureAwait(false);
 
-        // The last effect of a round per account/token carries the end-of-round absolute balance. USING TIMESTAMP makes
-        // the newest round win even when a stale writer is still replaying an older one.
-        var upsertHolding = $"""
-            INSERT INTO {Table("holdings_by_account")} (account, token_kind, token_id, amount, opted_in, last_changed_round)
-            VALUES (?, ?, ?, ?, ?, ?) USING TIMESTAMP ?
-            """;
-        var upsertByToken = $"""
-            INSERT INTO {Table("holdings_by_token")} (token_kind, token_id, shard, account, amount, opted_in, last_changed_round)
-            VALUES (?, ?, ?, ?, ?, ?, ?) USING TIMESTAMP ?
-            """;
-        var timestamp = unchecked((long)round) + 1;
+        // The last effect of a round per account/token carries the end-of-round absolute balance. One after the other per account,
+        // so the in-flight bound stays the number of accounts being written.
         await RunBoundedAsync(
             latest.Values.ToArray(),
-            async effect =>
-            {
-                // One after the other, so the in-flight bound stays the number of accounts being written.
-                await ExecuteAsync(
-                    upsertHolding,
-                    cancellationToken,
-                    effect.Account.ToArray(),
-                    effect.Token.Kind.ToStorageName(),
-                    StorageId(effect.Token.TokenId),
-                    effect.BalanceAfter.ToString(),
-                    effect.Type != EffectType.AssetOptOut,
-                    roundValue,
-                    timestamp).ConfigureAwait(false);
-                await ExecuteAsync(
-                    upsertByToken,
-                    cancellationToken,
-                    effect.Token.Kind.ToStorageName(),
-                    StorageId(effect.Token.TokenId),
-                    ShardOf(effect.Account),
-                    effect.Account.ToArray(),
-                    effect.BalanceAfter.ToString(),
-                    effect.Type != EffectType.AssetOptOut,
-                    roundValue,
-                    timestamp).ConfigureAwait(false);
-            },
+            effect => UpsertHoldingAsync(
+                effect.Account,
+                effect.Token.Kind.ToStorageName(),
+                StorageId(effect.Token.TokenId),
+                effect.BalanceAfter.ToString(),
+                effect.Type != EffectType.AssetOptOut,
+                roundValue,
+                cancellationToken),
             cancellationToken,
             _writeConcurrency).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Writes both holding rows of an account/token. USING TIMESTAMP (round + 1) makes the newest round win even when a stale writer is
+    /// still replaying an older one (ADR 0003); every holding row of the keyspace, also those of a partial rebuild, uses this rule.
+    /// </summary>
+    private async Task UpsertHoldingAsync(Address account, string kind, long tokenId, string amount, bool optedIn, long round, CancellationToken cancellationToken)
+    {
+        var timestamp = round + 1;
+        await ExecuteAsync(
+            $"""
+            INSERT INTO {Table("holdings_by_account")} (account, token_kind, token_id, amount, opted_in, last_changed_round)
+            VALUES (?, ?, ?, ?, ?, ?) USING TIMESTAMP ?
+            """,
+            cancellationToken,
+            account.ToArray(),
+            kind,
+            tokenId,
+            amount,
+            optedIn,
+            round,
+            timestamp).ConfigureAwait(false);
+        await ExecuteAsync(
+            $"""
+            INSERT INTO {Table("holdings_by_token")} (token_kind, token_id, shard, account, amount, opted_in, last_changed_round)
+            VALUES (?, ?, ?, ?, ?, ?, ?) USING TIMESTAMP ?
+            """,
+            cancellationToken,
+            kind,
+            tokenId,
+            ShardOf(account),
+            account.ToArray(),
+            amount,
+            optedIn,
+            round,
+            timestamp).ConfigureAwait(false);
     }
 
     /// <summary>
     /// Optional columns are left out of the statement instead of being bound to null: a null cell is a tombstone, and about
     /// every other effect (fees) has no counterparty.
     /// </summary>
-    private Task<RowSet> InsertAccountEffectAsync(TokenEffect effect, int bucket, string delta, CancellationToken cancellationToken)
-    {
-        var columns = "account, token_kind, token_id, bucket, round, intra_round_order, ordinal, transaction_id, effect_type, delta, balance_after";
-        var markers = "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?";
-        var values = new List<object?>
-        {
+    private Task<RowSet> InsertAccountEffectAsync(TokenEffect effect, int bucket, string delta, CancellationToken cancellationToken) =>
+        InsertAccountEffectRowAsync(
             effect.Account.ToArray(),
             effect.Token.Kind.ToStorageName(),
             StorageId(effect.Token.TokenId),
@@ -226,22 +232,45 @@ public sealed partial class CassandraChainStorage
             effect.Id.IntraRoundOrder,
             effect.Id.Ordinal,
             effect.Id.TransactionId,
+            effect.Id.InnerPath.Count > 0 ? effect.Id.InnerPath.ToArray() : null,
             effect.Type.ToString(),
             delta,
             effect.BalanceAfter.ToString(),
-        };
-        if (effect.Id.InnerPath.Count > 0)
+            effect.Counterparty?.ToArray(),
+            cancellationToken);
+
+    /// <summary>The insert of one row of <c>effects_by_account_token_bucket</c>, shared by the round writer and the copy of a partial rebuild.</summary>
+    private Task<RowSet> InsertAccountEffectRowAsync(
+        byte[] account,
+        string kind,
+        long tokenId,
+        int bucket,
+        long round,
+        int intraRoundOrder,
+        int ordinal,
+        string transactionId,
+        int[]? innerPath,
+        string effectType,
+        string delta,
+        string balanceAfter,
+        byte[]? counterparty,
+        CancellationToken cancellationToken)
+    {
+        var columns = "account, token_kind, token_id, bucket, round, intra_round_order, ordinal, transaction_id, effect_type, delta, balance_after";
+        var markers = "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?";
+        var values = new List<object?> { account, kind, tokenId, bucket, round, intraRoundOrder, ordinal, transactionId, effectType, delta, balanceAfter };
+        if (innerPath is { Length: > 0 })
         {
             columns += ", inner_path";
             markers += ", ?";
-            values.Add(effect.Id.InnerPath.ToArray());
+            values.Add(innerPath);
         }
 
-        if (effect.Counterparty is { } counterparty)
+        if (counterparty is not null)
         {
             columns += ", counterparty";
             markers += ", ?";
-            values.Add(counterparty.ToArray());
+            values.Add(counterparty);
         }
 
         return ExecuteAsync($"INSERT INTO {Table("effects_by_account_token_bucket")} ({columns}) VALUES ({markers})", cancellationToken, [.. values]);
