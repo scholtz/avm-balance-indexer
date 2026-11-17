@@ -411,6 +411,27 @@ public class IndexerWorkerTests : IDisposable
     }
 
     [Fact]
+    public async Task A_Rebuild_Runs_Before_The_Audit_Stop_Is_Checked_So_It_Can_Release_The_Stop()
+    {
+        var storage = NewStorage();
+        await storage.RecordAuditStopAsync(new AuditStop(4, "round 4: bob indexed 7000, ledger 7001", 9, DateTimeOffset.UtcNow, false), CancellationToken.None);
+        // What the rewind of a rebuild does to the stops after its round.
+        var rebuild = new FakeRebuild(2, async (_, token) =>
+        {
+            await storage.AcknowledgeAuditStopAsync(4, token);
+            return new PartialRebuildResult(PartialRebuildOutcome.Done);
+        });
+        var (worker, lifetime) = Create(storage, Scenario.Adapter(), maxFailures: 10, rebuild: rebuild);
+
+        await worker.StartAsync(CancellationToken.None);
+        await WaitForRoundAsync(storage, Scenario.LastRound);
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.False(lifetime.StopRequested);
+        Assert.Equal(1, rebuild.Calls);
+    }
+
+    [Fact]
     public async Task An_Acknowledged_Audit_Stop_Lets_The_Worker_Index_Again()
     {
         var storage = NewStorage();

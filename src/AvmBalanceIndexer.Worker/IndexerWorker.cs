@@ -268,8 +268,9 @@ public sealed partial class IndexerWorker(
                 // before anything is indexed (ADR 0021): a database that cannot take the record is a wait like any other transient failure.
                 if (!prepared)
                 {
-                    await CheckAuditStopAsync(stoppingToken).ConfigureAwait(false);
+                    // The rebuild comes first: it is what releases a recorded stop (the rewind deletes the stops after its round, a new keyspace has none).
                     await PrepareAsync(stoppingToken).ConfigureAwait(false);
+                    await CheckAuditStopAsync(stoppingToken).ConfigureAwait(false);
                     await RecordTermAsync(stoppingToken).ConfigureAwait(false);
                     prepared = true;
                 }

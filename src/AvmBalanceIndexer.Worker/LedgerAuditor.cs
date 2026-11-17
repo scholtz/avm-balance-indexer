@@ -103,7 +103,7 @@ public sealed partial class LedgerAuditor(
             var budget = Math.Max(1, settings.MaxRoundsPerPass);
             for (var round = _audited.Value + 1; round <= status.IndexedRound && budget-- > 0; round++)
             {
-                var step = await AuditRoundAsync(round, status.IndexedRound, settings, cancellationToken).ConfigureAwait(false);
+                var step = await AuditRoundAsync(round, status.IndexedRound, settings, countNoDeltas: true, cancellationToken).ConfigureAwait(false);
                 if (step == Step.Stop)
                 {
                     return false;
@@ -134,7 +134,8 @@ public sealed partial class LedgerAuditor(
             var next = ((_sampled.Value / every) + 1) * every;
             if (next <= status.IndexedRound)
             {
-                var step = await AuditRoundAsync(next, status.IndexedRound, settings, cancellationToken).ConfigureAwait(false);
+                // A node that keeps deltas of recent rounds only answers 404 for old samples: that says nothing about the tip.
+                var step = await AuditRoundAsync(next, status.IndexedRound, settings, countNoDeltas: false, cancellationToken).ConfigureAwait(false);
                 if (step == Step.Stop)
                 {
                     return false;
@@ -172,7 +173,25 @@ public sealed partial class LedgerAuditor(
         return true;
     }
 
-    private async Task<Step> AuditRoundAsync(ulong round, ulong published, AuditOptions settings, CancellationToken cancellationToken)
+    /// <summary>True while the budget of retries for this round is left (and counts the retry).</summary>
+    private bool ShouldRetry(ulong round)
+    {
+        if (_failingRound != round)
+        {
+            _failingRound = round;
+            _failuresOfRound = 0;
+        }
+
+        if (++_failuresOfRound < FailuresBeforeSkipping)
+        {
+            return true;
+        }
+
+        _failuresOfRound = 0;
+        return false;
+    }
+
+    private async Task<Step> AuditRoundAsync(ulong round, ulong published, AuditOptions settings, bool countNoDeltas, CancellationToken cancellationToken)
     {
         LedgerDelta? delta;
         try
@@ -183,19 +202,12 @@ public sealed partial class LedgerAuditor(
         {
             // Not a statement about the round: tried again at the next pass, and given up on only after a few failures of the same round.
             Warn(ex);
-            if (_failingRound != round)
-            {
-                _failingRound = round;
-                _failuresOfRound = 0;
-            }
-
-            if (++_failuresOfRound < FailuresBeforeSkipping)
+            if (ShouldRetry(round))
             {
                 return Step.Retry;
             }
 
             health.AuditSkipped();
-            _failuresOfRound = 0;
             return Step.Done;
         }
 
@@ -203,23 +215,16 @@ public sealed partial class LedgerAuditor(
         {
             // A 404 for one of the newest published rounds can only mean that the node (behind a load balancer, or simply a little behind the
             // block source) has not reached it yet: tried again like a failure. For an older round the node keeps no deltas (or none at all).
-            if (published - round < NodeLagRounds)
+            if (published - round < NodeLagRounds && ShouldRetry(round))
             {
-                if (_failingRound != round)
-                {
-                    _failingRound = round;
-                    _failuresOfRound = 0;
-                }
-
-                if (++_failuresOfRound < FailuresBeforeSkipping)
-                {
-                    return Step.Retry;
-                }
-
-                _failuresOfRound = 0;
+                return Step.Retry;
             }
 
-            _consecutiveNoDeltas++;
+            if (countNoDeltas)
+            {
+                _consecutiveNoDeltas++;
+            }
+
             health.AuditSkipped();
             return Step.Done;
         }
@@ -256,7 +261,17 @@ public sealed partial class LedgerAuditor(
         }
 
         var reason = $"round {round}: {description}";
-        await storage.RecordAuditStopAsync(new AuditStop(round, reason, published, _time.GetUtcNow(), false), cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await storage.RecordAuditStopAsync(new AuditStop(round, reason, published, _time.GetUtcNow(), false), cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            // The stop is not durable yet: the round is looked at again, and not counted again.
+            LogStopNotRecorded(logger, ex, chain.Chain, round);
+            return Step.Retry;
+        }
+
         LogStop(logger, chain.Chain, round, published, round > 0 ? round - 1 : 0, reason);
         Environment.ExitCode = 1;
         lifetime.StopApplication();
@@ -298,6 +313,9 @@ public sealed partial class LedgerAuditor(
 
     [LoggerMessage(EventId = 1355, Level = LogLevel.Warning, Message = "Ledger audit of {Chain}: round {Round} disagrees with the ledger but is listed in Worker:Audit:IgnoreRounds ({Details})")]
     private static partial void LogIgnored(ILogger logger, string chain, ulong round, string details);
+
+    [LoggerMessage(EventId = 1357, Level = LogLevel.Warning, Message = "The ledger audit of {Chain} could not record its stop at round {Round}; the database is tried again at the next pass and the worker keeps running until then")]
+    private static partial void LogStopNotRecorded(ILogger logger, Exception exception, string chain, ulong round);
 
     [LoggerMessage(EventId = 1356, Level = LogLevel.Critical, Message = "Ledger audit of {Chain} failed at round {Round}: the ledger disagrees at that round and this writer has published up to {Published}; the last round that agreed is {Good}. Fix the cause, then rebuild from a round below {Round} (docs/operations.md). {Reason}")]
     private static partial void LogStop(ILogger logger, string chain, ulong round, ulong published, ulong good, string reason);
