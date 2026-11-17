@@ -51,7 +51,7 @@ public sealed class AlgorandChainAdapter : IChainAdapter, IDisposable
                 var json = await _algodHttp.GetStringAsync(new Uri("genesis", UriKind.Relative), cancellationToken).ConfigureAwait(false);
                 return GenesisDocument.Parse(json);
             }
-            catch (HttpRequestException) when (attempt < GenesisAttempts)
+            catch (HttpRequestException ex) when (attempt < GenesisAttempts && ex is not NodeQuotaExceededException)
             {
                 await Task.Delay(TimeSpan.FromMilliseconds(200 * attempt), cancellationToken).ConfigureAwait(false);
             }

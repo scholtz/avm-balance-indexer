@@ -211,7 +211,7 @@ database holds for that round (absolute, pinned to the round; ARC-200 balances a
 (default 10, one request of 30 to 70 KB each; 1 audits every round and is meant for an own node, see *Daily quota of a public node* below); while it backfills, and during the replay after a partial rebuild, one round in `worker.audit.backfillSampleEvery` (default 1000, at most one request per pass), which is what can catch an
 era-specific bug near the round where it happens. The audit runs after publication: it detects a bad round, it does not keep it from being served. It is one-directional: it reads the accounts the ledger lists for the round, so a wrong effect for an account the ledger did not change is only found at the next round in which the ledger lists that account. A node that does not answer, answers 404 for a round, or sends a document that
 cannot be read is counted as skipped and logged at most every ten minutes; it is never a failure. A node that has no deltas for 20 rounds in a row at the start (Voi, a private node) switches the audit off with one log line.
-A node that answers 403 or 429 (throttled, or its daily quota is used up) pauses the audit for 15 minutes with one warning; it then continues at the round published at that time, the rounds in between are not audited.
+A node that answers 403 (its daily quota is used up) pauses the audit for 15 minutes, one that answers 429 (throttled) for one minute, each with one warning; it then continues at the round published at that time, the rounds in between are not audited.
 
 #### Daily quota of a public node (issue #219)
 
@@ -223,8 +223,8 @@ without counting towards `Indexer:MaxConsecutiveFailures`, so it does not restar
 raise `worker.audit.followSampleEvery`, or set it to 0. A 403 that does not name the quota (a blocked IP, a bad token) is still a failure that stops the worker after the retries.
 
 On a mismatch the worker logs the round, account, token, indexed and ledger amounts (Error), records the stop in the database (`audit_stop`), and, with `worker.audit.stopOnMismatch` (default true), stops with exit code 1 and the line
-*Ledger audit of ... failed at round S ...; this writer has published up to T; the last round that agreed is S - 1*. The stop survives restarts: a recorded, unacknowledged stop makes every worker refuse to index (the same message).
-What to do: take S from the log, find the cause, fix the normalizer with a test for that era, then rebuild from a round below S with the partial rebuild runbook above (the PostgreSQL rewind and a new Cassandra keyspace both release
+*Ledger audit of ... failed at round S ...; this writer has published up to T; the last audited round that agreed is G*. Not every round is audited (sampling, pauses), so the rounds between G and S are not known to be good. The stop survives restarts: a recorded, unacknowledged stop makes every worker refuse to index (the same message).
+What to do: take S from the log, find the cause, fix the normalizer with a test for that era, then rebuild from G or an earlier round with the partial rebuild runbook above (the PostgreSQL rewind and a new Cassandra keyspace both release
 the stop). When you decided that the ledger side is the one that is wrong (a difference of the oracle), set `worker.audit.acknowledgeRound: S` instead: the worker acknowledges it and indexes on; `worker.audit.ignoreRounds: [S]` makes a
 known round only a warning (counted in `avm.audit.ignored_mismatches`). MainNet ships with `stopOnMismatch: false` until TestNet has shown no false alarm for two weeks; the first thing to check after a mismatch there is whether it is real.
 To read the stops: PostgreSQL `SELECT * FROM audit_stop ORDER BY round;`, Cassandra `SELECT * FROM <keyspace>.audit_stop WHERE chain = '<chain>';`.

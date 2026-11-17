@@ -157,7 +157,7 @@ public sealed partial class IndexerWorker(
         {
             throw new InvalidOperationException(
                 $"Ledger audit of {chain.Chain} failed at round {stop.Round}: the ledger disagrees at that round and the writer had published up to {stop.PublishedRound}; "
-                + $"the last round that agreed is {(stop.Round > 0 ? stop.Round - 1 : 0)}. Fix the cause, then rebuild from a round below {stop.Round} (docs/operations.md), "
+                + $"Fix the cause, then rebuild from a round that was audited and agreed (the reason names the last one; docs/operations.md), "
                 + $"or acknowledge the round (worker.audit.acknowledgeRound) when the ledger side is the one that is wrong. {stop.Reason}");
         }
     }
@@ -337,13 +337,6 @@ public sealed partial class IndexerWorker(
     /// A public algod behind a gateway answers 403 (often with an empty body) while it throttles or blocks a client, so 403 is
     /// retried like 429 (a 403 that is really a bad credential or IP block ends the worker after MaxConsecutiveFailures); 400, 401 and 404 mean a wrong URL or token and stay fatal.
     /// </summary>
-    /// <summary>
-    /// The answer of a public gateway whose daily quota is used up: 403 with a text that names the quota (Nodely: "Daily free API quota
-    /// exceeded", https://nodely.io/docs/free/policy). A 403 without that text stays a transient failure that ends the worker when it persists.
-    /// </summary>
-    private static bool IsQuotaExceeded(Exception exception) =>
-        exception is Algorand.ApiException { StatusCode: 403, Response: { } body } && body.Contains("quota", StringComparison.OrdinalIgnoreCase);
-
     private bool IsTransient(Exception exception, CancellationToken stoppingToken) =>
         exception is BlockFetchException or HttpRequestException or TimeoutException or IOException
         || exception is Algorand.ApiException { StatusCode: >= 500 or 403 or 408 or 429 }
@@ -351,7 +344,16 @@ public sealed partial class IndexerWorker(
         || exception is StorageTimeoutException
         || failures.IsTransient(exception);
 
-    [LoggerMessage(EventId = 1318, Level = LogLevel.Warning, Message = "The node of {Chain} answered that its daily request quota is used up (HTTP 403); indexing waits {Backoff} and tries again. Use an own node or a paid plan (Algorand:AlgodUrl), or lower Worker:Audit:FollowSampleEvery, when this happens every day")]
+    /// <summary>
+    /// The answer of a public gateway whose daily quota is used up (Nodely: 403 "Daily free API quota exceeded", https://nodely.io/docs/free/policy).
+    /// The algod client reports it as <see cref="NodeQuotaExceededException"/> for every request; an SDK that read the answer itself reports
+    /// a 403 whose text names the quota. A 403 without that text stays a transient failure that ends the worker when it persists.
+    /// </summary>
+    private static bool IsQuotaExceeded(Exception exception) =>
+        exception is NodeQuotaExceededException or { InnerException: NodeQuotaExceededException }
+        || (exception is Algorand.ApiException { StatusCode: 403, Response: { } body } && body.Contains("quota", StringComparison.OrdinalIgnoreCase));
+
+    [LoggerMessage(EventId = 1318, Level = LogLevel.Warning, Message = "The node of {Chain} answered that its daily request quota is used up (HTTP 403); indexing waits {Backoff} and tries again. Use an own node or a paid plan (Algorand:AlgodUrl), or audit fewer followed rounds (raise Worker:Audit:FollowSampleEvery, 0 = none), when this happens every day")]
     private static partial void LogQuotaExceeded(ILogger logger, string chain, TimeSpan backoff);
 
     [LoggerMessage(EventId = 1300, Level = LogLevel.Information, Message = "Indexer worker started for {Chain}")]

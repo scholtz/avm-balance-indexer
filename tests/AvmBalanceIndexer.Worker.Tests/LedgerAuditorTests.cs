@@ -77,7 +77,7 @@ public sealed class LedgerAuditorTests : IDisposable
 
         var logger = new CapturingLogger();
         var lifetime = new StopSignal();
-        var auditor = new LedgerAuditor(deltas, storage, new ChainContext(ChainId.AlgorandTestnet), health, Options.Create(new WorkerOptions { Audit = audit }), lifetime, logger) { Interval = Tick, ThrottlePause = ThrottlePause };
+        var auditor = new LedgerAuditor(deltas, storage, new ChainContext(ChainId.AlgorandTestnet), health, Options.Create(new WorkerOptions { Audit = audit }), lifetime, logger) { Interval = Tick, ThrottlePause = ThrottlePause, QuotaPause = ThrottlePause };
         auditor.StartAsync(CancellationToken.None).GetAwaiter().GetResult();
         return new Rig { Auditor = auditor, Health = health, Logger = logger, Lifetime = lifetime };
     }
@@ -150,7 +150,7 @@ public sealed class LedgerAuditorTests : IDisposable
         Assert.Contains("indexed 7000", error.Message, StringComparison.Ordinal);
         Assert.Contains("ledger 7001", error.Message, StringComparison.Ordinal);
         var critical = Assert.Single(rig.Logger.Entries, static e => e.Level == LogLevel.Critical);
-        Assert.Contains("the last round that agreed is 3", critical.Message, StringComparison.Ordinal);
+        Assert.Contains("the last audited round that agreed is 3", critical.Message, StringComparison.Ordinal);
         Assert.Contains("published up to 5", critical.Message, StringComparison.Ordinal);
     }
 
@@ -330,7 +330,8 @@ public sealed class LedgerAuditorTests : IDisposable
         Assert.Contains("the ledger audit pauses", warning.Message, StringComparison.Ordinal); // an expected answer of a public node: one line
 
         // After the pause it continues with what is published then; the refused round is not asked for again.
-        await Task.Delay(ThrottlePause);
+        await UntilAsync(() => rig.Logger.Entries.Any(static e => e.Level == LogLevel.Information && e.Message.Contains("resumes", StringComparison.Ordinal)));
+        await Task.Delay(50); // the pass that resumed has read the published round (3)
         await FinishTheScenarioAsync(storage);
         await UntilAsync(() => rig.Health.LastAuditedRound == (long)Scenario.LastRound);
 

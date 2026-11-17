@@ -36,7 +36,11 @@ data:
   {{- fail (printf "worker.audit.backfillSampleEvery %v must be a whole number, 0 or more" .Values.worker.audit.backfillSampleEvery) }}
   {{- end }}
   Worker__Audit__BackfillSampleEvery: {{ int64 $sample | quote }}
-  {{- $follow := float64 (default 0 .Values.worker.audit.followSampleEvery) }}
+  {{- /* Absent (values kept from a release before this setting) means the default of the application, not 0, which would switch the audit off at the tip. */}}
+  {{- $follow := 10.0 }}
+  {{- if not (kindIs "invalid" .Values.worker.audit.followSampleEvery) }}
+  {{- $follow = float64 .Values.worker.audit.followSampleEvery }}
+  {{- end }}
   {{- if or (lt $follow 0.0) (ne $follow (floor $follow)) }}
   {{- fail (printf "worker.audit.followSampleEvery %v must be a whole number, 0 or more" .Values.worker.audit.followSampleEvery) }}
   {{- end }}

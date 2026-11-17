@@ -34,10 +34,9 @@ public sealed class AuditOptions
     public int IntervalSeconds { get; set; } = 10;
 
     /// <summary>
-    /// While following the tip one round in this many is audited (one request of 30 to 70 KB each); 1 audits every round, 0 none.
+    /// While following the tip one round in this many is audited (one request of 30 to 70 KB each); 1 audits every round, 0 (or less) none.
     /// The default fits the daily quota of a public node next to the indexing itself; with an own node use 1.
     /// </summary>
-    [System.ComponentModel.DataAnnotations.Range(0, int.MaxValue)]
     public int FollowSampleEvery { get; set; } = 10;
 
     /// <summary>Most rounds audited in one look while following the tip (one request per round).</summary>

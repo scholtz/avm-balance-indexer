@@ -164,6 +164,7 @@ jobs:
           t | grep -q 'Worker__Audit__FollowSampleEvery: "10"'
           t --set worker.audit.followSampleEvery=1 | grep -q 'Worker__Audit__FollowSampleEvery: "1"'
           t --set worker.audit.followSampleEvery=0 | grep -q 'Worker__Audit__FollowSampleEvery: "0"'
+          t --set worker.audit.followSampleEvery=null | grep -q 'Worker__Audit__FollowSampleEvery: "10"'
           if t | grep -q 'Worker__Audit__AcknowledgeRound'; then echo "no acknowledged round by default"; exit 1; fi
           if t | grep -q 'Worker__Audit__IgnoreRounds'; then echo "no ignored rounds by default"; exit 1; fi
           helm template ci deploy/helm/avm-balance-indexer -f deploy/helm/values/prod-algorand.yaml --set cassandra.embedded.node=ci-node | grep -q 'Worker__Audit__StopOnMismatch: "false"'
