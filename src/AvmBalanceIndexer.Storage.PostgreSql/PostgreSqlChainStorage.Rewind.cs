@@ -10,14 +10,15 @@ public sealed partial class PostgreSqlChainStorage
     /// <summary>
     /// Rewinds the database to <c>Request.Round</c> in one transaction (ADR 0021): readers see the old state until the commit, then the
     /// rewound one. The advisory lock of the round writer is taken (so a writer that is still running waits, and then fails against the new
-    /// cursor), and the request id is recorded in the same transaction, so the request runs once.
+    /// cursor), and the request id is recorded in the same transaction, so the request runs once. The schema must exist (the worker applies
+    /// it before it asks for the lease, and the rewind runs inside a writer term).
     /// </summary>
     public async Task<PartialRebuildResult> RunAsync(ReadOnlyMemory<byte> blockHashAtRound, IProgress<PartialRebuildProgress>? progress, CancellationToken cancellationToken)
     {
         var request = Request ?? throw new InvalidOperationException("No rewind is configured (Storage:PostgreSql:RewindTo).");
-        if (blockHashAtRound.IsEmpty)
+        if (blockHashAtRound.Length != 32)
         {
-            throw new ArgumentException("The hash of the block at the rewind round is required.", nameof(blockHashAtRound));
+            throw new ArgumentException("The hash of the block at the rewind round (32 bytes) is required.", nameof(blockHashAtRound));
         }
 
         var round = unchecked((long)request.Round);
@@ -61,12 +62,15 @@ public sealed partial class PostgreSqlChainStorage
             (deleted, holdings) = await DeleteAfterRoundAsync(connection, transaction, request.Round, progress, cancellationToken).ConfigureAwait(false);
         }
 
-        await RewindAsync(
-            connection,
-            transaction,
-            "UPDATE chain_status SET indexed_round = @r, indexed_block_hash = @hash, target_round = NULL, status = 'Backfilling', updated_at = now() WHERE chain = @chain",
-            [("r", round), ("hash", blockHashAtRound.ToArray()), ("chain", _chain)],
-            cancellationToken).ConfigureAwait(false);
+        if (cursor.Value.Round > request.Round)
+        {
+            await RewindAsync(
+                connection,
+                transaction,
+                "UPDATE chain_status SET indexed_round = @r, indexed_block_hash = @hash, target_round = NULL, status = 'Backfilling', updated_at = now() WHERE chain = @chain",
+                [("r", round), ("hash", blockHashAtRound.ToArray()), ("chain", _chain)],
+                cancellationToken).ConfigureAwait(false);
+        }
         await RewindAsync(
             connection,
             transaction,
@@ -97,6 +101,9 @@ public sealed partial class PostgreSqlChainStorage
             parameters,
             cancellationToken).ConfigureAwait(false);
         await RewindAsync(connection, transaction, "CREATE UNIQUE INDEX ON rewind_affected (account, token_kind, token_id)", [], cancellationToken).ConfigureAwait(false);
+
+        // Temporary tables are never analyzed by autovacuum; without statistics the planner would treat them as tiny.
+        await RewindAsync(connection, transaction, "ANALYZE rewind_affected", [], cancellationToken).ConfigureAwait(false);
         progress?.Report(new PartialRebuildProgress("affected pairs", 0, 1, RewindSteps));
 
         var deleted = await RewindAsync(
@@ -122,11 +129,12 @@ public sealed partial class PostgreSqlChainStorage
                    e.account, e.token_kind, e.token_id, e.balance_after AS amount, (e.effect_type <> 'AssetOptOut') AS opted_in, e.round
             FROM effects_by_account_token e
             JOIN rewind_affected a ON e.account = a.account AND e.token_kind = a.token_kind AND e.token_id = a.token_id
-            ORDER BY e.account, e.token_kind, e.token_id, e.round DESC, e.ordinal DESC, e.intra_round_order DESC
+            ORDER BY e.account, e.token_kind, e.token_id, e.round DESC, e.intra_round_order DESC, e.ordinal DESC
             """,
             [],
             cancellationToken).ConfigureAwait(false);
         await RewindAsync(connection, transaction, "CREATE UNIQUE INDEX ON rewind_newest (account, token_kind, token_id)", [], cancellationToken).ConfigureAwait(false);
+        await RewindAsync(connection, transaction, "ANALYZE rewind_newest", [], cancellationToken).ConfigureAwait(false);
 
         long holdings = 0;
         foreach (var table in (string[])["holdings_by_account", "holdings_by_token"])

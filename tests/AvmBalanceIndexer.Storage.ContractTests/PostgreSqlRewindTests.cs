@@ -190,9 +190,11 @@ public class PostgreSqlRewindTests(PostgresFixture postgres)
         var full = await IndexedAsync(Scenario.LastRound);
         var straight = await IndexedAsync(Scenario.LastRound);
 
+        var stateBefore = (await full.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!.State;
         var result = await WithRewind(full, "fix-1", Scenario.LastRound).RunAsync(await HashOfAsync(straight, Scenario.LastRound), null, CancellationToken.None);
 
         Assert.Equal((PartialRebuildOutcome.Done, 0L), (result.Outcome, result.EffectsCopied));
+        Assert.Equal(stateBefore, (await full.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!.State);
         await AssertSameAsync(full, straight, Scenario.LastRound);
     }
 
@@ -206,6 +208,16 @@ public class PostgreSqlRewindTests(PostgresFixture postgres)
         Assert.Equal(PartialRebuildOutcome.Refused, result.Outcome);
         var status = await full.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None);
         Assert.NotEqual(new byte[32], status!.IndexedBlockHash.ToArray());
+    }
+
+    [Fact]
+    public async Task A_Block_Hash_Of_The_Wrong_Length_Is_Rejected_Before_Anything_Is_Touched()
+    {
+        var full = await IndexedAsync(Scenario.LastRound);
+
+        await Assert.ThrowsAsync<ArgumentException>(() => WithRewind(full, "fix-1", 2).RunAsync(new byte[5], null, CancellationToken.None));
+
+        Assert.Equal(Scenario.LastRound, (await full.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!.IndexedRound);
     }
 
     [Fact]
