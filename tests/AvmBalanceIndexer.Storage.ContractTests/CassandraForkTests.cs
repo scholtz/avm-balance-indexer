@@ -110,6 +110,35 @@ public class CassandraForkTests(CassandraFixture cassandra)
     }
 
     [Fact]
+    public async Task A_Source_Holding_Another_Block_Hash_At_The_Round_Is_Refused()
+    {
+        var full = await IndexedAsync(3);
+        var target = await TargetAsync(full, 3);
+
+        var result = await ForkAsync(target, new byte[32]);
+
+        Assert.Equal(PartialRebuildOutcome.Refused, result.Outcome);
+        Assert.Null(await target.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task A_Bucket_Without_Effects_Stops_The_Copy_Before_Anything_Is_Published()
+    {
+        var full = await IndexedAsync(Scenario.LastRound);
+        var reference = await IndexedAsync(3);
+        var target = await TargetAsync(full, 3);
+        var session = await cassandra.SessionOfAsync(target);
+        await session.ExecuteAsync(new SimpleStatement(
+            $"INSERT INTO {cassandra.KeyspaceOf(target)}.effect_buckets_by_account_token (account, token_kind, token_id, bucket) VALUES (?, 'algo', 0, 7)",
+            TestChain.Account(9).ToArray()));
+
+        var hash = await HashOfAsync(reference, 3);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => ForkAsync(target, hash));
+
+        Assert.Null(await target.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task A_Second_Run_Is_Already_Done_And_Changes_Nothing_And_The_Source_Is_Never_Touched()
     {
         var full = await IndexedAsync(Scenario.LastRound);

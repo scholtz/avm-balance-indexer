@@ -45,7 +45,14 @@ public sealed partial class CassandraChainStorage
             return Refused($"{source} is not a keyspace of this indexer (no chain_status or effect tables)");
         }
 
-        var statuses = (await ExecuteAsync($"SELECT chain, indexed_round FROM {source}.chain_status", cancellationToken).ConfigureAwait(false)).ToArray();
+        // The token ranges below are Murmur3 tokens; another partitioner would make them select the wrong partitions.
+        var partitioner = (await session.ExecuteAsync(new SimpleStatement("SELECT partitioner FROM system.local")).WaitAsync(cancellationToken).ConfigureAwait(false)).First().GetValue<string>("partitioner");
+        if (!partitioner.EndsWith("Murmur3Partitioner", StringComparison.Ordinal))
+        {
+            return Refused($"the cluster uses the partitioner {partitioner}; the copy needs Murmur3");
+        }
+
+        var statuses = (await ExecuteAsync($"SELECT chain, indexed_round, indexed_block_hash FROM {source}.chain_status", cancellationToken).ConfigureAwait(false)).ToArray();
         if (statuses.Length != 1 || !string.Equals(statuses[0].GetValue<string>("chain"), _chain, StringComparison.Ordinal))
         {
             return Refused($"{source} does not hold exactly the chain {_chain}");
@@ -55,6 +62,12 @@ public sealed partial class CassandraChainStorage
         if (sourceRound < round)
         {
             return Refused($"{source} is at round {sourceRound}, before the requested round {request.Round}");
+        }
+
+        // At the source's own round the hash it holds must be the one that is published for the new keyspace.
+        if (sourceRound == round && !statuses[0].GetValue<byte[]>("indexed_block_hash").AsSpan().SequenceEqual(blockHashAtRound.Span))
+        {
+            return Refused($"{source} holds another block hash at its round {request.Round} than the one given");
         }
 
         // Carried out = a published round AND the stored request matches. A keyspace that holds something else is refused, never continued:
@@ -303,9 +316,10 @@ public sealed partial class CassandraChainStorage
                         kind,
                         id,
                         row.GetValue<int>("bucket")).ConfigureAwait(false)).FirstOrDefault();
+                    // A bucket that names no effect is an inconsistent keyspace: skipping it would publish a copy that lacks a holding.
                     if (effect is null)
                     {
-                        return;
+                        throw new InvalidOperationException($"The bucket {row.GetValue<int>("bucket")} of {kind}/{id} holds no effect; the copy is stopped before anything is published.");
                     }
 
                     await UpsertHoldingAsync(
