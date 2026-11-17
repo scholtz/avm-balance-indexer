@@ -9,7 +9,7 @@ namespace AvmBalanceIndexer.Storage.PostgreSql;
 /// account effects, range-partitioned token effects, array-parameter bulk statements, and one transaction per round
 /// that writes the effects and advances the publication cursor atomically.
 /// </summary>
-public sealed partial class PostgreSqlChainStorage : IChainStorage
+public sealed partial class PostgreSqlChainStorage : IChainStorage, IPartialRebuild
 {
     private const int MaxAccountPartitions = 1024;
 
@@ -20,8 +20,12 @@ public sealed partial class PostgreSqlChainStorage : IChainStorage
     private readonly int _readTimeoutMilliseconds;
     private readonly TimeSpan _leaseHeartbeat;
 
-    public PostgreSqlChainStorage(NpgsqlDataSource dataSource, ChainContext chain, int accountHashPartitions, TimeSpan? readTimeout = null, TimeSpan? leaseHeartbeat = null)
+    /// <inheritdoc />
+    public PartialRebuildRequest? Request { get; }
+
+    public PostgreSqlChainStorage(NpgsqlDataSource dataSource, ChainContext chain, int accountHashPartitions, TimeSpan? readTimeout = null, TimeSpan? leaseHeartbeat = null, PartialRebuildRequest? rewind = null)
     {
+        Request = rewind;
         _leaseHeartbeat = leaseHeartbeat is { } beat && beat > TimeSpan.Zero
             ? beat
             : leaseHeartbeat is null ? TimeSpan.FromSeconds(5) : throw new ArgumentOutOfRangeException(nameof(leaseHeartbeat), "The lease heartbeat must be positive.");
