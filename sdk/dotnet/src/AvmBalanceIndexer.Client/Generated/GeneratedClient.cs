@@ -958,7 +958,7 @@ namespace AvmBalanceIndexer.Client.Generated
         /// Start an asynchronous export of every holder of a token at a round
         /// </summary>
         /// <remarks>
-        /// Accepted at once; poll the scan and read the result pages. The body is optional: { "round": 123, "includeZero": false }.
+        /// Accepted at once; poll the scan and read the result pages. The body is optional: { "round": 123, "includeZero": false }. Answered with 503 while scans are paused because this deployment is being rebuilt; existing scans stay readable.
         /// </remarks>
         /// <param name="chain">The chain this deployment serves.</param>
         /// <param name="kind">Token kind: algo (native), asa (Algorand Standard Asset, also ARC-20) or arc200 (application token).</param>

@@ -37,7 +37,7 @@ public static class ScanEndpoints
             .WithName("CreateHolderScan")
             .WithTags("Scans")
             .WithSummary("Start an asynchronous export of every holder of a token at a round")
-            .WithDescription("Accepted at once; poll the scan and read the result pages. The body is optional: { \"round\": 123, \"includeZero\": false }.")
+            .WithDescription("Accepted at once; poll the scan and read the result pages. The body is optional: { \"round\": 123, \"includeZero\": false }. Answered with 503 while scans are paused because this deployment is being rebuilt; existing scans stay readable.")
             .Accepts<ScanRequest>(true, "application/json")
             .Produces<ScanResponse>(StatusCodes.Status202Accepted)
             .WithErrors(StatusCodes.Status400BadRequest, StatusCodes.Status404NotFound)
@@ -76,9 +76,16 @@ public static class ScanEndpoints
         IChainStorage storage,
         IScanJobStore jobs,
         IOptions<ScanOptions> options,
+        ApiOptions api,
         TimeProvider clock,
         CancellationToken cancellationToken)
     {
+        if (!api.ScansEnabled)
+        {
+            http.Response.Headers.RetryAfter = "600";
+            return Results.Json(new { error = "Scans are paused while this deployment is rebuilt; try again later." }, statusCode: StatusCodes.Status503ServiceUnavailable);
+        }
+
         if (!ReadEndpoints.TryToken(kind, tokenId, out var token, out var error))
         {
             return error!;

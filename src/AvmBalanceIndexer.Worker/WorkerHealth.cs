@@ -29,6 +29,8 @@ public sealed class WorkerHealth : IDisposable
     private long _leasesLost;
     private long _transientFailures;
     private long _sampleFailures;
+    private readonly object _rebuildGate = new();
+    private (int Done, int Total) _rebuild;
     private Func<long> _roundsCommitted = static () => 0;
     private ChainStatus? _chainStatus;
     private Func<DateTimeOffset> _now = static () => DateTimeOffset.UtcNow;
@@ -43,6 +45,8 @@ public sealed class WorkerHealth : IDisposable
         _meter.CreateObservableCounter("avm.indexer.status_sample_failures", () => Interlocked.Read(ref _sampleFailures), description: "Failed reads of the published status; while they rise the avm.indexer gauges are stale");
         _meter.CreateObservableCounter("avm.worker.transient_failures", () => Interlocked.Read(ref _transientFailures), description: "Retried indexing failures");
         _meter.CreateObservableCounter("avm.worker.rounds_committed", () => _roundsCommitted(), description: "Rounds this process committed");
+        _meter.CreateObservableGauge("avm.rebuild.ranges_done", () => { lock (_rebuildGate) { return _rebuild.Done; } }, description: "Ranges of the stage of a partial rebuild that is running that are finished (ADR 0021)");
+        _meter.CreateObservableGauge("avm.rebuild.ranges_total", () => { lock (_rebuildGate) { return _rebuild.Total; } }, description: "Ranges of the stage of a partial rebuild that is running; 0 when none runs");
 
         // What the database says, sampled by StatusSampler: the same numbers the API reports, as time series.
         _meter.CreateObservableGauge("avm.indexer.indexed_round", () => Measure(static s => (long)s.IndexedRound), description: "Published round");
@@ -85,6 +89,18 @@ public sealed class WorkerHealth : IDisposable
     }
 
     public void BecameStandby() => State = WorkerState.Standby;
+
+    /// <summary>Progress of a partial rebuild; both zero when none runs.</summary>
+    /// <param name="done">Ranges of the current stage that are finished.</param>
+    /// <param name="total">Ranges of the current stage.</param>
+    public void ReportRebuild(int done, int total)
+    {
+        // Both numbers change together, so a reader never sees more ranges done than there are.
+        lock (_rebuildGate)
+        {
+            _rebuild = (done, total);
+        }
+    }
 
     public void BecameLeader()
     {

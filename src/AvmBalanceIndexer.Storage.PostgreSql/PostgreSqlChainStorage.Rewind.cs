@@ -7,6 +7,22 @@ public sealed partial class PostgreSqlChainStorage
 {
     private const int RewindSteps = 8;
 
+    public async Task<bool> IsCarriedOutAsync(CancellationToken cancellationToken)
+    {
+        if (Request is not { } request)
+        {
+            return false;
+        }
+
+        await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = new NpgsqlCommand("SELECT 1 FROM maintenance_request WHERE request_id = @id", connection);
+        command.Parameters.AddWithValue("id", request.Source);
+        return await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is not null;
+    }
+
+    /// <summary>The rewind is in place, so there is no other database to check.</summary>
+    public Task<SourceCursor?> ReadSourceCursorAsync(CancellationToken cancellationToken) => Task.FromResult<SourceCursor?>(null);
+
     /// <summary>
     /// Rewinds the database to <c>Request.Round</c> in one transaction (ADR 0021): readers see the old state until the commit, then the
     /// rewound one. The advisory lock of the round writer is taken (so a writer that is still running waits, and then fails against the new

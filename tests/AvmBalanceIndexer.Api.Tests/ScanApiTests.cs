@@ -43,7 +43,7 @@ public sealed class ScanApiTests : IAsyncLifetime
         return Task.CompletedTask;
     }
 
-    private void Start(int maxActive, InMemoryChainStorage? storage = null, string pathBase = "", IScanJobStore? scanStore = null)
+    private void Start(int maxActive, InMemoryChainStorage? storage = null, string pathBase = "", IScanJobStore? scanStore = null, bool scansEnabled = true)
     {
         storage ??= _storage;
         _client?.Dispose();
@@ -54,6 +54,7 @@ public sealed class ScanApiTests : IAsyncLifetime
             builder.UseSetting("Storage:Provider", "PostgreSql");
             builder.UseSetting("Storage:PostgreSql:ConnectionString", "Host=localhost;Database=unused;Username=u;Password=p");
             builder.UseSetting("Api:PathBase", pathBase);
+            builder.UseSetting("Api:ScansEnabled", scansEnabled ? "true" : "false");
             builder.UseSetting("Scans:MaxActive", maxActive.ToString(System.Globalization.CultureInfo.InvariantCulture));
             builder.ConfigureServices(services =>
             {
@@ -122,6 +123,20 @@ public sealed class ScanApiTests : IAsyncLifetime
     }
 
     private static Holding Row(int index) => new(TestChain.Account(300 + index), TokenKey.Native, Amount.From((ulong)index + 1), true, 2);
+
+    [Fact]
+    public async Task New_Scans_Are_Refused_With_503_While_Scans_Are_Paused_And_The_Status_Says_So()
+    {
+        Start(5, scansEnabled: false);
+
+        var (response, body) = await PostAsync(TokenScans);
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.Contains("paused", body.GetProperty("error").GetString(), StringComparison.Ordinal);
+        Assert.True(response.Headers.RetryAfter is not null);
+        var (_, status) = await GetAsync("/v1/algorand-testnet/status");
+        Assert.False(status.GetProperty("historicalQueries").GetProperty("asynchronousScans").GetBoolean());
+    }
 
     [Fact]
     public async Task A_Page_Of_A_Scan_That_Finished_While_It_Was_Read_Is_Reported_Complete()

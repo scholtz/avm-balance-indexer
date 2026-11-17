@@ -53,6 +53,18 @@ internal sealed partial class CassandraOptionsValidator : IValidateOptions<Stora
     /// </summary>
     internal static IEnumerable<string> RetiredKeyspaceErrors(CassandraOptions settings)
     {
+        if (!string.IsNullOrEmpty(settings.ApiKeyspace))
+        {
+            if (!IsValidIdentifier(settings.ApiKeyspace))
+            {
+                yield return $"Storage:Cassandra:ApiKeyspace holds '{settings.ApiKeyspace}', which is not a keyspace name (a letter, then letters, digits and underscores, at most 48 characters).";
+            }
+            else if ((settings.RetiredKeyspaces ?? []).Any(retired => string.Equals(retired, settings.ApiKeyspace, StringComparison.OrdinalIgnoreCase)))
+            {
+                yield return $"Storage:Cassandra:RetiredKeyspaces holds '{settings.ApiKeyspace}', the keyspace the API reads (Storage:Cassandra:ApiKeyspace); it would drop the data that is served.";
+            }
+        }
+
         foreach (var retired in settings.RetiredKeyspaces ?? [])
         {
             if (!IsValidIdentifier(retired))

@@ -159,8 +159,13 @@ jobs:
           t | grep -q 'Storage__Cassandra__RetiredKeyspaceQuietMinutes: "60"'
           out=$(t --set storage.cassandra.keyspace=avm_new --set "storage.cassandra.retiredKeyspaces={avm_old_1,avm_old_2}" --set cassandra.embedded.autoSnapshotTtl=7d --set storage.cassandra.retiredKeyspaceQuietMinutes=240)
           echo "$out" | grep -q 'Storage__Cassandra__RetiredKeyspaceQuietMinutes: "240"'
-          echo "$out" | grep -q 'Storage__Cassandra__RetiredKeyspaces__0: "avm_old_1"'
-          echo "$out" | grep -q 'Storage__Cassandra__RetiredKeyspaces__1: "avm_old_2"'
+          # The worker-only settings are env entries of the worker deployment (name and value on two lines), not part of the shared ConfigMap.
+          worker() { t -s templates/worker-deployment.yaml "$@"; }
+          api() { t -s templates/api-deployment.yaml "$@"; }
+          has() { grep -A1 "name: $2\$" <<< "$1" | grep -q "value: \"$3\""; } # output, name, value
+          has "$(worker --set storage.cassandra.keyspace=avm_new --set "storage.cassandra.retiredKeyspaces={avm_old_1,avm_old_2}")" Storage__Cassandra__RetiredKeyspaces__0 avm_old_1
+          has "$(worker --set storage.cassandra.keyspace=avm_new --set "storage.cassandra.retiredKeyspaces={avm_old_1,avm_old_2}")" Storage__Cassandra__RetiredKeyspaces__1 avm_old_2
+          if api --set storage.cassandra.keyspace=avm_new --set "storage.cassandra.retiredKeyspaces={avm_old_1}" | grep -q RetiredKeyspaces; then echo "the API must not get the retired keyspaces"; exit 1; fi
           echo "$out" | grep -q 'auto_snapshot_ttl: 7d/'
           echo "$out" | grep -q 'exec docker-entrypoint.sh cassandra -f'
           # A missing setting must never keep Cassandra from starting: the check only warns, the exec is unconditional.
@@ -176,6 +181,37 @@ jobs:
           refused 'storage.cassandra.keyspace' --set storage.cassandra.keyspace=1bad
           refused 'storage.cassandra.keyspace' --set storage.cassandra.keyspace=bad-name
           refused 'storage.cassandra.localDatacenter' --set "storage.cassandra.localDatacenter=dc'1"
+          # Partial rebuild (ADR 0021): forkFrom reaches the worker only, the API keeps reading apiKeyspace and refuses new scans meanwhile.
+          fork=(--set storage.cassandra.keyspace=avm_new --set storage.cassandra.forkFrom.keyspace=avm_old --set storage.cassandra.forkFrom.round=1234567 --set storage.cassandra.forkFrom.into=avm_new)
+          w="$(worker "${fork[@]}" --set storage.cassandra.apiKeyspace=avm_old)"
+          has "$w" Storage__Cassandra__ForkFrom__Keyspace avm_old
+          has "$w" Storage__Cassandra__ForkFrom__Round 1234567
+          has "$w" Storage__Cassandra__ForkFrom__Into avm_new
+          has "$w" Storage__Cassandra__ApiKeyspace avm_old
+          a="$(api "${fork[@]}" --set storage.cassandra.apiKeyspace=avm_old)"
+          has "$a" Storage__Cassandra__Keyspace avm_old
+          has "$a" Api__ScansEnabled false
+          if grep -q ForkFrom <<< "$a"; then echo "the API must not get forkFrom"; exit 1; fi
+          if t "${fork[@]}" | grep -A3 'name: Api__ScansEnabled' | grep -q false; then echo "scans must stay on without apiKeyspace"; exit 1; fi
+          if t | grep -q 'ForkFrom'; then echo "no forkFrom by default"; exit 1; fi
+          t --set storage.cassandra.forkFrom=null > /dev/null # a request that is removed from the values is not an error
+          refused 'forkFrom.keyspace' --set storage.cassandra.keyspace=avm_new --set storage.cassandra.forkFrom.keyspace=AVM_NEW --set storage.cassandra.forkFrom.round=5 --set storage.cassandra.forkFrom.into=avm_new
+          refused 'forkFrom.keyspace' --set storage.cassandra.keyspace=avm_new --set storage.cassandra.forkFrom.keyspace=system_auth --set storage.cassandra.forkFrom.round=5 --set storage.cassandra.forkFrom.into=avm_new
+          refused 'forkFrom.keyspace' --set storage.cassandra.keyspace=avm_new --set storage.cassandra.forkFrom.keyspace=bad-name --set storage.cassandra.forkFrom.round=5 --set storage.cassandra.forkFrom.into=avm_new
+          refused 'retiredKeyspaces' --set storage.cassandra.keyspace=avm_new --set storage.cassandra.forkFrom.keyspace=avm_old --set storage.cassandra.forkFrom.round=5 --set storage.cassandra.forkFrom.into=avm_new --set "storage.cassandra.retiredKeyspaces={avm_old}"
+          for round in 0 -3 1.5; do
+            refused 'forkFrom.round' --set storage.cassandra.keyspace=avm_new --set storage.cassandra.forkFrom.keyspace=avm_old --set "storage.cassandra.forkFrom.round=$round" --set storage.cassandra.forkFrom.into=avm_new
+          done
+          refused 'forkFrom.into' --set storage.cassandra.keyspace=avm_new --set storage.cassandra.forkFrom.keyspace=avm_old --set storage.cassandra.forkFrom.round=5
+          refused 'forkFrom.into' --set storage.cassandra.keyspace=avm_new --set storage.cassandra.forkFrom.keyspace=avm_old --set storage.cassandra.forkFrom.round=5 --set storage.cassandra.forkFrom.into=avm_other
+          refused 'the keyspace the API reads' --set storage.cassandra.keyspace=avm_new --set storage.cassandra.apiKeyspace=avm_old --set "storage.cassandra.retiredKeyspaces={avm_old}"
+          refused 'apiKeyspace' --set storage.cassandra.apiKeyspace=bad-name
+          for provider_case in forkFrom apiKeyspace; do
+            if [ "$provider_case" = forkFrom ]; then extra=(--set storage.cassandra.forkFrom.keyspace=avm_old --set storage.cassandra.forkFrom.round=5 --set storage.cassandra.forkFrom.into=avm_indexer); else extra=(--set storage.cassandra.apiKeyspace=avm_old); fi
+            if helm template ci deploy/helm/avm-balance-indexer --set storage.provider=PostgreSql --set storage.postgreSql.existingSecret=x "${extra[@]}" > /dev/null 2>&1; then
+              echo "$provider_case for a PostgreSQL release must fail the render"; exit 1
+            fi
+          done
           # A PostgreSQL release never reads the Cassandra settings, so they are not checked there.
           helm template ci deploy/helm/avm-balance-indexer --set storage.provider=PostgreSql --set storage.postgreSql.existingSecret=x --set storage.cassandra.localDatacenter= > /dev/null
           # What the worker's options validation refuses must already fail the render: a pod that cannot start stops indexing.

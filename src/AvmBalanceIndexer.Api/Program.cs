@@ -88,6 +88,7 @@ builder.Services.AddAvmTelemetry(builder.Configuration, "avm-api", TelemetryExte
 builder.Services.AddOptions<ScanOptions>().Bind(builder.Configuration.GetSection(ScanOptions.SectionName)).ValidateDataAnnotations().ValidateOnStart();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<IndexedByLookup>();
+builder.Services.AddSingleton(api);
 builder.Services.AddExceptionHandler<ApiExceptionHandler>();
 builder.Services.AddProblemDetails();
 
@@ -241,7 +242,7 @@ var historicalQueries = new HistoricalQueriesInfo(
     Math.Min(
         api.RequestTimeoutSeconds,
         storageSettings.Provider == StorageProvider.Cassandra ? storageSettings.Cassandra.ReadTimeoutSeconds : storageSettings.PostgreSql.ReadTimeoutSeconds),
-    true,
+    api.ScansEnabled,
     app.Services.GetRequiredService<IOptions<ScanOptions>>().Value.MaxActive);
 
 v1.MapGet(

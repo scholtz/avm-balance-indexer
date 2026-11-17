@@ -699,7 +699,7 @@
           "Scans"
         ],
         "summary": "Start an asynchronous export of every holder of a token at a round",
-        "description": "Accepted at once; poll the scan and read the result pages. The body is optional: { \u0022round\u0022: 123, \u0022includeZero\u0022: false }.",
+        "description": "Accepted at once; poll the scan and read the result pages. The body is optional: { \u0022round\u0022: 123, \u0022includeZero\u0022: false }. Answered with 503 while scans are paused because this deployment is being rebuilt; existing scans stay readable.",
         "operationId": "CreateHolderScan",
         "parameters": [
           {

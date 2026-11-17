@@ -339,3 +339,29 @@ jobs:
           if has 'still in use'; then
             echo "::notice::Retired keyspaces of $RELEASE are not dropped yet: they must be unused and untouched for the quiet period first (the worker tries again every minute)"
           fi
+
+      # Partial rebuild (docs/adr/0021): when the values name a keyspace to fill from, the worker copies it before it indexes, which can take
+      # hours. This step only prints what the worker log says; the copy is not waited for. A refused request stops the worker (exit code 1):
+      # its reason is in the fatal log line, and is raised as an error annotation (not a failed job: the release is deployed).
+      - name: Partial rebuild
+        continue-on-error: true
+        env:
+          RELEASE: ${{ inputs.release }}
+        run: |
+          set -o pipefail
+          source="$(helm get values "$RELEASE" --namespace "$NAMESPACE" --all -o json | jq -r '.storage.cassandra.forkFrom.keyspace // ""')"
+          if [ -z "$source" ]; then echo "No partial rebuild is requested for $RELEASE"; exit 0; fi
+          echo "Partial rebuild of $RELEASE from $source"
+          if ! logs="$(kubectl -n "$NAMESPACE" logs -l "app.kubernetes.io/instance=${RELEASE},app.kubernetes.io/component=worker" --tail=3000 --prefix --max-log-requests 10 2>/dev/null)"; then
+            echo "::warning::The worker logs could not be read; check there what happened to the partial rebuild from $source"; exit 0
+          fi
+          # A worker that stopped on a refusal is restarted: its reason is in the log of the previous container.
+          logs="$logs"$'\n'"$(kubectl -n "$NAMESPACE" logs -l "app.kubernetes.io/instance=${RELEASE},app.kubernetes.io/component=worker" --previous --tail=3000 --prefix --max-log-requests 10 2>/dev/null || true)"
+          lines="$(grep 'Partial rebuild of' <<< "$logs" | tail -n 5 || true)"
+          [ -n "$lines" ] && cat <<< "$lines"
+          if refused="$(grep -E 'The partial rebuild of .* is refused' <<< "$logs" | tail -n 1)" && [ -n "$refused" ]; then
+            echo "::error::The partial rebuild of $RELEASE from $source was refused: ${refused}"; exit 1
+          fi
+          if [ -z "$lines" ]; then
+            echo "::notice::The workers of $RELEASE have not reported on the partial rebuild yet; the copy runs before indexing starts and logs its progress every 30 seconds"
+          fi

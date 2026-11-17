@@ -56,6 +56,24 @@ public sealed partial class RoundIndexer(
     /// <summary>Total rounds this instance has committed; lets a supervisor tell progress from a stall without reading storage.</summary>
     public long RoundsCommitted => Interlocked.Read(ref _roundsCommitted);
 
+    /// <summary>The hash of the block of a round, fetched like any block of the chain (a partial rebuild is checked against it).</summary>
+    /// <param name="round">The round.</param>
+    /// <param name="cancellationToken">Cancels the fetch.</param>
+    public async Task<byte[]> GetBlockHashAsync(ulong round, CancellationToken cancellationToken) =>
+        (await adapter.FetchBlockAsync(round, cancellationToken).ConfigureAwait(false)).Hash;
+
+    /// <summary>
+    /// Forgets what this instance learned from the database before it was changed underneath it (a partial rebuild moved it back to an
+    /// earlier round): the ARC-200 applications it has seen, and the metadata lookups under way. The balances are read per run.
+    /// </summary>
+    public void Reset()
+    {
+        _knownArc200.Clear();
+        _arc200Pending.Clear();
+        _arc200EmptyAnswers.Clear();
+        _arc200LookupsPausedUntil = default;
+    }
+
     /// <summary>
     /// Indexes from the stored cursor onwards.
     /// </summary>

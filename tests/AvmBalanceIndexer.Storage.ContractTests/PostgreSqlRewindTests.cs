@@ -111,7 +111,10 @@ public class PostgreSqlRewindTests(PostgresFixture postgres)
         var reference = await IndexedAsync(3);
         var hash = await HashOfAsync(reference, 3);
         var rewind = WithRewind(full, "fix-1", 3);
+        Assert.False(await rewind.IsCarriedOutAsync(CancellationToken.None));
         Assert.Equal(PartialRebuildOutcome.Done, (await rewind.RunAsync(hash, null, CancellationToken.None)).Outcome);
+        Assert.True(await rewind.IsCarriedOutAsync(CancellationToken.None));
+        Assert.False(await WithRewind(full, "fix-2", 3).IsCarriedOutAsync(CancellationToken.None));
         await Indexer(full).RunAsync(Scenario.LastRound, CancellationToken.None);
 
         var again = await rewind.RunAsync(hash, null, CancellationToken.None);

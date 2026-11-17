@@ -75,6 +75,12 @@ public sealed class CassandraOptions
     /// </summary>
     public string[] RetiredKeyspaces { get; set; } = [];
 
+    /// <summary>
+    /// The keyspace the API of this deployment reads while it differs from <see cref="Keyspace"/> (the worker fills a new one, ADR 0021). The worker
+    /// is told so that it never retires it: the keyspace the API reads can never be dropped. Empty when the API reads <see cref="Keyspace"/>.
+    /// </summary>
+    public string ApiKeyspace { get; set; } = string.Empty;
+
     /// <summary>Fills <see cref="Keyspace"/> from an earlier keyspace up to a round (partial rebuild, ADR 0021); null for none.</summary>
     public CassandraForkOptions? ForkFrom { get; set; }
 
