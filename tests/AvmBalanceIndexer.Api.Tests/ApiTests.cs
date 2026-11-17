@@ -137,6 +137,16 @@ public sealed class ApiTests : IDisposable
         var unavailable = await other.GetFromJsonAsync<JsonElement>(new Uri("/v1/algorand-testnet/status", UriKind.Relative));
         Assert.Equal(JsonValueKind.Null, unavailable.GetProperty("indexedBy").ValueKind);
         Assert.Equal("Following", unavailable.GetProperty("state").GetString());
+
+        // A storage timeout is a cancellation that is not the request's: the status is still served.
+        var slow = new CountingLogStorage { Timeout = true };
+        await slow.WriteRoundAsync(
+            new ChainStatus(ChainId.AlgorandTestnet, 0, TestChain.FakeHash(0), 0, IngestionState.Following, Now),
+            [],
+            CancellationToken.None);
+        using var third = CreateClient(slow);
+        var timedOut = await third.GetFromJsonAsync<JsonElement>(new Uri("/v1/algorand-testnet/status", UriKind.Relative));
+        Assert.Equal(JsonValueKind.Null, timedOut.GetProperty("indexedBy").ValueKind);
     }
 
     private sealed class CountingLogStorage : InMemoryChainStorage
@@ -150,12 +160,14 @@ public sealed class ApiTests : IDisposable
 
         public bool Fail { get; init; }
 
+        public bool Timeout { get; init; }
+
         public int Lists => Volatile.Read(ref _lists);
 
         public override Task<IReadOnlyList<IndexingTerm>> ListAsync(CancellationToken cancellationToken)
         {
             Interlocked.Increment(ref _lists);
-            return Fail ? throw new InvalidOperationException("no such table") : base.ListAsync(cancellationToken);
+            return Timeout ? throw new TaskCanceledException("storage timeout") : Fail ? throw new InvalidOperationException("no such table") : base.ListAsync(cancellationToken);
         }
     }
 

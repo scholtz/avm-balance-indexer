@@ -23,6 +23,11 @@ public sealed partial class CassandraChainStorage
     public async Task<IReadOnlyList<IndexingTerm>> ListAsync(CancellationToken cancellationToken)
     {
         var rows = await ExecuteAsync($"SELECT from_round, version, started_at FROM {Table("indexing_term")} WHERE chain = ?", cancellationToken, _chain).ConfigureAwait(false);
-        return [.. rows.Select(static row => new IndexingTerm(unchecked((ulong)row.GetValue<long>("from_round")), row.GetValue<string>("version"), row.GetValue<DateTimeOffset>("started_at")))];
+        // The clustering order gives the highest round first; of several builds recorded at one round the latest start is the one that wrote.
+        return [.. rows
+            .Select(static row => new IndexingTerm(unchecked((ulong)row.GetValue<long>("from_round")), row.GetValue<string>("version"), row.GetValue<DateTimeOffset>("started_at")))
+            .OrderByDescending(static t => t.FromRound)
+            .ThenByDescending(static t => t.StartedAt)
+            .ThenBy(static t => t.Version, StringComparer.Ordinal)];
     }
 }

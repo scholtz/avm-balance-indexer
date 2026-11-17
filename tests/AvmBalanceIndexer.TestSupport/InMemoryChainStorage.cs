@@ -40,7 +40,7 @@ public partial class InMemoryChainStorage(ChainContext context) : IChainStorage
     {
         lock (_gate)
         {
-            return Task.FromResult<IReadOnlyList<IndexingTerm>>([.. _terms.OrderByDescending(static t => t.FromRound).ThenBy(static t => t.Version, StringComparer.Ordinal)]);
+            return Task.FromResult<IReadOnlyList<IndexingTerm>>([.. _terms.OrderByDescending(static t => t.FromRound).ThenByDescending(static t => t.StartedAt).ThenBy(static t => t.Version, StringComparer.Ordinal)]);
         }
     }
 

@@ -1152,6 +1152,17 @@ public abstract class StorageContractTests
     }
 
     [Fact]
+    public async Task Of_Two_Builds_Recorded_At_One_Round_The_Later_Start_Is_Listed_First()
+    {
+        var storage = await CreateStorageAsync();
+        var t0 = new DateTimeOffset(2026, 11, 1, 10, 0, 0, TimeSpan.Zero);
+        await storage.AppendAsync(new IndexingTerm(500, "b-old", t0), CancellationToken.None);
+        await storage.AppendAsync(new IndexingTerm(500, "a-new", t0.AddHours(1)), CancellationToken.None);
+
+        Assert.Equal(["a-new", "b-old"], (await storage.ListAsync(CancellationToken.None)).Select(t => t.Version).ToArray());
+    }
+
+    [Fact]
     public async Task The_Same_Indexing_Term_Is_Not_Recorded_Twice()
     {
         var storage = await CreateStorageAsync();

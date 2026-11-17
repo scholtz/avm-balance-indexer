@@ -17,7 +17,7 @@ public sealed partial class PostgreSqlChainStorage
 
     public async Task<IReadOnlyList<IndexingTerm>> ListAsync(CancellationToken cancellationToken)
     {
-        await using var command = _dataSource.CreateCommand("SELECT from_round, version, started_at FROM indexing_term ORDER BY from_round DESC, version");
+        await using var command = _dataSource.CreateCommand("SELECT from_round, version, started_at FROM indexing_term ORDER BY from_round DESC, started_at DESC, version");
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         var terms = new List<IndexingTerm>();
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
