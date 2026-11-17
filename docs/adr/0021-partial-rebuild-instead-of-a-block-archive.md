@@ -1,7 +1,7 @@
 # 0021 Partial rebuild instead of a block archive
 
 Status: accepted as the design (issue #176). Not implemented yet: #178 (Cassandra copy), #179 (values, worker, pipeline,
-runbook), #180 (PostgreSQL), #181 (ledger audit), #182 (build record: implemented, the `indexing_term` table and `indexedBy` in the status),
+runbook), #180 (PostgreSQL rewind: implemented in the provider, not yet started by the worker), #181 (ledger audit), #182 (build record: implemented, the `indexing_term` table and `indexedBy` in the status),
 #168 (the status reports a frozen keyspace as stalled). Until #179 is merged the runbook in
 `docs/operations.md` still describes the rebuild from genesis.
 

@@ -103,6 +103,15 @@ rebuild into a new keyspace.
 The versions are the image tags (ADR 0014). A deployment upgraded to this release gets its first row at the then indexed round + 1; rounds before that row were written by an unknown build.
 A restart of the same build without new rounds adds no row.
 
+**PostgreSQL: rewind in place (issue #180, ADR 0021).** PostgreSQL has transactions, so a database is rewound to a round R in one transaction instead of being rebuilt next to the old one.
+The provider supports it with two settings, `Storage:PostgreSql:RewindTo:Round` and `Storage:PostgreSql:RewindTo:RequestId` (use a new request id for every rewind: it is recorded in
+`maintenance_request` in the same transaction, so the rewind runs once even when the values stay in the configuration). The rewind deletes the effects after R, recomputes the holdings
+and the touched-account directory of the affected accounts from what remains, restores tokens (created after R: deleted; destroyed after R: alive again), deletes scans and build records after R,
+and sets the cursor to R with state `Backfilling`; readers see the old state until the commit. Before you run it take a backup or note the PITR position (there is no undo window), expect clients
+to see `indexedRound` drop from the tip to R (requests for rounds above R are refused as not indexed until the replay passes them), and expect the delete to take time on a big database
+(it reads the affected pairs from the token-oriented table, then deletes by primary-key prefix). A Warning log line with the number of deleted rows is written by the worker once the wiring
+of #179 calls it; until that is merged the provider has the operation but nothing starts it.
+
 Choose how to switch:
 
 - **The deployment is stalled or serves wrong data** (TestNet after #115): change the keyspace in the release values. The API switches to the rebuilt data at once and reports a low

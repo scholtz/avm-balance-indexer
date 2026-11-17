@@ -24,6 +24,19 @@ public sealed class PostgreSqlOptions
 
     /// <summary>Longest a read may run (statement timeout), so one request cannot hold a snapshot and scan for minutes.</summary>
     public int ReadTimeoutSeconds { get; set; } = 30;
+
+    /// <summary>Rewinds the database to a round once, in one transaction (partial rebuild, ADR 0021); null for none.</summary>
+    public PostgreSqlRewindOptions? RewindTo { get; set; }
+}
+
+/// <summary>A rewind of the PostgreSQL database to a round. The request id makes it run once: it is recorded with the rewind.</summary>
+public sealed class PostgreSqlRewindOptions
+{
+    /// <summary>Names the request, 1 to 64 characters of <c>A-Z a-z 0-9 . _ -</c>; use a new one for every rewind.</summary>
+    public string RequestId { get; set; } = string.Empty;
+
+    /// <summary>The last round that is kept; indexing continues after it.</summary>
+    public long Round { get; set; } = -1;
 }
 
 public sealed class CassandraOptions

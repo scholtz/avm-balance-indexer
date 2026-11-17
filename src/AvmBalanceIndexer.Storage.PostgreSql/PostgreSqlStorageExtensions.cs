@@ -37,7 +37,11 @@ public static class PostgreSqlStorageExtensions
             provider.GetRequiredService<ChainContext>(),
             provider.GetRequiredService<IOptions<StorageOptions>>().Value.PostgreSql.AccountHashPartitions,
             TimeSpan.FromSeconds(provider.GetRequiredService<IOptions<StorageOptions>>().Value.PostgreSql.ReadTimeoutSeconds),
-            TimeSpan.FromSeconds(provider.GetRequiredService<IOptions<StorageOptions>>().Value.PostgreSql.LeaseHeartbeatSeconds)));
+            TimeSpan.FromSeconds(provider.GetRequiredService<IOptions<StorageOptions>>().Value.PostgreSql.LeaseHeartbeatSeconds),
+            provider.GetRequiredService<IOptions<StorageOptions>>().Value.PostgreSql.RewindTo is { } rewind
+                ? new PartialRebuildRequest(rewind.RequestId, (ulong)rewind.Round)
+                : null));
+        services.AddSingleton<IPartialRebuild>(static provider => provider.GetRequiredService<PostgreSqlChainStorage>());
         services.AddSingleton<IChainStorage>(static provider => provider.GetRequiredService<PostgreSqlChainStorage>());
         services.AddSingleton<IStorageFailureClassifier, PostgreSqlFailureClassifier>();
         services.AddSingleton<IScanJobStore>(static provider => provider.GetRequiredService<PostgreSqlChainStorage>());
@@ -68,6 +72,19 @@ public static class PostgreSqlStorageExtensions
             if (settings.ReadTimeoutSeconds is < 1 or > 600)
             {
                 return ValidateOptionsResult.Fail("Storage:PostgreSql:ReadTimeoutSeconds must be between 1 and 600.");
+            }
+
+            if (settings.RewindTo is { } rewind)
+            {
+                if (rewind.RequestId.Length is < 1 or > 64 || !rewind.RequestId.All(static c => char.IsAsciiLetterOrDigit(c) || c is '.' or '_' or '-'))
+                {
+                    return ValidateOptionsResult.Fail("Storage:PostgreSql:RewindTo:RequestId must be 1 to 64 characters of A-Z, a-z, 0-9, '.', '_' or '-'.");
+                }
+
+                if (rewind.Round < 0)
+                {
+                    return ValidateOptionsResult.Fail("Storage:PostgreSql:RewindTo:Round must be 0 or greater (set both RequestId and Round).");
+                }
             }
 
             return settings.AccountHashPartitions is < 1 or > 1024
