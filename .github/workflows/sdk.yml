@@ -51,7 +51,7 @@ jobs:
       - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
-          dotnet-version: 9.0.x
+          dotnet-version: 10.0.x
       - name: The OpenAPI document is the one the API publishes (test in the API suite)
         run: dotnet test tests/AvmBalanceIndexer.Api.Tests --filter "FullyQualifiedName~OpenApiSpecTests" -v q
       - uses: actions/cache@v6
@@ -132,7 +132,9 @@ jobs:
       - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
-          dotnet-version: 8.0.x
+          dotnet-version: |
+            8.0.x
+            10.0.x
       - run: dotnet build AvmBalanceIndexer.Client.slnx -c Release
       - run: dotnet test AvmBalanceIndexer.Client.slnx -c Release --no-build
       - name: Pack (both target frameworks)

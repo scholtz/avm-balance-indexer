@@ -4,7 +4,7 @@
 #   sdk/scripts/generate.sh            all languages
 #   sdk/scripts/generate.sh go python  only these
 #
-# Needs Docker (openapi-generator for TypeScript and Python, jq to strip `format: uuid` for Python, golang for oapi-codegen) and the .NET SDK (NSwag, pinned in sdk/dotnet/dotnet-tools.json).
+# Needs Docker (openapi-generator for TypeScript and Python, jq to strip `format: uuid` for Python, golang for oapi-codegen) and the .NET 11 SDK plus the .NET 10 runtime (NSwag, pinned in sdk/dotnet/dotnet-tools.json, runs on net10.0; set DOTNET_ROLL_FORWARD=Major to run it on 11 only).
 # CI runs this and fails when it changes a committed file (workflow "SDKs").
 set -euo pipefail
 

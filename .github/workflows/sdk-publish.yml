@@ -221,7 +221,9 @@ jobs:
         if: steps.need.outputs.publish == 'true'
         with:
           global-json-file: global.json
-          dotnet-version: 8.0.x
+          dotnet-version: |
+            8.0.x
+            10.0.x
       - name: Test and pack (no key)
         if: steps.need.outputs.publish == 'true'
         working-directory: sdk/dotnet

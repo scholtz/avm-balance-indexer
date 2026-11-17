@@ -12,7 +12,7 @@
 
 ## Code
 
-- .NET 10, nullable and implicit usings on, warnings are errors (`Directory.Build.props`).
+- .NET 11, nullable and implicit usings on, warnings are errors (`Directory.Build.props`).
 - Package versions are managed centrally in `Directory.Packages.props`; never put a `Version` on a `PackageReference`.
 - Amounts are `Amount` (BigInteger-backed). Never use `long`, `double` or `decimal` for token quantities.
 - Anything that differs between PostgreSQL and Cassandra lives inside the provider project. The Domain contract
