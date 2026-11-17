@@ -15,7 +15,7 @@ public sealed class NodeQuotaExceededException(string message) : HttpRequestExce
 /// </summary>
 internal sealed class AlgodQuotaHandler(HttpMessageHandler inner) : DelegatingHandler(inner)
 {
-    /// <summary>A quota answer is one line of text; a longer body is something else and is not read.</summary>
+    /// <summary>A quota answer is one line of text; a longer body is something else.</summary>
     private const int LongestQuotaAnswer = 1024;
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -26,11 +26,27 @@ internal sealed class AlgodQuotaHandler(HttpMessageHandler inner) : DelegatingHa
             return response;
         }
 
-        // Buffered, so that the caller can still read the body of a 403 that is not about the quota.
-        await response.Content.LoadIntoBufferAsync(cancellationToken).ConfigureAwait(false);
-        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-        if (!body.Contains("quota", StringComparison.OrdinalIgnoreCase))
+        // At most LongestQuotaAnswer + 1 bytes are read, also of a body without a length (chunked, decompressed). The caller gets what
+        // was read back as the body: whole for a short 403, cut to that length for a longer one (an HTML page of a firewall).
+        var buffer = new byte[LongestQuotaAnswer + 1];
+        var read = 0;
+        var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        await using (stream.ConfigureAwait(false))
         {
+            int n;
+            while (read < buffer.Length && (n = await stream.ReadAsync(buffer.AsMemory(read), cancellationToken).ConfigureAwait(false)) > 0)
+            {
+                read += n;
+            }
+        }
+
+        var body = System.Text.Encoding.UTF8.GetString(buffer, 0, read);
+        if (read > LongestQuotaAnswer || !body.Contains("quota", StringComparison.OrdinalIgnoreCase))
+        {
+            var original = response.Content;
+            response.Content = new ByteArrayContent(buffer, 0, read);
+            response.Content.Headers.ContentType = original.Headers.ContentType;
+            original.Dispose();
             return response;
         }
 

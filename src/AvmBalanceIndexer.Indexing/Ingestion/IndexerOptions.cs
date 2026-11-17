@@ -75,9 +75,10 @@ public sealed class IndexerOptions : IValidatableObject
     public TimeSpan RetryMaxBackoff { get; set; } = TimeSpan.FromMinutes(1);
 
     /// <summary>
-    /// Wait after the node answered that its daily quota is used up (HTTP 403 naming the quota, as the public Nodely endpoints do). Such
-    /// an answer is expected, does not count towards <see cref="MaxConsecutiveFailures"/> and ends by itself when the quota is renewed;
-    /// every refused request counts against the quota too, so the wait is longer than a retry backoff.
+    /// Longest wait after the node answered that its daily quota is used up (HTTP 403 naming the quota, as the public Nodely endpoints do).
+    /// Such an answer is expected, does not count towards <see cref="MaxConsecutiveFailures"/> and ends by itself when the quota is renewed.
+    /// The wait starts at <see cref="RetryInitialBackoff"/> (near the quota only a share of the requests is refused) and doubles up to
+    /// this value while nothing is indexed in between (every refused request counts against the quota too).
     /// </summary>
     [Range(typeof(TimeSpan), "00:00:00.001", "01:00:00")]
     public TimeSpan QuotaBackoff { get; set; } = TimeSpan.FromMinutes(1);

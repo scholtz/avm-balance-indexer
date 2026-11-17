@@ -51,8 +51,8 @@ public sealed partial class LedgerAuditor(
     /// <summary>How long nothing is asked after the node refused for its daily quota (403): the indexer needs the requests more.</summary>
     internal TimeSpan QuotaPause { get; init; } = TimeSpan.FromMinutes(15);
 
-    /// <summary>How long nothing is asked after the node throttled (429, a limit per second).</summary>
-    internal TimeSpan ThrottlePause { get; init; } = TimeSpan.FromMinutes(1);
+    /// <summary>How long nothing is asked after the node throttled (429, a limit per second); the round is then asked for again.</summary>
+    internal TimeSpan ThrottlePause { get; init; } = TimeSpan.FromSeconds(30);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -106,7 +106,10 @@ public sealed partial class LedgerAuditor(
             }
 
             _pausedAt = null;
-            LogResumed(logger, chain.Chain);
+            if (_audited is null)
+            {
+                LogResumed(logger, chain.Chain);
+            }
         }
 
         var status = await storage.GetAsync(chain.Chain, cancellationToken).ConfigureAwait(false);
@@ -159,6 +162,7 @@ public sealed partial class LedgerAuditor(
         if (status.IndexedRound < _sampled)
         {
             _sampled = status.IndexedRound;
+            _lastAgreed = null;
         }
 
         if (settings.BackfillSampleEvery > 0 && status.State == IngestionState.Backfilling)
@@ -231,15 +235,23 @@ public sealed partial class LedgerAuditor(
         {
             delta = await deltas.TryGetAsync(round, cancellationToken).ConfigureAwait(false);
         }
-        catch (HttpRequestException ex) when (ex.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.TooManyRequests)
+        catch (NodeQuotaExceededException)
         {
-            // The node throttles, or its daily quota is used up (a public node answers 403 then, and counts the refused request too):
-            // the audit stops asking for a while and continues with the round that is published then. The rounds in between are not audited.
+            // The daily quota of a public node is used up (and it counts the refused request too): the audit stops asking for a while
+            // and continues with the round that is published then. The rounds in between are not audited.
             _pausedAt = _time.GetTimestamp();
-            _pause = ex.StatusCode == HttpStatusCode.Forbidden ? QuotaPause : ThrottlePause;
+            _pause = QuotaPause;
             _audited = null;
             health.AuditSkipped();
-            LogPaused(logger, chain.Chain, (int)ex.StatusCode!, round, _pause);
+            LogQuotaPause(logger, chain.Chain, round, _pause);
+            return Step.Retry;
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode is HttpStatusCode.TooManyRequests)
+        {
+            // A limit per second: the same round is asked for again after a short pause, nothing is skipped.
+            _pausedAt = _time.GetTimestamp();
+            _pause = ThrottlePause;
+            LogThrottled(logger, chain.Chain, round, _pause);
             return Step.Retry;
         }
         catch (Exception ex) when (ex is HttpRequestException or InvalidDataException or TimeoutException || (ex is OperationCanceledException && !cancellationToken.IsCancellationRequested))
@@ -306,7 +318,8 @@ public sealed partial class LedgerAuditor(
         }
 
         // Not every round is audited (sampling, pauses, a node without an answer): the round before this one is not known to be good.
-        var good = _lastAgreed is { } agreed ? agreed.ToString(CultureInfo.InvariantCulture) : "none since this writer became active";
+        // A sample of an older round (backfill after falling behind) can fail below a round that agreed earlier: that one says nothing.
+        var good = _lastAgreed is { } agreed && agreed < round ? agreed.ToString(CultureInfo.InvariantCulture) : "none known below that round";
         var reason = $"round {round}: {description}; last audited round that agreed: {good}";
         try
         {
@@ -364,8 +377,11 @@ public sealed partial class LedgerAuditor(
     [LoggerMessage(EventId = 1359, Level = LogLevel.Information, Message = "The ledger audit of {Chain} resumes at the published round")]
     private static partial void LogResumed(ILogger logger, string chain);
 
-    [LoggerMessage(EventId = 1358, Level = LogLevel.Warning, Message = "The node of {Chain} answered HTTP {Status} for the ledger deltas of round {Round} (throttled, or its daily quota is used up); the ledger audit pauses for {Pause} and does not audit the rounds published meanwhile")]
-    private static partial void LogPaused(ILogger logger, string chain, int status, ulong round, TimeSpan pause);
+    [LoggerMessage(EventId = 1358, Level = LogLevel.Warning, Message = "The daily quota of the node of {Chain} is used up (HTTP 403 for the ledger deltas of round {Round}); the ledger audit pauses for {Pause} and does not audit the rounds published meanwhile")]
+    private static partial void LogQuotaPause(ILogger logger, string chain, ulong round, TimeSpan pause);
+
+    [LoggerMessage(EventId = 1360, Level = LogLevel.Information, Message = "The node of {Chain} throttles (HTTP 429 for the ledger deltas of round {Round}); the ledger audit asks again in {Pause}")]
+    private static partial void LogThrottled(ILogger logger, string chain, ulong round, TimeSpan pause);
 
     [LoggerMessage(EventId = 1357, Level = LogLevel.Warning, Message = "The ledger audit of {Chain} could not record its stop at round {Round}; the database is tried again at the next pass and the worker keeps running until then")]
     private static partial void LogStopNotRecorded(ILogger logger, Exception exception, string chain, ulong round);

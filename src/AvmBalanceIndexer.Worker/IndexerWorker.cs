@@ -156,8 +156,8 @@ public sealed partial class IndexerWorker(
         if (await storage.GetAuditStopAsync(cancellationToken).ConfigureAwait(false) is { } stop)
         {
             throw new InvalidOperationException(
-                $"Ledger audit of {chain.Chain} failed at round {stop.Round}: the ledger disagrees at that round and the writer had published up to {stop.PublishedRound}; "
-                + $"Fix the cause, then rebuild from a round that was audited and agreed (the reason names the last one; docs/operations.md), "
+                $"Ledger audit of {chain.Chain} failed at round {stop.Round}: the ledger disagrees at that round and the writer had published up to {stop.PublishedRound}. "
+                + $"Fix the cause, then rebuild from a round below {stop.Round} that was audited and agreed (the reason names the last one when it is known; docs/operations.md), "
                 + $"or acknowledge the round (worker.audit.acknowledgeRound) when the ledger side is the one that is wrong. {stop.Reason}");
         }
     }
@@ -258,6 +258,9 @@ public sealed partial class IndexerWorker(
         var failures = 0;
         var committedAtLastFailure = indexer.RoundsCommitted + Interlocked.Read(ref _rebuildReports);
         var prepared = false;
+        var quotaBackoff = settings.RetryInitialBackoff;
+        var committedAtLastRefusal = committedAtLastFailure;
+        long? quotaLoggedAt = null;
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -284,17 +287,32 @@ public sealed partial class IndexerWorker(
             catch (Exception ex) when (IsQuotaExceeded(ex))
             {
                 // The daily quota of a public node: nothing is wrong, and a restart would only spend more requests. Waited out without
-                // counting a failure; the status goes stale meanwhile, which is what the alerts look at.
-                health.ReportTransientFailure();
-                LogQuotaExceeded(logger, chain.Chain, settings.QuotaBackoff);
+                // counting a failure; the status goes stale meanwhile, which is what the alerts look at. Near the quota only a share of
+                // the requests is refused: the wait starts short and grows only while nothing is indexed between two refusals.
+                var committed = indexer.RoundsCommitted + Interlocked.Read(ref _rebuildReports);
+                if (committed != committedAtLastRefusal)
+                {
+                    committedAtLastRefusal = committed;
+                    quotaBackoff = settings.RetryInitialBackoff;
+                }
+
+                var wait = quotaBackoff < settings.QuotaBackoff ? quotaBackoff : settings.QuotaBackoff;
+                if (quotaLoggedAt is not { } loggedAt || _clock.GetElapsedTime(loggedAt) >= QuotaLogInterval)
+                {
+                    quotaLoggedAt = _clock.GetTimestamp();
+                    LogQuotaExceeded(logger, chain.Chain, settings.QuotaBackoff);
+                }
+
                 try
                 {
-                    await Task.Delay(settings.QuotaBackoff, stoppingToken).ConfigureAwait(false);
+                    await Task.Delay(wait, stoppingToken).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
                     return;
                 }
+
+                quotaBackoff = TimeSpan.FromTicks(Math.Min(quotaBackoff.Ticks * 2, settings.QuotaBackoff.Ticks));
             }
             catch (Exception ex) when (IsTransient(ex, stoppingToken))
             {
@@ -346,14 +364,15 @@ public sealed partial class IndexerWorker(
 
     /// <summary>
     /// The answer of a public gateway whose daily quota is used up (Nodely: 403 "Daily free API quota exceeded", https://nodely.io/docs/free/policy).
-    /// The algod client reports it as <see cref="NodeQuotaExceededException"/> for every request; an SDK that read the answer itself reports
-    /// a 403 whose text names the quota. A 403 without that text stays a transient failure that ends the worker when it persists.
+    /// The algod client reports it as <see cref="NodeQuotaExceededException"/> for every request (also when a caller wraps it). Any other
+    /// 403 stays a transient failure that ends the worker when it persists.
     /// </summary>
-    private static bool IsQuotaExceeded(Exception exception) =>
-        exception is NodeQuotaExceededException or { InnerException: NodeQuotaExceededException }
-        || (exception is Algorand.ApiException { StatusCode: 403, Response: { } body } && body.Contains("quota", StringComparison.OrdinalIgnoreCase));
+    private static readonly TimeSpan QuotaLogInterval = TimeSpan.FromMinutes(10);
 
-    [LoggerMessage(EventId = 1318, Level = LogLevel.Warning, Message = "The node of {Chain} answered that its daily request quota is used up (HTTP 403); indexing waits {Backoff} and tries again. Use an own node or a paid plan (Algorand:AlgodUrl), or audit fewer followed rounds (raise Worker:Audit:FollowSampleEvery, 0 = none), when this happens every day")]
+    private static bool IsQuotaExceeded(Exception exception) =>
+        exception is NodeQuotaExceededException || (exception.InnerException is { } inner && IsQuotaExceeded(inner));
+
+    [LoggerMessage(EventId = 1318, Level = LogLevel.Warning, Message = "The node of {Chain} answered that its daily request quota is used up (HTTP 403); indexing waits (up to {Backoff} between two attempts) until the quota is renewed; this line is repeated at most every ten minutes. Use an own node or a paid plan (Algorand:AlgodUrl), or audit fewer followed rounds (raise Worker:Audit:FollowSampleEvery, 0 = none), when this happens every day")]
     private static partial void LogQuotaExceeded(ILogger logger, string chain, TimeSpan backoff);
 
     [LoggerMessage(EventId = 1300, Level = LogLevel.Information, Message = "Indexer worker started for {Chain}")]

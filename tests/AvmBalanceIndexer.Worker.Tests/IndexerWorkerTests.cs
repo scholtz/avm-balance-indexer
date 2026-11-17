@@ -109,15 +109,17 @@ public class IndexerWorkerTests : IDisposable
     }
 
     [Theory]
-    [InlineData(false)] // the algod client of this repo (status, genesis, deltas) reports the quota answer itself
-    [InlineData(true)] // an SDK call that read the 403 on its own
-    public async Task A_Used_Up_Daily_Quota_Of_A_Public_Node_Is_Waited_Out_It_Never_Stops_The_Worker_And_Is_Logged_Without_A_Stack_Trace(bool fromSdk)
+    [InlineData(false)] // the algod client reports the quota answer itself (status, genesis, deltas)
+    [InlineData(true)] // a caller in between wrapped it
+    public async Task A_Used_Up_Daily_Quota_Of_A_Public_Node_Is_Waited_Out_It_Never_Stops_The_Worker_And_Is_Logged_Once_Without_A_Stack_Trace(bool wrapped)
     {
         var storage = NewStorage();
         // What nodely.io answers when the daily quota of the free tier is used up (and, near the quota, to a growing share of requests).
-        var errors = new Queue<Exception>(Enumerable.Range(0, 8).Select(_ => fromSdk
-            ? (Exception)new Algorand.ApiException("Forbidden", 403, "Daily free API quota exceeded", new Dictionary<string, IEnumerable<string>>(), new HttpRequestException("403"))
-            : new NodeQuotaExceededException("The node answered HTTP 403 for /v2/status: Daily free API quota exceeded")));
+        var errors = new Queue<Exception>(Enumerable.Range(0, 8).Select(_ =>
+        {
+            var refused = new NodeQuotaExceededException("The node answered HTTP 403 for /v2/status: Daily free API quota exceeded");
+            return wrapped ? new InvalidOperationException("status", refused) : (Exception)refused;
+        }));
         var adapter = new FlakyAdapter(Scenario.Adapter(), failuresBeforeSuccess: 8, errors: errors);
         var logger = new ListLogger();
 
@@ -129,13 +131,10 @@ public class IndexerWorkerTests : IDisposable
 
         Assert.False(lifetime.StopRequested);
         Assert.Equal(8, adapter.Failures);
-        var warnings = logger.Entries.Where(static e => e.Level == LogLevel.Warning).ToList();
-        Assert.Equal(8, warnings.Count);
-        Assert.All(warnings, static w =>
-        {
-            Assert.Null(w.Exception);
-            Assert.Contains("quota", w.Message, StringComparison.OrdinalIgnoreCase);
-        });
+        // One line for the whole outage (repeated every ten minutes at most), not one per attempt.
+        var warning = Assert.Single(logger.Entries, static e => e.Level == LogLevel.Warning);
+        Assert.Null(warning.Exception);
+        Assert.Contains("quota", warning.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -437,7 +436,7 @@ public class IndexerWorkerTests : IDisposable
             Assert.Null(await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None));
             var fatal = Assert.Single(logger.Entries, static e => e.Level == LogLevel.Critical);
             Assert.Contains("Ledger audit of algorand-testnet failed at round 4", fatal.Exception!.Message, StringComparison.Ordinal);
-            Assert.Contains("rebuild from a round that was audited and agreed", fatal.Exception.Message, StringComparison.Ordinal);
+            Assert.Contains("rebuild from a round below 4 that was audited and agreed", fatal.Exception.Message, StringComparison.Ordinal);
             Environment.ExitCode = 0;
         }
     }

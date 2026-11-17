@@ -142,6 +142,7 @@ public sealed class LedgerAuditorTests : IDisposable
         Assert.Equal(4UL, stop!.Round);
         Assert.Equal(Scenario.LastRound, stop.PublishedRound);
         Assert.Contains("indexed 7000, ledger 7001", stop.Reason, StringComparison.Ordinal);
+        Assert.Contains("last audited round that agreed: 3", stop.Reason, StringComparison.Ordinal);
         Assert.DoesNotContain(5UL, ledger.Requested);
         Assert.Equal(1, rig.Health.AuditMismatches);
         var error = Assert.Single(rig.Logger.Entries, static e => e.Level == LogLevel.Error);
@@ -309,13 +310,67 @@ public sealed class LedgerAuditorTests : IDisposable
         Assert.False(rig.Lifetime.StopRequested);
     }
 
-    [Theory]
-    [InlineData(HttpStatusCode.Forbidden)]
-    [InlineData(HttpStatusCode.TooManyRequests)]
-    public async Task A_Node_That_Throttles_Or_Has_No_Quota_Left_Pauses_The_Audit_Which_Resumes_At_The_Published_Round(HttpStatusCode answer)
+    [Fact]
+    public async Task A_Node_That_Throttles_Is_Asked_For_The_Same_Round_Again_After_A_Pause_Nothing_Is_Skipped()
     {
         var (storage, ledger) = await AtRoundTwoAsync();
-        ledger.Throttled.Enqueue(answer);
+        ledger.Throttled.Enqueue(HttpStatusCode.TooManyRequests);
+        await using var rig = Start(storage, ledger, new AuditOptions { FollowSampleEvery = 1 });
+        await Task.Delay(100);
+
+        await FinishTheScenarioAsync(storage);
+        await UntilAsync(() => rig.Health.LastAuditedRound == (long)Scenario.LastRound);
+
+        Assert.Equal([3UL, 3UL, 4UL, 5UL], ledger.Requested.ToArray());
+        Assert.DoesNotContain(rig.Logger.Entries, static e => e.Level >= LogLevel.Warning);
+        Assert.Equal(0, rig.Health.AuditSkippedCount);
+    }
+
+    [Fact]
+    public async Task A_403_That_Is_Not_About_The_Quota_Is_A_Node_That_Does_Not_Answer_The_Round_Is_Tried_Again_Without_A_Pause()
+    {
+        var (storage, ledger) = await AtRoundTwoAsync();
+        var refusing = new FakeDeltas { QuotaAnswer = false };
+        foreach (var (round, delta) in ledger.Rounds)
+        {
+            refusing.Rounds[round] = delta;
+        }
+
+        refusing.Throttled.Enqueue(HttpStatusCode.Forbidden);
+        refusing.Throttled.Enqueue(HttpStatusCode.Forbidden);
+        await using var rig = Start(storage, refusing, new AuditOptions { FollowSampleEvery = 1 });
+        await Task.Delay(100);
+
+        await FinishTheScenarioAsync(storage);
+        await UntilAsync(() => rig.Health.LastAuditedRound == (long)Scenario.LastRound);
+
+        Assert.Equal([3UL, 3UL, 3UL, 4UL, 5UL], refusing.Requested.ToArray());
+        var warning = Assert.Single(rig.Logger.Entries, static e => e.Level == LogLevel.Warning);
+        Assert.DoesNotContain("quota", warning.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task A_Mismatch_Without_An_Audited_Round_Below_It_Names_No_Good_Round()
+    {
+        var (storage, ledger) = await AtRoundTwoAsync();
+        var good = ledger.Rounds[3];
+        ledger.Rounds[3] = good with { Algo = new Dictionary<Address, ulong>(good.Algo) { [Scenario.Bob] = good.Algo[Scenario.Bob] + 1 } };
+        await using var rig = Start(storage, ledger, new AuditOptions { FollowSampleEvery = 1 });
+        await Task.Delay(100);
+
+        await FinishTheScenarioAsync(storage);
+        await UntilAsync(() => rig.Lifetime.StopRequested);
+
+        var stop = await storage.GetAuditStopAsync(CancellationToken.None);
+        Assert.Equal(3UL, stop!.Round);
+        Assert.Contains("last audited round that agreed: none known below that round", stop.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_Node_Whose_Daily_Quota_Is_Used_Up_Pauses_The_Audit_Which_Resumes_At_The_Published_Round()
+    {
+        var (storage, ledger) = await AtRoundTwoAsync();
+        ledger.Throttled.Enqueue(HttpStatusCode.Forbidden);
         await using var rig = Start(storage, ledger, new AuditOptions { FollowSampleEvery = 1 });
         await Task.Delay(100);
 
@@ -376,6 +431,9 @@ public sealed class LedgerAuditorTests : IDisposable
         /// <summary>Answers of a gateway that throttles or has no quota left (403, 429), given before anything else.</summary>
         public Queue<HttpStatusCode> Throttled { get; } = [];
 
+        /// <summary>Whether a 403 is the quota answer (as the algod client reports it) or a plain 403.</summary>
+        public bool QuotaAnswer { get; init; } = true;
+
         /// <summary>Answers 404 (null) this many times first, as a node that has not reached a young round yet.</summary>
         public int NotYetAvailable { get; set; }
 
@@ -403,7 +461,9 @@ public sealed class LedgerAuditorTests : IDisposable
 
                 if (Throttled.TryDequeue(out var status))
                 {
-                    throw new HttpRequestException("throttled", null, status);
+                    throw status == HttpStatusCode.Forbidden && QuotaAnswer
+                        ? new NodeQuotaExceededException("The node answered HTTP 403 for /v2/deltas/3: Daily free API quota exceeded")
+                        : new HttpRequestException("refused", null, status);
                 }
             }
 

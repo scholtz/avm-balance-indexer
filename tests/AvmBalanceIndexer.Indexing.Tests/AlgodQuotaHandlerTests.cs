@@ -49,12 +49,29 @@ public class AlgodQuotaHandlerTests
         Assert.Equal(page, await response.Content.ReadAsStringAsync());
     }
 
+    [Fact]
+    public async Task A_Long_403_Body_Without_A_Length_Is_Read_Up_To_The_Limit_Only_And_Is_No_Quota_Answer()
+    {
+        var page = "<html>" + new string('x', 5000) + " quota </html>";
+        using var http = Client(HttpStatusCode.Forbidden, page, "text/html", streamed: true);
+
+        using var response = await http.GetAsync(new Uri("v2/status", UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal(page[..1025], await response.Content.ReadAsStringAsync());
+    }
+
+    private sealed class NoLength(byte[] bytes) : MemoryStream(bytes)
+    {
+        public override bool CanSeek => false;
+    }
+
     private sealed class Stub(HttpStatusCode status, string body, string contentType, bool streamed) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             HttpContent content = streamed
-                ? new StreamContent(new MemoryStream(Encoding.UTF8.GetBytes(body))) // a streamed body
+                ? new StreamContent(new NoLength(Encoding.UTF8.GetBytes(body))) // no Content-Length, as a chunked or decompressed answer
                 : new StringContent(body, Encoding.UTF8, contentType);
             return Task.FromResult(new HttpResponseMessage(status) { Content = content, RequestMessage = request });
         }

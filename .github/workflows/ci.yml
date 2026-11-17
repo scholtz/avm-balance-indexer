@@ -201,6 +201,7 @@ jobs:
           refused 'worker.audit.backfillSampleEvery' --set worker.audit.backfillSampleEvery=-1
           refused 'worker.audit.followSampleEvery' --set worker.audit.followSampleEvery=-1
           refused 'worker.audit.followSampleEvery' --set worker.audit.followSampleEvery=2.5
+          refused 'worker.audit.followSampleEvery' --set-string worker.audit.followSampleEvery=1O
           refused 'storage.cassandra.keyspace' --set storage.cassandra.keyspace=1bad
           refused 'storage.cassandra.keyspace' --set storage.cassandra.keyspace=bad-name
           refused 'storage.cassandra.localDatacenter' --set "storage.cassandra.localDatacenter=dc'1"
