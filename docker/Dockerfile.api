@@ -7,7 +7,7 @@ COPY src/ src/
 RUN dotnet restore src/AvmBalanceIndexer.Api/AvmBalanceIndexer.Api.csproj
 RUN dotnet publish src/AvmBalanceIndexer.Api/AvmBalanceIndexer.Api.csproj -c Release -o /app --no-restore -p:InformationalVersion=$BUILD_VERSION
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:11.0 AS runtime
 WORKDIR /app
 ENV ASPNETCORE_URLS=http://+:8080 \
     DOTNET_EnableDiagnostics=0
