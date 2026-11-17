@@ -510,7 +510,7 @@ type ClientInterface interface {
 
 	// CreateHolderScanWithBody Start an asynchronous export of every holder of a token at a round
 	//
-	// Accepted at once; poll the scan and read the result pages. The body is optional: { "round": 123, "includeZero": false }.
+	// Accepted at once; poll the scan and read the result pages. The body is optional: { "round": 123, "includeZero": false }. Answered with 503 while scans are paused because this deployment is being rebuilt; existing scans stay readable.
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -519,7 +519,7 @@ type ClientInterface interface {
 
 	// CreateHolderScan Start an asynchronous export of every holder of a token at a round
 	//
-	// Accepted at once; poll the scan and read the result pages. The body is optional: { "round": 123, "includeZero": false }.
+	// Accepted at once; poll the scan and read the result pages. The body is optional: { "round": 123, "includeZero": false }. Answered with 503 while scans are paused because this deployment is being rebuilt; existing scans stay readable.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -676,7 +676,7 @@ func (c *GeneratedClient) GetTokenHolders(ctx context.Context, chain ChainId, ki
 
 // CreateHolderScanWithBody Start an asynchronous export of every holder of a token at a round
 //
-// Accepted at once; poll the scan and read the result pages. The body is optional: { "round": 123, "includeZero": false }.
+// Accepted at once; poll the scan and read the result pages. The body is optional: { "round": 123, "includeZero": false }. Answered with 503 while scans are paused because this deployment is being rebuilt; existing scans stay readable.
 //
 // Takes any type of body and a specified content type.
 //
@@ -695,7 +695,7 @@ func (c *GeneratedClient) CreateHolderScanWithBody(ctx context.Context, chain Ch
 
 // CreateHolderScan Start an asynchronous export of every holder of a token at a round
 //
-// Accepted at once; poll the scan and read the result pages. The body is optional: { "round": 123, "includeZero": false }.
+// Accepted at once; poll the scan and read the result pages. The body is optional: { "round": 123, "includeZero": false }. Answered with 503 while scans are paused because this deployment is being rebuilt; existing scans stay readable.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -1541,7 +1541,7 @@ type ClientWithResponsesInterface interface {
 
 	// CreateHolderScanWithBodyWithResponse Start an asynchronous export of every holder of a token at a round
 	//
-	// Accepted at once; poll the scan and read the result pages. The body is optional: { "round": 123, "includeZero": false }.
+	// Accepted at once; poll the scan and read the result pages. The body is optional: { "round": 123, "includeZero": false }. Answered with 503 while scans are paused because this deployment is being rebuilt; existing scans stay readable.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -1550,7 +1550,7 @@ type ClientWithResponsesInterface interface {
 
 	// CreateHolderScanWithResponse Start an asynchronous export of every holder of a token at a round
 	//
-	// Accepted at once; poll the scan and read the result pages. The body is optional: { "round": 123, "includeZero": false }.
+	// Accepted at once; poll the scan and read the result pages. The body is optional: { "round": 123, "includeZero": false }. Answered with 503 while scans are paused because this deployment is being rebuilt; existing scans stay readable.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -2435,7 +2435,7 @@ func (c *ClientWithResponses) GetTokenHoldersWithResponse(ctx context.Context, c
 
 // CreateHolderScanWithBodyWithResponse Start an asynchronous export of every holder of a token at a round
 //
-// Accepted at once; poll the scan and read the result pages. The body is optional: { "round": 123, "includeZero": false }.
+// Accepted at once; poll the scan and read the result pages. The body is optional: { "round": 123, "includeZero": false }. Answered with 503 while scans are paused because this deployment is being rebuilt; existing scans stay readable.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -2450,7 +2450,7 @@ func (c *ClientWithResponses) CreateHolderScanWithBodyWithResponse(ctx context.C
 
 // CreateHolderScanWithResponse Start an asynchronous export of every holder of a token at a round
 //
-// Accepted at once; poll the scan and read the result pages. The body is optional: { "round": 123, "includeZero": false }.
+// Accepted at once; poll the scan and read the result pages. The body is optional: { "round": 123, "includeZero": false }. Answered with 503 while scans are paused because this deployment is being rebuilt; existing scans stay readable.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //

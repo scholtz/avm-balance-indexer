@@ -1,6 +1,6 @@
 # 0021 Partial rebuild instead of a block archive
 
-Status: accepted as the design (issue #176). Cassandra copy (#178): implemented in the provider (the holdings are rebuilt from the newest copied effect, the token-oriented tables are copied, not derived), not yet started by the worker. Not implemented yet: #179 (values, worker, pipeline,
+Status: accepted as the design (issue #176). Cassandra copy (#178): implemented in the provider (the holdings are rebuilt from the newest copied effect, the token-oriented tables are copied, not derived), not yet started by the worker. Worker, chart values, deploy step and runbook (#179): implemented for Cassandra. Not implemented yet:
 runbook), #180 (PostgreSQL rewind: implemented in the provider, not yet started by the worker), #181 (ledger audit), #182 (build record: implemented, the `indexing_term` table and `indexedBy` in the status),
 #168 (the status reports a frozen keyspace as stalled). Until #179 is merged the runbook in
 `docs/operations.md` still describes the rebuild from genesis.

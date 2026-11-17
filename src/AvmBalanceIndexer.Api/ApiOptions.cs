@@ -50,4 +50,10 @@ public sealed class ApiOptions
     /// </summary>
     [RegularExpression(@"^(/(?!\.+(?:/|\z))[A-Za-z0-9._~-]+)*\z", ErrorMessage = "Api:PathBase must be empty or start with a slash, have no trailing slash and contain only URL-safe segments (for example /algorand-testnet).")]
     public string PathBase { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Accept new holder scans. The chart turns this off while the API reads another keyspace than the worker fills (a partial rebuild,
+    /// ADR 0021): a scan created now would never run. Existing scans stay readable.
+    /// </summary>
+    public bool ScansEnabled { get; set; } = true;
 }

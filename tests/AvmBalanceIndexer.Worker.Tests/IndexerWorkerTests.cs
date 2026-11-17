@@ -1,5 +1,6 @@
 using AvmBalanceIndexer.Domain.Chains;
 using AvmBalanceIndexer.Domain.Storage;
+using AvmBalanceIndexer.Domain.Tokens;
 using AvmBalanceIndexer.Indexing.Adapters;
 using AvmBalanceIndexer.Indexing.Ingestion;
 using AvmBalanceIndexer.Indexing.Normalization;
@@ -330,6 +331,152 @@ public class IndexerWorkerTests : IDisposable
     }
 
     [Fact]
+    public async Task A_Partial_Rebuild_Runs_Once_With_The_Hash_Of_Its_Round_Before_Indexing_And_Indexing_Continues_After_It()
+    {
+        var storage = NewStorage();
+        var blocks = Scenario.Blocks(new TestChain()).ToList();
+        var adapter = Scenario.Adapter(blocks);
+        var rebuild = new FakeRebuild(2, async (hash, token) =>
+        {
+            // What the copy leaves behind: the database as of round 2.
+            await new RoundIndexer(Scenario.Adapter(Scenario.Blocks(new TestChain()).ToList()), new AlgoEffectNormalizer(), storage, Options.Create(new IndexerOptions { FetchConcurrency = 1 }), NullLogger<RoundIndexer>.Instance).RunAsync(2, token);
+            return new PartialRebuildResult(PartialRebuildOutcome.Done, string.Empty, 5, 3);
+        });
+        var health = new WorkerHealth();
+        var (worker, lifetime) = Create(storage, adapter, maxFailures: 10, health, rebuild: rebuild);
+
+        await worker.StartAsync(CancellationToken.None);
+        await WaitForRoundAsync(storage, Scenario.LastRound);
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.False(lifetime.StopRequested);
+        Assert.Equal([blocks[1].Hash], rebuild.Hashes.Select(static h => h).ToArray());
+        Assert.Equal(Scenario.ExpectedBalance(Scenario.Alice, Scenario.LastRound), (ulong)(await storage.GetBalanceAtRoundAsync(Scenario.Alice, TokenKey.Native, Scenario.LastRound, CancellationToken.None)).Value);
+    }
+
+    [Fact]
+    public async Task The_Rebuild_Is_Asked_Even_When_The_Database_Has_Data_And_AlreadyDone_Changes_Nothing()
+    {
+        var storage = NewStorage();
+        var rebuild = new FakeRebuild(2, (_, _) => Task.FromResult(new PartialRebuildResult(PartialRebuildOutcome.AlreadyDone)));
+        var (worker, lifetime) = Create(storage, Scenario.Adapter(), maxFailures: 10, rebuild: rebuild);
+
+        await worker.StartAsync(CancellationToken.None);
+        await WaitForRoundAsync(storage, Scenario.LastRound);
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.False(lifetime.StopRequested);
+        Assert.Equal(1, rebuild.Calls);
+    }
+
+    [Fact]
+    public async Task A_Refused_Rebuild_Stops_The_Worker_With_Exit_Code_1_And_Nothing_Is_Indexed()
+    {
+        var storage = NewStorage();
+        var rebuild = new FakeRebuild(2, (_, _) => Task.FromResult(new PartialRebuildResult(PartialRebuildOutcome.Refused, "the keyspace holds an unfinished copy")));
+        var logger = new ListLogger();
+        var (worker, lifetime) = Create(storage, Scenario.Adapter(), maxFailures: 10, logger: logger, rebuild: rebuild);
+
+        await worker.StartAsync(CancellationToken.None);
+        await lifetime.WaitForStopAsync();
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.Equal(1, Environment.ExitCode);
+        Assert.Null(await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None));
+        Assert.Contains(logger.Entries, e => e.Exception?.Message.Contains("unfinished copy", StringComparison.Ordinal) == true);
+    }
+
+    [Fact]
+    public async Task A_Rebuild_That_Fails_Transiently_Is_Called_Again_And_Indexing_Starts_After_It_Succeeds()
+    {
+        var storage = NewStorage();
+        var rebuild = new FakeRebuild(2, (_, _) => rebuildFailures++ < 2
+            ? throw new TimeoutException("cassandra timeout")
+            : Task.FromResult(new PartialRebuildResult(PartialRebuildOutcome.AlreadyDone)));
+        var (worker, lifetime) = Create(storage, Scenario.Adapter(), maxFailures: 10, rebuild: rebuild);
+
+        await worker.StartAsync(CancellationToken.None);
+        await WaitForRoundAsync(storage, Scenario.LastRound);
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.False(lifetime.StopRequested);
+        Assert.Equal(3, rebuild.Calls);
+    }
+
+    [Fact]
+    public async Task A_Source_Built_From_Another_History_Is_Refused_And_The_Rebuild_Is_Not_Called()
+    {
+        var storage = NewStorage();
+        var rebuild = new FakeRebuild(2, (_, _) => Task.FromResult(new PartialRebuildResult(PartialRebuildOutcome.Done))) { Source = new SourceCursor(3, new byte[32]) };
+        var (worker, lifetime) = Create(storage, Scenario.Adapter(), maxFailures: 10, rebuild: rebuild);
+
+        await worker.StartAsync(CancellationToken.None);
+        await lifetime.WaitForStopAsync();
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.Equal(1, Environment.ExitCode);
+        Assert.Equal(0, rebuild.Calls);
+        Assert.Null(await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task A_Source_Whose_Block_Matches_The_Chain_Lets_The_Rebuild_Run()
+    {
+        var storage = NewStorage();
+        var blocks = Scenario.Blocks(new TestChain()).ToList();
+        var rebuild = new FakeRebuild(2, (_, _) => Task.FromResult(new PartialRebuildResult(PartialRebuildOutcome.AlreadyDone))) { Source = new SourceCursor(3, blocks[2].Hash) };
+        var (worker, lifetime) = Create(storage, Scenario.Adapter(blocks), maxFailures: 10, rebuild: rebuild);
+
+        await worker.StartAsync(CancellationToken.None);
+        await WaitForRoundAsync(storage, Scenario.LastRound);
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.False(lifetime.StopRequested);
+        Assert.Equal(1, rebuild.Calls);
+    }
+
+    [Fact]
+    public async Task Losing_The_Lease_During_The_Rebuild_Cancels_It_And_The_Replica_Takes_Part_Again_Later()
+    {
+        var storage = NewStorage();
+        var health = new WorkerHealth();
+        var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var rebuild = new FakeRebuild(2, async (_, token) =>
+        {
+            started.TrySetResult();
+            if (cancelled.Task.IsCompleted)
+            {
+                return new PartialRebuildResult(PartialRebuildOutcome.AlreadyDone);
+            }
+
+            try
+            {
+                await Task.Delay(Timeout.Infinite, token);
+            }
+            catch (OperationCanceledException)
+            {
+                cancelled.TrySetResult();
+                throw;
+            }
+
+            return new PartialRebuildResult(PartialRebuildOutcome.AlreadyDone);
+        });
+        var (worker, lifetime) = Create(storage, Scenario.Adapter(), maxFailures: 10, health, rebuild: rebuild);
+
+        await worker.StartAsync(CancellationToken.None);
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        storage.RevokeLease();
+        await cancelled.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        await WaitUntilAsync(() => health.LeasesLost == 1 && storage.LeasesGranted == 2);
+        await WaitForRoundAsync(storage, Scenario.LastRound);
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.False(lifetime.StopRequested);
+        Assert.Equal(0, Environment.ExitCode);
+    }
+
+    [Fact]
     public async Task Losing_The_Lease_Stops_Indexing_And_The_Replica_Resumes_When_It_Gets_The_Lease_Again()
     {
         var storage = NewStorage();
@@ -460,7 +607,7 @@ public class IndexerWorkerTests : IDisposable
 
     private static InMemoryChainStorage NewStorage() => new(new ChainContext(ChainId.AlgorandTestnet));
 
-    private static (IndexerWorker Worker, FakeLifetime Lifetime) Create(InMemoryChainStorage storage, IChainAdapter adapter, int maxFailures, WorkerHealth? health = null, ILogger<IndexerWorker>? logger = null, string? version = null)
+    private static (IndexerWorker Worker, FakeLifetime Lifetime) Create(InMemoryChainStorage storage, IChainAdapter adapter, int maxFailures, WorkerHealth? health = null, ILogger<IndexerWorker>? logger = null, string? version = null, IPartialRebuild? rebuild = null)
     {
         var options = Options.Create(new IndexerOptions
         {
@@ -473,7 +620,7 @@ public class IndexerWorkerTests : IDisposable
         });
         var indexer = new RoundIndexer(adapter, new AlgoEffectNormalizer(), storage, options, NullLogger<RoundIndexer>.Instance);
         var lifetime = new FakeLifetime();
-        return (new IndexerWorker(indexer, storage, new ChainContext(ChainId.AlgorandTestnet), options, lifetime, storage, storage, health ?? new WorkerHealth(), logger ?? NullLogger<IndexerWorker>.Instance, buildVersion: version), lifetime);
+        return (new IndexerWorker(indexer, storage, new ChainContext(ChainId.AlgorandTestnet), options, lifetime, storage, storage, health ?? new WorkerHealth(), logger ?? NullLogger<IndexerWorker>.Instance, buildVersion: version, partialRebuilds: rebuild is null ? null : [rebuild]), lifetime);
     }
 
     private static async Task WaitForRoundAsync(InMemoryChainStorage storage, ulong round)
@@ -603,6 +750,35 @@ public class IndexerWorkerTests : IDisposable
             {
                 IndexedRoundsAtAppend.Add(status?.IndexedRound);
             }
+        }
+    }
+
+    private int rebuildFailures;
+
+    private sealed class FakeRebuild(ulong round, Func<byte[], CancellationToken, Task<PartialRebuildResult>> run) : IPartialRebuild
+    {
+        private int _calls;
+
+        public PartialRebuildRequest? Request { get; } = new("avm_old", round);
+
+        public SourceCursor? Source { get; init; }
+
+        public int Calls => Volatile.Read(ref _calls);
+
+        public List<byte[]> Hashes { get; } = [];
+
+        public Task<SourceCursor?> ReadSourceCursorAsync(CancellationToken cancellationToken) => Task.FromResult(Source);
+
+        public Task<PartialRebuildResult> RunAsync(ReadOnlyMemory<byte> blockHashAtRound, IProgress<PartialRebuildProgress>? progress, CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref _calls);
+            lock (Hashes)
+            {
+                Hashes.Add(blockHashAtRound.ToArray());
+            }
+
+            progress?.Report(new PartialRebuildProgress("effects", 1, 1, 256));
+            return run(blockHashAtRound.ToArray(), cancellationToken);
         }
     }
 

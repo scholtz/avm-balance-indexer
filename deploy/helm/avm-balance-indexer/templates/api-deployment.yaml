@@ -37,6 +37,7 @@ spec:
                 name: {{ include "avm.fullname" . }}-config
           env:
             {{- include "avm.storageEnv" . | nindent 12 }}
+            {{- include "avm.apiRebuildEnv" . | nindent 12 }}
           readinessProbe:
             httpGet: { path: /healthz/ready, port: http }
           livenessProbe:

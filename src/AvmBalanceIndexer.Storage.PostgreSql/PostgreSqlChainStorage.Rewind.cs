@@ -7,6 +7,9 @@ public sealed partial class PostgreSqlChainStorage
 {
     private const int RewindSteps = 8;
 
+    /// <summary>The rewind is in place, so there is no other database to check.</summary>
+    public Task<SourceCursor?> ReadSourceCursorAsync(CancellationToken cancellationToken) => Task.FromResult<SourceCursor?>(null);
+
     /// <summary>
     /// Rewinds the database to <c>Request.Round</c> in one transaction (ADR 0021): readers see the old state until the commit, then the
     /// rewound one. The advisory lock of the round writer is taken (so a writer that is still running waits, and then fails against the new

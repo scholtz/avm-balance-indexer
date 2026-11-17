@@ -2537,7 +2537,9 @@ impl Client {
     ///Start an asynchronous export of every holder of a token at a round
     ///
     ///Accepted at once; poll the scan and read the result pages. The body is
-    /// optional: { "round": 123, "includeZero": false }.
+    /// optional: { "round": 123, "includeZero": false }. Answered with 503
+    /// while scans are paused because this deployment is being rebuilt;
+    /// existing scans stay readable.
     ///
     ///Sends a `POST` request to
     /// `/v1/{chain}/tokens/{kind}/{tokenId}/holders/scans`

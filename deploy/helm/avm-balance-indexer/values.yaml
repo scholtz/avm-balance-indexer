@@ -40,6 +40,17 @@ storage:
     # A retired keyspace is dropped only after its status was untouched for this long (a writer keeps it moving): the time
     # in which a switch to a new keyspace can still be rolled back.
     retiredKeyspaceQuietMinutes: 60
+    # Partial rebuild (docs/adr/0021): fill `keyspace` from `forkFrom.keyspace` up to and including `round`, then index from round + 1.
+    # Carried out by the worker before it indexes; it only acts while `keyspace` has no published round, and the entry may stay
+    # afterwards (it then does nothing). Remove it together with the retirement of the old keyspace: a later change of `keyspace` to
+    # yet another new name with `forkFrom` still set would fork again from the old source.
+    forkFrom:
+      keyspace: ""      # the keyspace that is copied, for example avm_testnet_2 (only read)
+      round: 0          # the last round that is known to be good (a positive integer)
+      into: ""          # must be the same as `keyspace`; stops a request that was left behind from filling another keyspace
+    # While the worker fills a new `keyspace` the API keeps reading this one (a keyspace without a published round answers 503), and new
+    # holder scans are refused. Remove it when the new keyspace follows the chain and has been compared. Never list it in retiredKeyspaces.
+    apiKeyspace: ""
     localDatacenter: dc1
     # Encrypt the connection; credentials from existingSecret travel in clear text without it.
     useTls: false

@@ -354,7 +354,7 @@ class ScansApi:
     ) -> ScanResponse:
         """Start an asynchronous export of every holder of a token at a round
 
-        Accepted at once; poll the scan and read the result pages. The body is optional: { \"round\": 123, \"includeZero\": false }.
+        Accepted at once; poll the scan and read the result pages. The body is optional: { \"round\": 123, \"includeZero\": false }. Answered with 503 while scans are paused because this deployment is being rebuilt; existing scans stay readable.
 
         :param chain: The chain this deployment serves. (required)
         :type chain: ChainId
@@ -438,7 +438,7 @@ class ScansApi:
     ) -> ApiResponse[ScanResponse]:
         """Start an asynchronous export of every holder of a token at a round
 
-        Accepted at once; poll the scan and read the result pages. The body is optional: { \"round\": 123, \"includeZero\": false }.
+        Accepted at once; poll the scan and read the result pages. The body is optional: { \"round\": 123, \"includeZero\": false }. Answered with 503 while scans are paused because this deployment is being rebuilt; existing scans stay readable.
 
         :param chain: The chain this deployment serves. (required)
         :type chain: ChainId
@@ -522,7 +522,7 @@ class ScansApi:
     ) -> RESTResponseType:
         """Start an asynchronous export of every holder of a token at a round
 
-        Accepted at once; poll the scan and read the result pages. The body is optional: { \"round\": 123, \"includeZero\": false }.
+        Accepted at once; poll the scan and read the result pages. The body is optional: { \"round\": 123, \"includeZero\": false }. Answered with 503 while scans are paused because this deployment is being rebuilt; existing scans stay readable.
 
         :param chain: The chain this deployment serves. (required)
         :type chain: ChainId

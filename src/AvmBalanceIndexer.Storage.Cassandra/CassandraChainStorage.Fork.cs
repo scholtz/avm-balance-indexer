@@ -32,6 +32,18 @@ public sealed partial class CassandraChainStorage
         var source = request.Source;
         var round = unchecked((long)request.Round);
 
+        // A request that was carried out does nothing, and must not read the source: by then it may have been retired.
+        // Carried out = a published round AND the stored request matches. A keyspace that holds something else is refused, never continued:
+        // rows between a corrected and an earlier round would stay, and holdings written with the higher timestamp would win.
+        var published = await ReadCursorAsync(serial: true, cancellationToken).ConfigureAwait(false);
+        var stored = await ReadForkRequestAsync(cancellationToken).ConfigureAwait(false);
+        if (published is not null)
+        {
+            return stored is { } match && match.Source == source && match.Round == round
+                ? new PartialRebuildResult(PartialRebuildOutcome.AlreadyDone, $"{_keyspace} was filled before.")
+                : Refused($"{_keyspace} already follows the chain and was not filled from {source} at round {request.Round}");
+        }
+
         // The source must be a keyspace of this indexer that holds this chain. Reading its published round (and not its tip) matters: rows of a
         // round that was never published can exist in a keyspace (ADR 0003), and they must never be taken over.
         var sourceTables = await TablesOfAsync(session, source, cancellationToken).ConfigureAwait(false);
@@ -70,17 +82,6 @@ public sealed partial class CassandraChainStorage
         if (sourceRound == round && !statuses[0].GetValue<byte[]>("indexed_block_hash").AsSpan().SequenceEqual(blockHashAtRound.Span))
         {
             return Refused($"{source} holds another block hash at its round {request.Round} than the one given");
-        }
-
-        // Carried out = a published round AND the stored request matches. A keyspace that holds something else is refused, never continued:
-        // rows between a corrected and an earlier round would stay, and holdings written with the higher timestamp would win.
-        var published = await ReadCursorAsync(serial: true, cancellationToken).ConfigureAwait(false);
-        var stored = await ReadForkRequestAsync(cancellationToken).ConfigureAwait(false);
-        if (published is not null)
-        {
-            return stored is { } match && match.Source == source && match.Round == round
-                ? new PartialRebuildResult(PartialRebuildOutcome.AlreadyDone, $"{_keyspace} was filled before.")
-                : Refused($"{_keyspace} already follows the chain and was not filled from {source} at round {request.Round}");
         }
 
         if (stored is null)
@@ -147,6 +148,25 @@ public sealed partial class CassandraChainStorage
             : Refused($"{_keyspace} was published by something else while it was being filled; use a new keyspace name");
 
         static PartialRebuildResult Refused(string reason) => new(PartialRebuildOutcome.Refused, reason);
+    }
+
+    public async Task<SourceCursor?> ReadSourceCursorAsync(CancellationToken cancellationToken)
+    {
+        if (Request is not { } request || await ReadCursorAsync(serial: false, cancellationToken).ConfigureAwait(false) is not null)
+        {
+            return null;
+        }
+
+        var session = await _source.GetSessionAsync(cancellationToken).ConfigureAwait(false);
+        if (!(await TablesOfAsync(session, request.Source, cancellationToken).ConfigureAwait(false)).Contains("chain_status"))
+        {
+            return null;
+        }
+
+        var rows = (await ExecuteAsync($"SELECT chain, indexed_round, indexed_block_hash FROM {request.Source}.chain_status", cancellationToken).ConfigureAwait(false)).ToArray();
+        return rows is [var row] && string.Equals(row.GetValue<string>("chain"), _chain, StringComparison.Ordinal)
+            ? new SourceCursor((ulong)row.GetValue<long>("indexed_round"), row.GetValue<byte[]>("indexed_block_hash"))
+            : null;
     }
 
     private async Task<(string Source, long Round)?> ReadForkRequestAsync(CancellationToken cancellationToken)

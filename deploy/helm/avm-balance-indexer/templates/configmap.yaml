@@ -65,22 +65,7 @@ data:
   Storage__Cassandra__Keyspace: {{ .Values.storage.cassandra.keyspace | quote }}
   Storage__Cassandra__LocalDatacenter: {{ .Values.storage.cassandra.localDatacenter | quote }}
   Storage__Cassandra__RetiredKeyspaceQuietMinutes: {{ .Values.storage.cassandra.retiredKeyspaceQuietMinutes | quote }}
-  {{- if and .Values.storage.cassandra.retiredKeyspaces (ne .Values.storage.provider "Cassandra") }}
-  {{- fail "storage.cassandra.retiredKeyspaces is only carried out for storage.provider=Cassandra; the list would be ignored" }}
-  {{- end }}
-  {{- range $i, $retired := .Values.storage.cassandra.retiredKeyspaces }}
-  {{- /* The same rules as the options validator: a wrong entry must fail here, not in a pod that then cannot start. */}}
-  {{- if not (regexMatch $keyspacePattern (toString $retired)) }}
-  {{- fail (printf "storage.cassandra.retiredKeyspaces holds %q, which is not a keyspace name (a letter, then letters, digits and underscores, at most 48 characters)" (toString $retired)) }}
-  {{- end }}
-  {{- if hasPrefix "system" (lower $retired) }}
-  {{- fail (printf "storage.cassandra.retiredKeyspaces holds %q, a Cassandra system keyspace" $retired) }}
-  {{- end }}
-  {{- if eq (lower $retired) (lower $.Values.storage.cassandra.keyspace) }}
-  {{- fail (printf "storage.cassandra.retiredKeyspaces holds %q, the keyspace this release uses: it would drop its own data" $retired) }}
-  {{- end }}
-  Storage__Cassandra__RetiredKeyspaces__{{ $i }}: {{ $retired | quote }}
-  {{- end }}
+  {{- /* retiredKeyspaces, apiKeyspace and forkFrom are acted on by the worker only: they are rendered (and checked) as env entries of the worker, see _rebuild-env.tpl. */}}
   {{- $contactPoints := .Values.storage.cassandra.contactPoints }}
   {{- if and .Values.cassandra.embedded.enabled (not $contactPoints) }}
   {{- $contactPoints = list (printf "%s-cassandra" (include "avm.fullname" .)) }}

@@ -184,6 +184,23 @@ public class CassandraForkTests(CassandraFixture cassandra)
     }
 
     [Fact]
+    public async Task A_Request_That_Was_Carried_Out_Does_Not_Read_The_Source_Which_May_Be_Retired_By_Then()
+    {
+        var full = await IndexedAsync(Scenario.LastRound);
+        var reference = await IndexedAsync(3);
+        var hash = await HashOfAsync(reference, 3);
+        var target = await TargetAsync(full, 3);
+        await ForkAsync(target, hash);
+        var session = await cassandra.SessionOfAsync(full);
+        await session.ExecuteAsync(new SimpleStatement($"DROP KEYSPACE {cassandra.KeyspaceOf(full)}"));
+
+        var again = await ForkAsync(target, hash);
+
+        Assert.Equal(PartialRebuildOutcome.AlreadyDone, again.Outcome);
+        Assert.Null(await target.ReadSourceCursorAsync(CancellationToken.None));
+    }
+
+    [Fact]
     public async Task A_Copy_That_Stopped_Half_Way_Is_Resumed_Nothing_Is_Visible_Before_The_End_And_The_Result_Is_Equal()
     {
         var full = await IndexedAsync(Scenario.LastRound);
@@ -293,6 +310,24 @@ public class CassandraForkTests(CassandraFixture cassandra)
         Assert.NotEmpty(Errors("avm_old", "avm_x", ["avm_old"], "avm_x"));
         Assert.NotEmpty(Errors("avm_old", "avm_x", [], "avm_other"));
         Assert.Empty(Errors("avm_old", "avm_x", ["avm_older"], "avm_x"));
+    }
+
+    [Theory]
+    [InlineData("avm_api", new[] { "avm_api" }, true)] // retiring the keyspace the API reads
+    [InlineData("AVM_API", new[] { "avm_api" }, true)]
+    [InlineData("avm_api", new[] { "avm_older" }, false)]
+    [InlineData("bad name", new string[0], true)]
+    [InlineData("", new[] { "avm_old" }, false)]
+    public void The_Keyspace_The_Api_Reads_Can_Never_Be_Retired(string apiKeyspace, string[] retired, bool refused)
+    {
+        var services = new ServiceCollection();
+        services.AddCassandraStorage();
+        using var provider = services.BuildServiceProvider();
+        var options = new StorageOptions { Provider = StorageProvider.Cassandra, Cassandra = { ContactPoints = ["localhost"], Keyspace = "avm_x", ApiKeyspace = apiKeyspace, RetiredKeyspaces = retired } };
+
+        var result = provider.GetServices<IValidateOptions<StorageOptions>>().Single().Validate(null, options);
+
+        Assert.Equal(refused, result.Failed);
     }
 
     private static List<string> Errors(string source, string keyspace, string[] retired, string into)

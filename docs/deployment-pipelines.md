@@ -114,6 +114,10 @@ Upgrades follow the rules of [operations.md](operations.md) automatically: when 
 seconds a worker restart takes. Deployments of one release never overlap (a run waits for the running one; of several waiting runs only the newest is kept, so start a rollback when nothing else is pending), testnet only ever deploys the head of `main`, and a production tag is refused unless CI succeeded on its commit.
 For a rollback give *Deploy production* the image tag; the chart and values come from the commit in it (or from `ref` for older tags such as `main-<sha7>`).
 
+A partial rebuild (ADR 0021) is requested the same way: `storage.cassandra.forkFrom` (with `into`, the new keyspace) and `storage.cassandra.apiKeyspace` (what the API keeps reading meanwhile). The worker copies the
+old keyspace before it indexes; the step *Partial rebuild* of the deploy job prints what the workers report and raises an error annotation when the request was refused, without failing the job. See the runbook in
+[operations.md](operations.md#reindex-after-a-normalizer-fix-runbook).
+
 Database change requests travel the same way (ADR 0020): a keyspace listed in `storage.cassandra.retiredKeyspaces` of a values file is dropped by the worker once the release follows the chain. The step
 *Database change requests* of the deploy job prints what the workers reported (removed, already gone, still in use or pending). When the worker refused a keyspace the step is marked failed with an error annotation; the
 job and the deployment of the other chains continue, because the release itself is healthy. Nothing is run by hand in the cluster.

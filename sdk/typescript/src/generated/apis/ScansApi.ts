@@ -148,7 +148,7 @@ export interface ScansApiInterface {
     createHolderScanRequestOpts(requestParameters: CreateHolderScanRequest): Promise<runtime.RequestOpts>;
 
     /**
-     * Accepted at once; poll the scan and read the result pages. The body is optional: { \"round\": 123, \"includeZero\": false }.
+     * Accepted at once; poll the scan and read the result pages. The body is optional: { \"round\": 123, \"includeZero\": false }. Answered with 503 while scans are paused because this deployment is being rebuilt; existing scans stay readable.
      * @summary Start an asynchronous export of every holder of a token at a round
      * @param {ChainId} chain The chain this deployment serves.
      * @param {TokenKind} kind Token kind: algo (native), asa (Algorand Standard Asset, also ARC-20) or arc200 (application token).
@@ -161,7 +161,7 @@ export interface ScansApiInterface {
     createHolderScanRaw(requestParameters: CreateHolderScanRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<ScanResponse>>;
 
     /**
-     * Accepted at once; poll the scan and read the result pages. The body is optional: { \"round\": 123, \"includeZero\": false }.
+     * Accepted at once; poll the scan and read the result pages. The body is optional: { \"round\": 123, \"includeZero\": false }. Answered with 503 while scans are paused because this deployment is being rebuilt; existing scans stay readable.
      * Start an asynchronous export of every holder of a token at a round
      */
     createHolderScan(requestParameters: CreateHolderScanRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<ScanResponse>;
@@ -328,7 +328,7 @@ export class ScansApi extends runtime.BaseAPI implements ScansApiInterface {
     }
 
     /**
-     * Accepted at once; poll the scan and read the result pages. The body is optional: { \"round\": 123, \"includeZero\": false }.
+     * Accepted at once; poll the scan and read the result pages. The body is optional: { \"round\": 123, \"includeZero\": false }. Answered with 503 while scans are paused because this deployment is being rebuilt; existing scans stay readable.
      * Start an asynchronous export of every holder of a token at a round
      */
     async createHolderScanRaw(requestParameters: CreateHolderScanRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<ScanResponse>> {
@@ -339,7 +339,7 @@ export class ScansApi extends runtime.BaseAPI implements ScansApiInterface {
     }
 
     /**
-     * Accepted at once; poll the scan and read the result pages. The body is optional: { \"round\": 123, \"includeZero\": false }.
+     * Accepted at once; poll the scan and read the result pages. The body is optional: { \"round\": 123, \"includeZero\": false }. Answered with 503 while scans are paused because this deployment is being rebuilt; existing scans stay readable.
      * Start an asynchronous export of every holder of a token at a round
      */
     async createHolderScan(requestParameters: CreateHolderScanRequest, initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<ScanResponse> {

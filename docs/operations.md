@@ -103,13 +103,29 @@ rebuild into a new keyspace.
 The versions are the image tags (ADR 0014). A deployment upgraded to this release gets its first row at the then indexed round + 1; rounds before that row were written by an unknown build.
 A restart of the same build without new rounds adds no row.
 
+**Partial rebuild, the default way to roll out a normalizer fix (issue #179, ADR 0021).** Only the rounds after the first affected round F are indexed again: the worker copies the old keyspace up
+to R = F - 1 into the new one and indexes from R + 1 with the fixed code. Nobody touches the cluster; it is three changes of the values:
+
+1. *Fill.* `storage.cassandra.keyspace: <new>`, `storage.cassandra.forkFrom: { keyspace: <old>, round: R, into: <new> }` and `storage.cassandra.apiKeyspace: <old>`. The worker copies the old keyspace
+   (it logs `Partial rebuild of ...` every 30 seconds and exposes `avm.rebuild.ranges_done` / `avm.rebuild.ranges_total`), then replays the rounds after R. Meanwhile the API keeps serving the old keyspace, frozen
+   at its last round (the status reports a growing lag), and new holder scans are answered with 503 (`Api:ScansEnabled` is switched off; existing scans stay readable). The deploy job prints the worker's report
+   (step *Partial rebuild*); a refused request stops the worker with exit code 1 and the reason in its log (a wrong source, a keyspace that holds something else, a source built from another history).
+   Take the progress of the new keyspace from the worker: its `avm.indexer.lag_rounds` metric or its log, because the public status still shows the old keyspace.
+2. *Switch.* When the new keyspace follows the chain and the comparison of step 3 below is done, remove `apiKeyspace`. The API reads the new keyspace from then on. Answers for explicit rounds are cacheable for an
+   hour (`Cache-Control` of the round endpoints), so wrong answers for rounds after R can stay in caches for that hour after the switch.
+3. *Clean up.* `retiredKeyspaces: [<old>]` and remove `forkFrom`, in the same change (a later change of `keyspace` to yet another name with `forkFrom` still set would fork again from the old source; the keyspace the
+   API reads, `apiKeyspace`, can never be retired, the chart and the worker refuse it).
+
+The cost: the copy is a full read of the old keyspace's effect tables (the scan is by token range, the rounds after R are read and dropped on the client), then one lookup per account and token for the holdings. The
+request is stored in the new keyspace: another source or round with the same keyspace name is refused ("use a new keyspace name"), and `forkFrom` staying in the values after the copy is harmless (the worker answers *already done*).
+
 **Cassandra: fill a new keyspace from the old one (issue #178, ADR 0021).** Instead of indexing from genesis, a new keyspace takes over everything of the old one up to a round R
 (`Storage:Cassandra:ForkFrom:Keyspace`, `:Round` and `:Into`, which must name the new keyspace so that a request left in the values cannot fill another one) and indexing continues after R.
 The old keyspace is only read. The copy scans the old keyspace in 256 token ranges per table, filters by round on the client, derives the holdings from the newest copied effect of every
 account and token, and publishes the cursor last (a lightweight transaction), so nothing is visible before the end. Progress is kept in `fork_progress`: a copy that stopped is repeated
 from its finished ranges. The new keyspace is bound to its request: another source or round on the same keyspace is refused ("use a new keyspace name"), and a keyspace that already follows the
-chain without a matching request is refused too. Rows of a round that was never published are not taken over (R must not exceed the source's published round). Until #179 wires it into the
-worker and the chart, the provider has the operation but nothing starts it.
+chain without a matching request is refused too. Rows of a round that was never published are not taken over (R must not exceed the source's published round). The worker
+starts it (see above).
 
 **PostgreSQL: rewind in place (issue #180, ADR 0021).** PostgreSQL has transactions, so a database is rewound to a round R in one transaction instead of being rebuilt next to the old one.
 The provider supports it with two settings, `Storage:PostgreSql:RewindTo:Round` and `Storage:PostgreSql:RewindTo:RequestId` (use a new request id for every rewind: it is recorded in
@@ -118,8 +134,7 @@ and the touched-account directory of the affected accounts from what remains, re
 and sets the cursor to R with state `Backfilling`; readers see the old state until the commit. Before you run it take a backup or note the PITR position (there is no undo window), expect clients
 to see `indexedRound` drop from the tip to R (requests for rounds above R are refused as not indexed until the replay passes them), and expect the delete to take time on a big database
 (it reads the affected pairs from the token-oriented table, then deletes by primary-key prefix). A request that is refused (the database is behind the round, or the hash differs) is not recorded and stays armed:
-remove the setting after the run, or a later restart at a higher round would carry it out. A Warning log line with the number of deleted rows is written by the worker once the wiring
-of #179 calls it; until that is merged the provider has the operation but nothing starts it.
+remove the setting after the run, or a later restart at a higher round would carry it out. The worker logs a Warning audit line when a rebuild ran; the chart values for the PostgreSQL rewind are not part of #179 (they follow when a PostgreSQL deployment needs them).
 
 Choose how to switch:
 
