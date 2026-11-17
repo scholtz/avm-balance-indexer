@@ -11,6 +11,7 @@ namespace AvmBalanceIndexer.Api;
 /// <param name="Health">The API's view of ingestion: <c>NotStarted</c>, <c>Healthy</c>, or <c>Stalled</c> when the writer has not updated the status for longer than <c>Api:StalledAfterSeconds</c>.</param>
 /// <param name="StatusAgeSeconds">Whole seconds since the writer last updated the status; never negative, null before the first round.</param>
 /// <param name="HistoricalQueries">How holders at a round are computed and the limits that apply.</param>
+/// <param name="IndexedBy">The build that is writing the newest rounds and the round it began at; null when the database has no record yet. Rounds before it were written by earlier builds.</param>
 public sealed record StatusResponse(
     string Chain,
     string Provider,
@@ -21,7 +22,14 @@ public sealed record StatusResponse(
     DateTimeOffset? UpdatedAt,
     string Health,
     long? StatusAgeSeconds,
-    HistoricalQueriesInfo HistoricalQueries);
+    HistoricalQueriesInfo HistoricalQueries,
+    IndexedByInfo? IndexedBy = null);
+
+/// <summary>The newest writer term: which build indexes the chain from which round on.</summary>
+/// <param name="Version">The version of the indexer build.</param>
+/// <param name="FromRound">The first round this build wrote.</param>
+/// <param name="Since">When this build began writing.</param>
+public sealed record IndexedByInfo(string Version, ulong FromRound, DateTimeOffset Since);
 
 /// <summary>How holders at a round are computed, and the limits a synchronous request runs into.</summary>
 /// <param name="Mode">Always <c>EffectAggregation</c>: holders at a round are computed by aggregating token effects, there are no snapshots.</param>

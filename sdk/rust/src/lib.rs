@@ -27,7 +27,7 @@ use futures_util::stream;
 use progenitor_client::ResponseValue;
 
 pub use generated::types::{
-    BalanceResponse, ChainId, EffectDto, ErrorResponse, HistoricalQueriesInfo, HistoryResponse, HolderDto, HoldersResponse,
+    BalanceResponse, ChainId, EffectDto, ErrorResponse, HistoricalQueriesInfo, HistoryResponse, HolderDto, HoldersResponse, IndexedByInfo,
     HoldingDto, HoldingsResponse,
     ScanHoldersResponse, ScanRequest, ScanResponse, StatusResponse, TokenKind, TokenRef, TokenResponse,
 };

@@ -1381,6 +1381,31 @@
           }
         }
       },
+      "IndexedByInfo": {
+        "required": [
+          "version",
+          "fromRound",
+          "since"
+        ],
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "string",
+            "description": "The version of the indexer build."
+          },
+          "fromRound": {
+            "type": "integer",
+            "description": "The first round this build wrote.",
+            "format": "uint64"
+          },
+          "since": {
+            "type": "string",
+            "description": "When this build began writing.",
+            "format": "date-time"
+          }
+        },
+        "description": "The newest writer term: which build indexes the chain from which round on."
+      },
       "ScanHoldersResponse": {
         "required": [
           "id",
@@ -1550,6 +1575,19 @@
           },
           "historicalQueries": {
             "$ref": "#/components/schemas/HistoricalQueriesInfo"
+          },
+          "indexedBy": {
+            "oneOf": [
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true
+              },
+              {
+                "$ref": "#/components/schemas/IndexedByInfo"
+              }
+            ]
           }
         },
         "description": "Indexed round, target round, lag and ingestion state of the chain this deployment serves."

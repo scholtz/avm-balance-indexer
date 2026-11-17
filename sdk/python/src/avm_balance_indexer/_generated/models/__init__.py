@@ -23,6 +23,7 @@ from avm_balance_indexer._generated.models.holder_dto import HolderDto
 from avm_balance_indexer._generated.models.holders_response import HoldersResponse
 from avm_balance_indexer._generated.models.holding_dto import HoldingDto
 from avm_balance_indexer._generated.models.holdings_response import HoldingsResponse
+from avm_balance_indexer._generated.models.indexed_by_info import IndexedByInfo
 from avm_balance_indexer._generated.models.scan_holders_response import ScanHoldersResponse
 from avm_balance_indexer._generated.models.scan_request import ScanRequest
 from avm_balance_indexer._generated.models.scan_response import ScanResponse

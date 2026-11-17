@@ -43,6 +43,7 @@ __all__ = [
     "HoldersResponse",
     "HoldingDto",
     "HoldingsResponse",
+    "IndexedByInfo",
     "ScanHoldersResponse",
     "ScanRequest",
     "ScanResponse",
@@ -82,6 +83,7 @@ from avm_balance_indexer._generated.models.holder_dto import HolderDto as Holder
 from avm_balance_indexer._generated.models.holders_response import HoldersResponse as HoldersResponse
 from avm_balance_indexer._generated.models.holding_dto import HoldingDto as HoldingDto
 from avm_balance_indexer._generated.models.holdings_response import HoldingsResponse as HoldingsResponse
+from avm_balance_indexer._generated.models.indexed_by_info import IndexedByInfo as IndexedByInfo
 from avm_balance_indexer._generated.models.scan_holders_response import ScanHoldersResponse as ScanHoldersResponse
 from avm_balance_indexer._generated.models.scan_request import ScanRequest as ScanRequest
 from avm_balance_indexer._generated.models.scan_response import ScanResponse as ScanResponse

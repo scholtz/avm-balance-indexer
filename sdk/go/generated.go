@@ -147,6 +147,18 @@ type HoldingsResponse struct {
 	NextCursor   *string      `json:"nextCursor"`
 }
 
+// IndexedByInfo The newest writer term: which build indexes the chain from which round on.
+type IndexedByInfo struct {
+	// FromRound The first round this build wrote.
+	FromRound uint64 `json:"fromRound"`
+
+	// Since When this build began writing.
+	Since time.Time `json:"since"`
+
+	// Version The version of the indexer build.
+	Version string `json:"version"`
+}
+
 // ScanHoldersResponse defines model for ScanHoldersResponse.
 type ScanHoldersResponse struct {
 	Complete   bool               `json:"complete"`
@@ -187,7 +199,8 @@ type StatusResponse struct {
 	Health *string `json:"health,omitempty"`
 
 	// HistoricalQueries How holders at a round are computed, and the limits a synchronous request runs into.
-	HistoricalQueries *HistoricalQueriesInfo `json:"historicalQueries,omitempty"`
+	HistoricalQueries *HistoricalQueriesInfo    `json:"historicalQueries,omitempty"`
+	IndexedBy         *StatusResponse_IndexedBy `json:"indexedBy,omitempty"`
 
 	// IndexedRound The newest round the API serves; null before the first round.
 	IndexedRound *uint64 `json:"indexedRound"`
@@ -209,6 +222,14 @@ type StatusResponse struct {
 
 	// UpdatedAt When the writer last updated the status.
 	UpdatedAt *time.Time `json:"updatedAt"`
+}
+
+// StatusResponseIndexedBy0 defines model for StatusResponse.IndexedBy.0.
+type StatusResponseIndexedBy0 = interface{}
+
+// StatusResponse_IndexedBy defines model for StatusResponse.IndexedBy.
+type StatusResponse_IndexedBy struct {
+	union json.RawMessage
 }
 
 // TokenKind algo (native, token id 0), asa (Algorand Standard Asset, also ARC-20 Smart ASAs) or arc200 (application token).
@@ -293,6 +314,68 @@ type GetTokenHoldersParams struct {
 
 // CreateHolderScanJSONRequestBody defines body for CreateHolderScan for application/json ContentType.
 type CreateHolderScanJSONRequestBody = ScanRequest
+
+// AsStatusResponseIndexedBy0 returns the union data inside the StatusResponse_IndexedBy as a StatusResponseIndexedBy0
+func (t StatusResponse_IndexedBy) AsStatusResponseIndexedBy0() (StatusResponseIndexedBy0, error) {
+	var body StatusResponseIndexedBy0
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromStatusResponseIndexedBy0 overwrites any union data inside the StatusResponse_IndexedBy as the provided StatusResponseIndexedBy0
+func (t *StatusResponse_IndexedBy) FromStatusResponseIndexedBy0(v StatusResponseIndexedBy0) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeStatusResponseIndexedBy0 performs a merge with any union data inside the StatusResponse_IndexedBy, using the provided StatusResponseIndexedBy0
+func (t *StatusResponse_IndexedBy) MergeStatusResponseIndexedBy0(v StatusResponseIndexedBy0) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsIndexedByInfo returns the union data inside the StatusResponse_IndexedBy as a IndexedByInfo
+func (t StatusResponse_IndexedBy) AsIndexedByInfo() (IndexedByInfo, error) {
+	var body IndexedByInfo
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromIndexedByInfo overwrites any union data inside the StatusResponse_IndexedBy as the provided IndexedByInfo
+func (t *StatusResponse_IndexedBy) FromIndexedByInfo(v IndexedByInfo) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeIndexedByInfo performs a merge with any union data inside the StatusResponse_IndexedBy, using the provided IndexedByInfo
+func (t *StatusResponse_IndexedBy) MergeIndexedByInfo(v IndexedByInfo) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t StatusResponse_IndexedBy) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *StatusResponse_IndexedBy) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
 
 // RequestEditorFn is the function signature for the RequestEditor callback function
 type RequestEditorFn func(ctx context.Context, req *http.Request) error

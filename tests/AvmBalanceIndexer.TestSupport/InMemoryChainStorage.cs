@@ -19,7 +19,30 @@ public partial class InMemoryChainStorage(ChainContext context) : IChainStorage
     private readonly Dictionary<HoldingKey, List<TokenEffect>> _effects = [];
     private readonly Dictionary<HoldingKey, Holding> _holdings = [];
     private readonly Dictionary<TokenKey, TokenInfo> _tokens = [];
+    private readonly List<IndexingTerm> _terms = [];
     private ChainStatus? _status;
+
+    public virtual Task AppendAsync(IndexingTerm term, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(term);
+        lock (_gate)
+        {
+            if (!_terms.Any(t => t.FromRound == term.FromRound && t.Version == term.Version))
+            {
+                _terms.Add(term);
+            }
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public virtual Task<IReadOnlyList<IndexingTerm>> ListAsync(CancellationToken cancellationToken)
+    {
+        lock (_gate)
+        {
+            return Task.FromResult<IReadOnlyList<IndexingTerm>>([.. _terms.OrderByDescending(static t => t.FromRound).ThenBy(static t => t.Version, StringComparer.Ordinal)]);
+        }
+    }
 
     /// <summary>Total number of stored effect rows.</summary>
     public int EffectCount

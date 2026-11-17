@@ -10,6 +10,7 @@ export * from './HolderDto.js';
 export * from './HoldersResponse.js';
 export * from './HoldingDto.js';
 export * from './HoldingsResponse.js';
+export * from './IndexedByInfo.js';
 export * from './ScanHoldersResponse.js';
 export * from './ScanRequest.js';
 export * from './ScanResponse.js';

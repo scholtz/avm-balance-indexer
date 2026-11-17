@@ -87,6 +87,78 @@ public sealed class ApiTests : IDisposable
         Assert.Equal("EffectAggregation", status.GetProperty("historicalQueries").GetProperty("mode").GetString());
     }
 
+    [Fact]
+    public async Task Status_Reports_The_Newest_Indexing_Term_And_Null_Without_Records()
+    {
+        await _storage.WriteRoundAsync(
+            new ChainStatus(ChainId.AlgorandTestnet, 0, TestChain.FakeHash(0), 0, IngestionState.Following, Now),
+            [],
+            CancellationToken.None);
+        using var client = CreateClient();
+        var without = await client.GetFromJsonAsync<JsonElement>(new Uri("/v1/algorand-testnet/status", UriKind.Relative));
+        Assert.Equal(JsonValueKind.Null, without.GetProperty("indexedBy").ValueKind);
+
+        await _storage.AppendAsync(new IndexingTerm(0, "v1", Now.AddDays(-2)), CancellationToken.None);
+        await _storage.AppendAsync(new IndexingTerm(500, "v2", Now.AddDays(-1)), CancellationToken.None);
+        using var second = CreateClient();
+        var status = await second.GetFromJsonAsync<JsonElement>(new Uri("/v1/algorand-testnet/status", UriKind.Relative));
+
+        var by = status.GetProperty("indexedBy");
+        Assert.Equal("v2", by.GetProperty("version").GetString());
+        Assert.Equal(500UL, by.GetProperty("fromRound").GetUInt64());
+        Assert.Equal(Now.AddDays(-1), by.GetProperty("since").GetDateTimeOffset());
+    }
+
+    [Fact]
+    public async Task The_Indexing_Term_Is_Cached_And_A_Failing_Lookup_Does_Not_Fail_The_Status()
+    {
+        var storage = new CountingLogStorage();
+        await storage.WriteRoundAsync(
+            new ChainStatus(ChainId.AlgorandTestnet, 0, TestChain.FakeHash(0), 0, IngestionState.Following, Now),
+            [],
+            CancellationToken.None);
+        await storage.AppendAsync(new IndexingTerm(0, "v1", Now), CancellationToken.None);
+        using var client = CreateClient(storage);
+
+        for (var i = 0; i < 3; i++)
+        {
+            var status = await client.GetFromJsonAsync<JsonElement>(new Uri("/v1/algorand-testnet/status", UriKind.Relative));
+            Assert.Equal("v1", status.GetProperty("indexedBy").GetProperty("version").GetString());
+        }
+
+        Assert.Equal(1, storage.Lists);
+
+        var failing = new CountingLogStorage { Fail = true };
+        await failing.WriteRoundAsync(
+            new ChainStatus(ChainId.AlgorandTestnet, 0, TestChain.FakeHash(0), 0, IngestionState.Following, Now),
+            [],
+            CancellationToken.None);
+        using var other = CreateClient(failing);
+        var unavailable = await other.GetFromJsonAsync<JsonElement>(new Uri("/v1/algorand-testnet/status", UriKind.Relative));
+        Assert.Equal(JsonValueKind.Null, unavailable.GetProperty("indexedBy").ValueKind);
+        Assert.Equal("Following", unavailable.GetProperty("state").GetString());
+    }
+
+    private sealed class CountingLogStorage : InMemoryChainStorage
+    {
+        private int _lists;
+
+        public CountingLogStorage()
+            : base(new ChainContext(ChainId.AlgorandTestnet))
+        {
+        }
+
+        public bool Fail { get; init; }
+
+        public int Lists => Volatile.Read(ref _lists);
+
+        public override Task<IReadOnlyList<IndexingTerm>> ListAsync(CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref _lists);
+            return Fail ? throw new InvalidOperationException("no such table") : base.ListAsync(cancellationToken);
+        }
+    }
+
     [Theory]
     [InlineData(0, "Healthy", 0)]
     [InlineData(-30, "Healthy", 30)]
@@ -243,6 +315,10 @@ public sealed class ApiTests : IDisposable
 
     private sealed class ThrowingStorage(Exception? failure = null) : IChainStorage
     {
+        public Task AppendAsync(IndexingTerm term, CancellationToken cancellationToken) => throw new InvalidOperationException();
+
+        public Task<IReadOnlyList<IndexingTerm>> ListAsync(CancellationToken cancellationToken) => throw new InvalidOperationException();
+
         public Task<ChainStatus?> GetAsync(string chain, CancellationToken cancellationToken) => throw failure ?? new InvalidOperationException("database is down");
 
         public Task UpdateProgressAsync(ChainStatus status, CancellationToken cancellationToken) => throw new InvalidOperationException();

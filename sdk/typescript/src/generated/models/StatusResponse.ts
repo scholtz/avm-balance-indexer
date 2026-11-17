@@ -13,6 +13,13 @@
  */
 
 import { mapValues, parseDate, parseDateTime, serializeDate, serializeDateTime } from '../runtime.js';
+import type { IndexedByInfo } from './IndexedByInfo.js';
+import {
+    IndexedByInfoFromJSON,
+    IndexedByInfoFromJSONTyped,
+    IndexedByInfoToJSON,
+    IndexedByInfoToJSONTyped,
+} from './IndexedByInfo.js';
 import type { HistoricalQueriesInfo } from './HistoricalQueriesInfo.js';
 import {
     HistoricalQueriesInfoFromJSON,
@@ -67,6 +74,10 @@ export interface StatusResponse {
      * 
      */
     historicalQueries?: HistoricalQueriesInfo;
+    /**
+     * 
+     */
+    indexedBy?: IndexedByInfo | null;
 }
 
 /**
@@ -103,6 +114,7 @@ export function StatusResponseFromJSONTyped(json: any, ignoreDiscriminator: bool
         'health': json['health'] == null ? undefined : json['health'],
         'statusAgeSeconds': json['statusAgeSeconds'] === undefined ? undefined : json['statusAgeSeconds'] === null ? null : json['statusAgeSeconds'],
         'historicalQueries': json['historicalQueries'] == null ? undefined : HistoricalQueriesInfoFromJSON(json['historicalQueries']),
+        'indexedBy': json['indexedBy'] === undefined ? undefined : json['indexedBy'] === null ? null : IndexedByInfoFromJSON(json['indexedBy']),
     };
 }
 
@@ -127,6 +139,7 @@ export function StatusResponseToJSONTyped(value?: StatusResponse | null, ignoreD
         'health': value['health'],
         'statusAgeSeconds': value['statusAgeSeconds'],
         'historicalQueries': HistoricalQueriesInfoToJSON(value['historicalQueries']),
+        'indexedBy': IndexedByInfoToJSON(value['indexedBy']),
     };
 }
 
