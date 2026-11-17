@@ -20,6 +20,7 @@ public partial class InMemoryChainStorage(ChainContext context) : IChainStorage
     private readonly Dictionary<HoldingKey, Holding> _holdings = [];
     private readonly Dictionary<TokenKey, TokenInfo> _tokens = [];
     private readonly List<IndexingTerm> _terms = [];
+    private readonly List<AuditStop> _stops = [];
     private ChainStatus? _status;
 
     public virtual Task AppendAsync(IndexingTerm term, CancellationToken cancellationToken)
@@ -41,6 +42,42 @@ public partial class InMemoryChainStorage(ChainContext context) : IChainStorage
         lock (_gate)
         {
             return Task.FromResult<IReadOnlyList<IndexingTerm>>([.. _terms.OrderByDescending(static t => t.FromRound).ThenByDescending(static t => t.StartedAt).ThenBy(static t => t.Version, StringComparer.Ordinal)]);
+        }
+    }
+
+    public Task RecordAuditStopAsync(AuditStop auditStop, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(auditStop);
+        lock (_gate)
+        {
+            if (_stops.All(s => s.Round != auditStop.Round))
+            {
+                _stops.Add(auditStop with { Acknowledged = false });
+            }
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public Task<AuditStop?> GetAuditStopAsync(CancellationToken cancellationToken)
+    {
+        lock (_gate)
+        {
+            return Task.FromResult(_stops.Where(static s => !s.Acknowledged).OrderBy(static s => s.Round).FirstOrDefault());
+        }
+    }
+
+    public Task<bool> AcknowledgeAuditStopAsync(ulong round, CancellationToken cancellationToken)
+    {
+        lock (_gate)
+        {
+            var index = _stops.FindIndex(s => s.Round == round && !s.Acknowledged);
+            if (index >= 0)
+            {
+                _stops[index] = _stops[index] with { Acknowledged = true };
+            }
+
+            return Task.FromResult(index >= 0);
         }
     }
 

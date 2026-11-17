@@ -29,6 +29,11 @@ public sealed class WorkerHealth : IDisposable
     private long _leasesLost;
     private long _transientFailures;
     private long _sampleFailures;
+    private long _auditedRound;
+    private long _auditedRounds;
+    private long _auditMismatches;
+    private long _auditIgnored;
+    private long _auditSkipped;
     private readonly object _rebuildGate = new();
     private (int Done, int Total) _rebuild;
     private Func<long> _roundsCommitted = static () => 0;
@@ -45,6 +50,11 @@ public sealed class WorkerHealth : IDisposable
         _meter.CreateObservableCounter("avm.indexer.status_sample_failures", () => Interlocked.Read(ref _sampleFailures), description: "Failed reads of the published status; while they rise the avm.indexer gauges are stale");
         _meter.CreateObservableCounter("avm.worker.transient_failures", () => Interlocked.Read(ref _transientFailures), description: "Retried indexing failures");
         _meter.CreateObservableCounter("avm.worker.rounds_committed", () => _roundsCommitted(), description: "Rounds this process committed");
+        _meter.CreateObservableGauge("avm.audit.last_round", () => Interlocked.Read(ref _auditedRound), description: "Last round the ledger audit compared with the ledger (ADR 0021); 0 before the first");
+        _meter.CreateObservableCounter("avm.audit.rounds", () => Interlocked.Read(ref _auditedRounds), description: "Rounds the ledger audit compared with the ledger");
+        _meter.CreateObservableCounter("avm.audit.mismatches", () => Interlocked.Read(ref _auditMismatches), description: "Rounds at which the database disagreed with the ledger; the worker stops at the first (Worker:Audit:StopOnMismatch)");
+        _meter.CreateObservableCounter("avm.audit.ignored_mismatches", () => Interlocked.Read(ref _auditIgnored), description: "Mismatches at rounds listed in Worker:Audit:IgnoreRounds");
+        _meter.CreateObservableCounter("avm.audit.skipped", () => Interlocked.Read(ref _auditSkipped), description: "Rounds or passes the audit could not compare (no deltas, node or database unreachable); never a failure");
         _meter.CreateObservableGauge("avm.rebuild.ranges_done", () => { lock (_rebuildGate) { return _rebuild.Done; } }, description: "Ranges of the stage of a partial rebuild that is running that are finished (ADR 0021)");
         _meter.CreateObservableGauge("avm.rebuild.ranges_total", () => { lock (_rebuildGate) { return _rebuild.Total; } }, description: "Ranges of the stage of a partial rebuild that is running; 0 when none runs");
 
@@ -89,6 +99,31 @@ public sealed class WorkerHealth : IDisposable
     }
 
     public void BecameStandby() => State = WorkerState.Standby;
+
+    internal long LastAuditedRound => Interlocked.Read(ref _auditedRound);
+
+    internal long AuditMismatches => Interlocked.Read(ref _auditMismatches);
+
+    internal long AuditIgnored => Interlocked.Read(ref _auditIgnored);
+
+    internal long AuditSkippedCount => Interlocked.Read(ref _auditSkipped);
+
+    /// <summary>A round was compared with the ledger.</summary>
+    /// <param name="round">The round.</param>
+    public void ReportAudited(ulong round)
+    {
+        Interlocked.Exchange(ref _auditedRound, unchecked((long)round));
+        Interlocked.Increment(ref _auditedRounds);
+    }
+
+    /// <summary>The database disagreed with the ledger.</summary>
+    public void AuditMismatch() => Interlocked.Increment(ref _auditMismatches);
+
+    /// <summary>The database disagreed at a round the operator listed in <c>IgnoreRounds</c>.</summary>
+    public void AuditIgnoredMismatch() => Interlocked.Increment(ref _auditIgnored);
+
+    /// <summary>A round or a pass could not be compared.</summary>
+    public void AuditSkipped() => Interlocked.Increment(ref _auditSkipped);
 
     /// <summary>Progress of a partial rebuild; both zero when none runs.</summary>
     /// <param name="done">Ranges of the current stage that are finished.</param>

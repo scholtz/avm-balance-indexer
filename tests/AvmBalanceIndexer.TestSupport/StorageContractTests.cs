@@ -1173,4 +1173,48 @@ public abstract class StorageContractTests
         var term = Assert.Single(await storage.ListAsync(CancellationToken.None));
         Assert.Equal(t0, term.StartedAt);
     }
+
+    [Fact]
+    public async Task Without_An_Audit_Stop_Nothing_Is_Returned_And_Acknowledging_Finds_Nothing()
+    {
+        var storage = await CreateStorageAsync();
+
+        Assert.Null(await storage.GetAuditStopAsync(CancellationToken.None));
+        Assert.False(await storage.AcknowledgeAuditStopAsync(5, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task An_Audit_Stop_Is_Recorded_Once_Per_Round_And_The_Earliest_Unacknowledged_One_Is_Returned()
+    {
+        var storage = await CreateStorageAsync();
+        var at = new DateTimeOffset(2026, 11, 1, 10, 0, 0, TimeSpan.Zero);
+        await storage.RecordAuditStopAsync(new AuditStop(900, "later", 905, at, false), CancellationToken.None);
+        await storage.RecordAuditStopAsync(new AuditStop(500, "first", 503, at, false), CancellationToken.None);
+        await storage.RecordAuditStopAsync(new AuditStop(500, "again", 520, at.AddHours(1), false), CancellationToken.None);
+
+        var stop = await storage.GetAuditStopAsync(CancellationToken.None);
+
+        Assert.Equal((500UL, "first", 503UL, at, false), (stop!.Round, stop.Reason, stop.PublishedRound, stop.RecordedAt, stop.Acknowledged));
+    }
+
+    [Fact]
+    public async Task An_Acknowledged_Audit_Stop_Is_Skipped_And_A_Later_One_Comes_Up()
+    {
+        var storage = await CreateStorageAsync();
+        var at = new DateTimeOffset(2026, 11, 1, 10, 0, 0, TimeSpan.Zero);
+        await storage.RecordAuditStopAsync(new AuditStop(500, "first", 503, at, false), CancellationToken.None);
+        await storage.RecordAuditStopAsync(new AuditStop(900, "later", 905, at, false), CancellationToken.None);
+
+        Assert.True(await storage.AcknowledgeAuditStopAsync(500, CancellationToken.None));
+        Assert.False(await storage.AcknowledgeAuditStopAsync(500, CancellationToken.None)); // already acknowledged: no change
+
+        Assert.Equal(900UL, (await storage.GetAuditStopAsync(CancellationToken.None))!.Round);
+        Assert.True(await storage.AcknowledgeAuditStopAsync(900, CancellationToken.None));
+        Assert.Null(await storage.GetAuditStopAsync(CancellationToken.None));
+        Assert.False(await storage.AcknowledgeAuditStopAsync(777, CancellationToken.None));
+
+        // An acknowledged round recorded again stays acknowledged: the operator's decision is not undone by a second audit of the same round.
+        await storage.RecordAuditStopAsync(new AuditStop(500, "again", 520, at, false), CancellationToken.None);
+        Assert.Null(await storage.GetAuditStopAsync(CancellationToken.None));
+    }
 }

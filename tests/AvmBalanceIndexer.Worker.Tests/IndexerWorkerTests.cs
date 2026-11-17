@@ -388,6 +388,66 @@ public class IndexerWorkerTests : IDisposable
     }
 
     [Fact]
+    public async Task A_Recorded_Audit_Stop_Keeps_The_Worker_From_Indexing_Also_After_A_Restart()
+    {
+        var storage = NewStorage();
+        await storage.RecordAuditStopAsync(new AuditStop(4, "round 4: bob indexed 7000, ledger 7001", 9, DateTimeOffset.UtcNow, false), CancellationToken.None);
+
+        for (var start = 0; start < 2; start++)
+        {
+            var logger = new ListLogger();
+            var (worker, lifetime) = Create(storage, Scenario.Adapter(), maxFailures: 10, logger: logger);
+            await worker.StartAsync(CancellationToken.None);
+            await lifetime.WaitForStopAsync();
+            await worker.StopAsync(CancellationToken.None);
+
+            Assert.Equal(1, Environment.ExitCode);
+            Assert.Null(await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None));
+            var fatal = Assert.Single(logger.Entries, static e => e.Level == LogLevel.Critical);
+            Assert.Contains("Ledger audit of algorand-testnet failed at round 4", fatal.Exception!.Message, StringComparison.Ordinal);
+            Assert.Contains("the last round that agreed is 3", fatal.Exception.Message, StringComparison.Ordinal);
+            Environment.ExitCode = 0;
+        }
+    }
+
+    [Fact]
+    public async Task A_Rebuild_Runs_Before_The_Audit_Stop_Is_Checked_So_It_Can_Release_The_Stop()
+    {
+        var storage = NewStorage();
+        await storage.RecordAuditStopAsync(new AuditStop(4, "round 4: bob indexed 7000, ledger 7001", 9, DateTimeOffset.UtcNow, false), CancellationToken.None);
+        // What the rewind of a rebuild does to the stops after its round.
+        var rebuild = new FakeRebuild(2, async (_, token) =>
+        {
+            await storage.AcknowledgeAuditStopAsync(4, token);
+            return new PartialRebuildResult(PartialRebuildOutcome.Done);
+        });
+        var (worker, lifetime) = Create(storage, Scenario.Adapter(), maxFailures: 10, rebuild: rebuild);
+
+        await worker.StartAsync(CancellationToken.None);
+        await WaitForRoundAsync(storage, Scenario.LastRound);
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.False(lifetime.StopRequested);
+        Assert.Equal(1, rebuild.Calls);
+    }
+
+    [Fact]
+    public async Task An_Acknowledged_Audit_Stop_Lets_The_Worker_Index_Again()
+    {
+        var storage = NewStorage();
+        await storage.RecordAuditStopAsync(new AuditStop(4, "round 4: a difference on the side of the oracle", 9, DateTimeOffset.UtcNow, false), CancellationToken.None);
+        var audit = new WorkerOptions { Audit = new AuditOptions { AcknowledgeRound = 4 } };
+        var (worker, lifetime) = Create(storage, Scenario.Adapter(), maxFailures: 10, workerOptions: audit);
+
+        await worker.StartAsync(CancellationToken.None);
+        await WaitForRoundAsync(storage, Scenario.LastRound);
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.False(lifetime.StopRequested);
+        Assert.Null(await storage.GetAuditStopAsync(CancellationToken.None));
+    }
+
+    [Fact]
     public async Task A_Refused_Rebuild_Stops_The_Worker_With_Exit_Code_1_And_Nothing_Is_Indexed()
     {
         var storage = NewStorage();
@@ -625,7 +685,7 @@ public class IndexerWorkerTests : IDisposable
 
     private static InMemoryChainStorage NewStorage() => new(new ChainContext(ChainId.AlgorandTestnet));
 
-    private static (IndexerWorker Worker, FakeLifetime Lifetime) Create(InMemoryChainStorage storage, IChainAdapter adapter, int maxFailures, WorkerHealth? health = null, ILogger<IndexerWorker>? logger = null, string? version = null, IPartialRebuild? rebuild = null)
+    private static (IndexerWorker Worker, FakeLifetime Lifetime) Create(InMemoryChainStorage storage, IChainAdapter adapter, int maxFailures, WorkerHealth? health = null, ILogger<IndexerWorker>? logger = null, string? version = null, IPartialRebuild? rebuild = null, WorkerOptions? workerOptions = null)
     {
         var options = Options.Create(new IndexerOptions
         {
@@ -638,7 +698,7 @@ public class IndexerWorkerTests : IDisposable
         });
         var indexer = new RoundIndexer(adapter, new AlgoEffectNormalizer(), storage, options, NullLogger<RoundIndexer>.Instance);
         var lifetime = new FakeLifetime();
-        return (new IndexerWorker(indexer, storage, new ChainContext(ChainId.AlgorandTestnet), options, lifetime, storage, storage, health ?? new WorkerHealth(), logger ?? NullLogger<IndexerWorker>.Instance, buildVersion: version, partialRebuilds: rebuild is null ? null : [rebuild]), lifetime);
+        return (new IndexerWorker(indexer, storage, new ChainContext(ChainId.AlgorandTestnet), options, lifetime, storage, storage, health ?? new WorkerHealth(), logger ?? NullLogger<IndexerWorker>.Instance, buildVersion: version, partialRebuilds: rebuild is null ? null : [rebuild], workerOptions: workerOptions is null ? null : Options.Create(workerOptions)), lifetime);
     }
 
     private static async Task WaitForRoundAsync(InMemoryChainStorage storage, ulong round)

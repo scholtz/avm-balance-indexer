@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using AvmBalanceIndexer.Domain.Chains;
+using AvmBalanceIndexer.Indexing.Adapters;
 
 namespace AvmBalanceIndexer.Live.Tests;
 
@@ -93,17 +94,8 @@ public sealed class ReferenceNode : IDisposable
     /// </summary>
     public async Task<IReadOnlyDictionary<Address, ulong>> LedgerBalancesAfterAsync(ulong round)
     {
-        // Later sections of recent deltas carry integer map keys, which is not valid JSON, so only the leading Accts value is parsed.
         var text = await GetTextAsync($"{_algod}/v2/deltas/{round}").ConfigureAwait(false);
-        using var json = JsonDocument.Parse(LeadingAccts(text));
-        var result = new Dictionary<Address, ulong>();
-        foreach (var account in json.RootElement.GetProperty("Accts").GetProperty("Accts").EnumerateArray())
-        {
-            var address = new Address(Convert.FromBase64String(account.GetProperty("Addr").GetString()!));
-            result[address] = account.GetProperty("MicroAlgos").GetUInt64();
-        }
-
-        return result;
+        return LedgerDelta.Parse(text).Algo;
     }
 
     /// <summary>
@@ -113,29 +105,7 @@ public sealed class ReferenceNode : IDisposable
     public async Task<IReadOnlyDictionary<(Address Account, ulong AssetId), ulong>> LedgerAssetHoldingsAfterAsync(ulong round)
     {
         var text = await GetTextAsync($"{_algod}/v2/deltas/{round}").ConfigureAwait(false);
-        using var json = JsonDocument.Parse(LeadingAccts(text));
-        var result = new Dictionary<(Address, ulong), ulong>();
-        if (!json.RootElement.GetProperty("Accts").TryGetProperty("AssetResources", out var resources) || resources.ValueKind != JsonValueKind.Array)
-        {
-            return result;
-        }
-
-        foreach (var resource in resources.EnumerateArray())
-        {
-            var holding = resource.GetProperty("Holding");
-            var deleted = holding.GetProperty("Deleted").GetBoolean();
-            var data = holding.TryGetProperty("Holding", out var inner) ? inner : default;
-            if (!deleted && data.ValueKind != JsonValueKind.Object)
-            {
-                continue;
-            }
-
-            var address = new Address(Convert.FromBase64String(resource.GetProperty("Addr").GetString()!));
-            var amount = !deleted && data.TryGetProperty("a", out var a) ? a.GetUInt64() : 0UL;
-            result[(address, resource.GetProperty("Aidx").GetUInt64())] = amount;
-        }
-
-        return result;
+        return LedgerDelta.Parse(text).Assets.ToDictionary(static pair => pair.Key, static pair => pair.Value ?? 0UL);
     }
 
     /// <summary>Creator and creation round of an asset as the public indexer reports them, including destroyed assets (whose total it reports as zero).</summary>
@@ -254,44 +224,6 @@ public sealed class ReferenceNode : IDisposable
     }
 
     public void Dispose() => _http.Dispose();
-
-    /// <summary>The <c>"Accts": { ... }</c> object of a delta document wrapped as a standalone JSON object.</summary>
-    private static string LeadingAccts(string text)
-    {
-        var start = text.IndexOf("\"Accts\"", StringComparison.Ordinal);
-        var open = start < 0 ? -1 : text.IndexOf('{', start);
-        if (open < 0)
-        {
-            throw new InvalidDataException("Delta document has no Accts object.");
-        }
-
-        var depth = 0;
-        var inString = false;
-        var escaped = false;
-        for (var i = open; i < text.Length; i++)
-        {
-            var c = text[i];
-            if (inString)
-            {
-                inString = c != '"' || escaped;
-                escaped = !escaped && c == '\\';
-            }
-            else if (c == '"')
-            {
-                inString = true;
-            }
-            else if (c == '{')
-            {
-                depth++;
-            }
-            else if (c == '}' && --depth == 0)
-            {
-                return "{\"Accts\":" + text[open..(i + 1)] + "}";
-            }
-        }
-
-        throw new InvalidDataException("Delta document has no Accts object.");
-    }
 
     private async Task<JsonDocument> GetJsonAsync(string url, CancellationToken cancellationToken = default) => JsonDocument.Parse(await GetTextAsync(url, cancellationToken).ConfigureAwait(false));
 

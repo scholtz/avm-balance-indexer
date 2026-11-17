@@ -144,6 +144,19 @@ worker:
   arc200Metadata: true
   # An idle writer stops refreshing the status when algod's latest round has not advanced for this long (the API then reports Stalled).
   tipStaleAfter: "00:01:00"
+  # Ledger audit (docs/adr/0021): published rounds are compared with the ledger deltas of the node (algod /v2/deltas). It switches itself
+  # off on a node that offers none (Voi). A mismatch is logged, counted and recorded in the database.
+  audit:
+    enabled: true
+    # Stop the worker at the first mismatch and keep it stopped, also after a restart, until the round is acknowledged or the database is
+    # rebuilt from an earlier round. False only logs and counts.
+    stopOnMismatch: true
+    # While backfilling (and replaying after a partial rebuild) one round in this many is audited; 0 audits nothing then.
+    backfillSampleEvery: 1000
+    # The round of a recorded stop that you decided is fine (a difference on the side of the oracle): the stop is acknowledged.
+    acknowledgeRound: 0
+    # Rounds whose mismatch is only a warning (counted separately) instead of a stop.
+    ignoreRounds: []
   resources:
     requests: { cpu: 500m, memory: 512Mi }
     limits: { cpu: "2", memory: 2Gi }

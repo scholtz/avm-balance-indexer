@@ -28,6 +28,28 @@ data:
   Indexer__Arc200Metadata: {{ .Values.worker.arc200Metadata | quote }}
   Indexer__TipStaleAfter: {{ .Values.worker.tipStaleAfter | quote }}
   Worker__HealthPort: {{ .Values.worker.healthPort | quote }}
+  Worker__Audit__Enabled: {{ .Values.worker.audit.enabled | quote }}
+  Worker__Audit__StopOnMismatch: {{ .Values.worker.audit.stopOnMismatch | quote }}
+  {{- /* The same rules as the options (whole numbers): a wrong value must fail here, not in a pod that cannot start. */}}
+  {{- $sample := float64 (default 0 .Values.worker.audit.backfillSampleEvery) }}
+  {{- if or (lt $sample 0.0) (ne $sample (floor $sample)) }}
+  {{- fail (printf "worker.audit.backfillSampleEvery %v must be a whole number, 0 or more" .Values.worker.audit.backfillSampleEvery) }}
+  {{- end }}
+  Worker__Audit__BackfillSampleEvery: {{ int64 $sample | quote }}
+  {{- $acknowledge := float64 (default 0 .Values.worker.audit.acknowledgeRound) }}
+  {{- if or (lt $acknowledge 0.0) (ne $acknowledge (floor $acknowledge)) }}
+  {{- fail (printf "worker.audit.acknowledgeRound %v must be a round number (a whole number, 0 for none)" .Values.worker.audit.acknowledgeRound) }}
+  {{- end }}
+  {{- if gt $acknowledge 0.0 }}
+  Worker__Audit__AcknowledgeRound: {{ int64 $acknowledge | quote }}
+  {{- end }}
+  {{- range $i, $ignored := .Values.worker.audit.ignoreRounds }}
+  {{- $round := float64 $ignored }}
+  {{- if or (le $round 0.0) (ne $round (floor $round)) }}
+  {{- fail (printf "worker.audit.ignoreRounds holds %v, which is not a round number (a positive whole number)" $ignored) }}
+  {{- end }}
+  Worker__Audit__IgnoreRounds__{{ $i }}: {{ int64 $round | quote }}
+  {{- end }}
   Api__RateLimitPerMinute: {{ .Values.api.rateLimitPerMinute | quote }}
   Api__RequestTimeoutSeconds: {{ .Values.api.requestTimeoutSeconds | quote }}
   Api__StalledAfterSeconds: {{ .Values.api.stalledAfterSeconds | quote }}

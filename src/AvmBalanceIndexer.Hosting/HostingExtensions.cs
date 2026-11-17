@@ -83,6 +83,9 @@ public static class HostingExtensions
         services.AddSingleton<IArc200MetadataSource>(static provider => AlgorandChainFactory.CreateArc200MetadataSource(
             provider.GetRequiredService<IOptions<AlgorandChainOptions>>().Value,
             provider.GetRequiredService<ILoggerFactory>()));
+        services.AddSingleton<ILedgerDeltaSource>(static provider => AlgorandChainFactory.CreateLedgerDeltaSource(
+            provider.GetRequiredService<IOptions<AlgorandChainOptions>>().Value,
+            provider.GetRequiredService<ILoggerFactory>()));
         services.AddSingleton<IEffectNormalizer, AlgoEffectNormalizer>();
         services.AddSingleton<RoundIndexer>();
         return services;
