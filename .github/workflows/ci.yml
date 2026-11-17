@@ -119,7 +119,7 @@ jobs:
           file: docker/Dockerfile.${{ matrix.component }}
           push: false
           tags: avm-balance-indexer/${{ matrix.component }}:ci
-          build-args: VERSION=ci
+          build-args: BUILD_VERSION=ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

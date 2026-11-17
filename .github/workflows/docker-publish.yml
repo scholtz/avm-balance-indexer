@@ -79,7 +79,7 @@ jobs:
           file: docker/Dockerfile.${{ matrix.component }}
           platforms: linux/amd64
           push: true
-          build-args: VERSION=${{ inputs.version }}
+          build-args: BUILD_VERSION=${{ inputs.version }}
           tags: ${{ steps.names.outputs.list }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
