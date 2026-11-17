@@ -32,6 +32,8 @@ public sealed partial class IndexerWorker(
     private readonly TimeProvider _clock = clock ?? TimeProvider.System;
     private readonly string _version = buildVersion ?? BuildVersion.Current;
     private static readonly TimeSpan RebuildLogInterval = TimeSpan.FromSeconds(30);
+    private readonly object _reportGate = new();
+    private long _rebuildReports;
 
     /// <summary>Reports on the thread that raised them (<see cref="Progress{T}"/> posts, which loses the order and the last report).</summary>
     private sealed class SynchronousProgress(Action<PartialRebuildProgress> handler) : IProgress<PartialRebuildProgress>
@@ -106,7 +108,6 @@ public sealed partial class IndexerWorker(
             }
 
             var lost = false;
-            var recorded = true;
             await using (lease.ConfigureAwait(false))
             {
                 health.BecameLeader();
@@ -114,23 +115,7 @@ public sealed partial class IndexerWorker(
                 using var term = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, lease.Lost);
                 try
                 {
-                    // Nothing is indexed before the term is on record (ADR 0021): a database that cannot take the record is a wait.
-                    try
-                    {
-                        await RecordTermAsync(term.Token).ConfigureAwait(false);
-                    }
-                    catch (Exception ex) when (IsTransient(ex, term.Token) && !term.Token.IsCancellationRequested)
-                    {
-                        recorded = false;
-                        health.ReportTransientFailure();
-                        health.BecameStandby();
-                        LogTermNotRecorded(logger, ex, chain.Chain);
-                    }
-
-                    if (recorded)
-                    {
-                        await FollowAsync(term.Token).ConfigureAwait(false);
-                    }
+                    await FollowAsync(term.Token).ConfigureAwait(false);
                 }
                 catch (Exception ex) when (lease.Lost.IsCancellationRequested && !stoppingToken.IsCancellationRequested
                     && (ex is OperationCanceledException or ChainDivergenceException || IsTransient(ex, stoppingToken)))
@@ -145,12 +130,6 @@ public sealed partial class IndexerWorker(
                     LogLeaseLost(logger, chain.Chain);
                     lost = true;
                 }
-            }
-
-            if (!recorded)
-            {
-                await Task.Delay(settings.LeaseRetryInterval, stoppingToken).ConfigureAwait(false);
-                continue;
             }
 
             if (lost)
@@ -192,12 +171,17 @@ public sealed partial class IndexerWorker(
         var lastReport = long.MinValue;
         var progress = new SynchronousProgress(report =>
         {
-            health.ReportRebuild(report.RangesDone, report.RangesTotal);
-            var now = _clock.GetTimestamp();
-            if (lastReport == long.MinValue || _clock.GetElapsedTime(lastReport, now) >= RebuildLogInterval)
+            // Ranges are copied in parallel: the reports arrive on several threads.
+            lock (_reportGate)
             {
-                lastReport = now;
-                LogRebuildProgress(logger, chain.Chain, request.Source, report.Stage, report.Rows, report.RangesDone, report.RangesTotal);
+                Interlocked.Increment(ref _rebuildReports);
+                health.ReportRebuild(report.RangesDone, report.RangesTotal);
+                var now = _clock.GetTimestamp();
+                if (lastReport == long.MinValue || _clock.GetElapsedTime(lastReport, now) >= RebuildLogInterval)
+                {
+                    lastReport = now;
+                    LogRebuildProgress(logger, chain.Chain, request.Source, report.Stage, report.Rows, report.RangesDone, report.RangesTotal);
+                }
             }
         });
         PartialRebuildResult result;
@@ -250,17 +234,20 @@ public sealed partial class IndexerWorker(
         var settings = options.Value;
         var backoff = settings.RetryInitialBackoff;
         var failures = 0;
-        var committedAtLastFailure = indexer.RoundsCommitted;
+        var committedAtLastFailure = indexer.RoundsCommitted + Interlocked.Read(ref _rebuildReports);
         var prepared = false;
 
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                // Inside the retry loop: a transient failure of the rebuild is retried with the same backoff, and the copy resumes.
+                // Inside the retry loop: a transient failure of the rebuild is retried with the same backoff, and the copy resumes. The term
+                // is recorded after the rebuild (so its first round is the one after the copied data, and the copied build records stay), and
+                // before anything is indexed (ADR 0021): a database that cannot take the record is a wait like any other transient failure.
                 if (!prepared)
                 {
                     await PrepareAsync(stoppingToken).ConfigureAwait(false);
+                    await RecordTermAsync(stoppingToken).ConfigureAwait(false);
                     prepared = true;
                 }
 
@@ -273,7 +260,8 @@ public sealed partial class IndexerWorker(
             catch (Exception ex) when (IsTransient(ex, stoppingToken))
             {
                 // Rounds committed since the previous failure mean the indexer is making progress despite the trouble.
-                var committed = indexer.RoundsCommitted;
+                // A copy that reports progress is making progress, also while no round is committed.
+                var committed = indexer.RoundsCommitted + Interlocked.Read(ref _rebuildReports);
                 if (committed != committedAtLastFailure)
                 {
                     committedAtLastFailure = committed;
@@ -334,9 +322,6 @@ public sealed partial class IndexerWorker(
 
     [LoggerMessage(EventId = 1313, Level = LogLevel.Information, Message = "This replica writes {Chain} from round {FromRound} with build {Version}")]
     private static partial void LogTerm(ILogger logger, string chain, ulong fromRound, string version);
-
-    [LoggerMessage(EventId = 1314, Level = LogLevel.Warning, Message = "The writer term for {Chain} could not be recorded; indexing waits and the replica tries again")]
-    private static partial void LogTermNotRecorded(ILogger logger, Exception exception, string chain);
 
     [LoggerMessage(EventId = 1305, Level = LogLevel.Warning, Message = "The writer lease for {Chain} was lost; indexing stopped and this replica goes back to standby")]
     private static partial void LogLeaseLost(ILogger logger, string chain);

@@ -351,6 +351,8 @@ public class IndexerWorkerTests : IDisposable
 
         Assert.False(lifetime.StopRequested);
         Assert.Equal([blocks[1].Hash], rebuild.Hashes.Select(static h => h).ToArray());
+        // The term is recorded after the rebuild: it starts where the copied data ends, not at round 0.
+        Assert.Equal(3UL, Assert.Single(await storage.ListAsync(CancellationToken.None)).FromRound);
         Assert.Equal(Scenario.ExpectedBalance(Scenario.Alice, Scenario.LastRound), (ulong)(await storage.GetBalanceAtRoundAsync(Scenario.Alice, TokenKey.Native, Scenario.LastRound, CancellationToken.None)).Value);
     }
 
