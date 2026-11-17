@@ -90,8 +90,8 @@ internal static class OpenApiRefinements
                     {
                         if (media.Schema is OpenApiSchema { OneOf: { Count: 2 } oneOf } && oneOf.FirstOrDefault(static o => o is OpenApiSchemaReference) is { } reference)
                         {
-                            // The library declares its media types through the read-only interface; failing loudly keeps a different implementation from silently skipping the refinement.
-                            (media as OpenApiMediaType ?? throw new InvalidOperationException($"Unexpected media type implementation {media.GetType()}")).Schema = reference;
+                            // The library declares its media types through the read-only interface; the cast fails loudly (and OpenApiSpecTests with it) if an implementation ever differs.
+                            ((OpenApiMediaType)media).Schema = reference;
                             body.Required = false;
                         }
                     }
