@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Net;
 using AvmBalanceIndexer.Domain.Chains;
 using AvmBalanceIndexer.Domain.Storage;
 using AvmBalanceIndexer.Indexing.Adapters;
@@ -40,9 +41,13 @@ public sealed partial class LedgerAuditor(
     private ulong _failingRound;
     private ulong? _reportedMismatch;
     private long? _lastWarning;
+    private long? _pausedAt;
 
     /// <summary>Tests pass a shorter pause than the configuration (whole seconds) allows.</summary>
     internal TimeSpan? Interval { get; init; }
+
+    /// <summary>How long nothing is asked after the node throttled or refused for its quota (403, 429): the indexer needs the requests more.</summary>
+    internal TimeSpan ThrottlePause { get; init; } = TimeSpan.FromMinutes(15);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -88,6 +93,16 @@ public sealed partial class LedgerAuditor(
             return true;
         }
 
+        if (_pausedAt is { } pausedAt)
+        {
+            if (_time.GetElapsedTime(pausedAt) < ThrottlePause)
+            {
+                return true;
+            }
+
+            _pausedAt = null;
+        }
+
         var status = await storage.GetAsync(chain.Chain, cancellationToken).ConfigureAwait(false);
         if (status is null)
         {
@@ -101,8 +116,20 @@ public sealed partial class LedgerAuditor(
         if (status.State == IngestionState.Following)
         {
             var budget = Math.Max(1, settings.MaxRoundsPerPass);
-            for (var round = _audited.Value + 1; round <= status.IndexedRound && budget-- > 0; round++)
+            var every = (ulong)Math.Max(0, settings.FollowSampleEvery);
+            for (var round = _audited.Value + 1; round <= status.IndexedRound; round++)
             {
+                if (every == 0 || round % every != 0)
+                {
+                    _audited = round;
+                    continue;
+                }
+
+                if (budget-- <= 0)
+                {
+                    break;
+                }
+
                 var step = await AuditRoundAsync(round, status.IndexedRound, settings, countNoDeltas: true, cancellationToken).ConfigureAwait(false);
                 if (step == Step.Stop)
                 {
@@ -197,6 +224,16 @@ public sealed partial class LedgerAuditor(
         try
         {
             delta = await deltas.TryGetAsync(round, cancellationToken).ConfigureAwait(false);
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.TooManyRequests)
+        {
+            // The node throttles, or its daily quota is used up (a public node answers 403 then, and counts the refused request too):
+            // the audit stops asking for a while and continues with the round that is published then. The rounds in between are not audited.
+            _pausedAt = _time.GetTimestamp();
+            _audited = null;
+            health.AuditSkipped();
+            LogPaused(logger, chain.Chain, (int)ex.StatusCode!, round, ThrottlePause);
+            return Step.Retry;
         }
         catch (Exception ex) when (ex is HttpRequestException or InvalidDataException or TimeoutException || (ex is OperationCanceledException && !cancellationToken.IsCancellationRequested))
         {
@@ -313,6 +350,9 @@ public sealed partial class LedgerAuditor(
 
     [LoggerMessage(EventId = 1355, Level = LogLevel.Warning, Message = "Ledger audit of {Chain}: round {Round} disagrees with the ledger but is listed in Worker:Audit:IgnoreRounds ({Details})")]
     private static partial void LogIgnored(ILogger logger, string chain, ulong round, string details);
+
+    [LoggerMessage(EventId = 1358, Level = LogLevel.Warning, Message = "The node of {Chain} answered HTTP {Status} for the ledger deltas of round {Round} (throttled, or its daily quota is used up); the ledger audit pauses for {Pause} and skips the rounds published meanwhile")]
+    private static partial void LogPaused(ILogger logger, string chain, int status, ulong round, TimeSpan pause);
 
     [LoggerMessage(EventId = 1357, Level = LogLevel.Warning, Message = "The ledger audit of {Chain} could not record its stop at round {Round}; the database is tried again at the next pass and the worker keeps running until then")]
     private static partial void LogStopNotRecorded(ILogger logger, Exception exception, string chain, ulong round);

@@ -109,6 +109,33 @@ public class IndexerWorkerTests : IDisposable
     }
 
     [Fact]
+    public async Task A_Used_Up_Daily_Quota_Of_A_Public_Node_Is_Waited_Out_It_Never_Stops_The_Worker_And_Is_Logged_Without_A_Stack_Trace()
+    {
+        var storage = NewStorage();
+        // What nodely.io answers when the daily quota of the free tier is used up (and, near the quota, to a growing share of requests).
+        var errors = new Queue<Exception>(Enumerable.Range(0, 8).Select(_ =>
+            (Exception)new Algorand.ApiException("Forbidden", 403, "Daily free API quota exceeded", new Dictionary<string, IEnumerable<string>>(), new HttpRequestException("403"))));
+        var adapter = new FlakyAdapter(Scenario.Adapter(), failuresBeforeSuccess: 8, errors: errors);
+        var logger = new ListLogger();
+
+        // Two failures without progress would stop the worker: eight quota answers do not.
+        var (worker, lifetime) = Create(storage, adapter, maxFailures: 2, logger: logger);
+        await worker.StartAsync(CancellationToken.None);
+        await WaitForRoundAsync(storage, Scenario.LastRound);
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.False(lifetime.StopRequested);
+        Assert.Equal(8, adapter.Failures);
+        var warnings = logger.Entries.Where(static e => e.Level == LogLevel.Warning).ToList();
+        Assert.Equal(8, warnings.Count);
+        Assert.All(warnings, static w =>
+        {
+            Assert.Null(w.Exception);
+            Assert.Contains("quota", w.Message, StringComparison.OrdinalIgnoreCase);
+        });
+    }
+
+    [Fact]
     public async Task A_Chain_Divergence_Stops_The_Application_Immediately_Without_Retrying()
     {
         var storage = NewStorage();
@@ -695,6 +722,7 @@ public class IndexerWorkerTests : IDisposable
             FollowPollInterval = TimeSpan.FromMilliseconds(5),
             RetryInitialBackoff = TimeSpan.FromMilliseconds(1),
             RetryMaxBackoff = TimeSpan.FromMilliseconds(5),
+            QuotaBackoff = TimeSpan.FromMilliseconds(2),
             MaxConsecutiveFailures = maxFailures,
             LeaseRetryInterval = TimeSpan.FromMilliseconds(5),
         });

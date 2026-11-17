@@ -36,6 +36,11 @@ data:
   {{- fail (printf "worker.audit.backfillSampleEvery %v must be a whole number, 0 or more" .Values.worker.audit.backfillSampleEvery) }}
   {{- end }}
   Worker__Audit__BackfillSampleEvery: {{ int64 $sample | quote }}
+  {{- $follow := float64 (default 0 .Values.worker.audit.followSampleEvery) }}
+  {{- if or (lt $follow 0.0) (ne $follow (floor $follow)) }}
+  {{- fail (printf "worker.audit.followSampleEvery %v must be a whole number, 0 or more" .Values.worker.audit.followSampleEvery) }}
+  {{- end }}
+  Worker__Audit__FollowSampleEvery: {{ int64 $follow | quote }}
   {{- $acknowledge := float64 (default 0 .Values.worker.audit.acknowledgeRound) }}
   {{- if or (lt $acknowledge 0.0) (ne $acknowledge (floor $acknowledge)) }}
   {{- fail (printf "worker.audit.acknowledgeRound %v must be a round number (a whole number, 0 for none)" .Values.worker.audit.acknowledgeRound) }}

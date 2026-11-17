@@ -207,10 +207,20 @@ Also watch the database itself: disk, replication, connections, vacuum and bloat
 ### Ledger audit (issue #181, ADR 0021)
 
 The writer compares the rounds it has published with the node's own post-round balances (`GET /v2/deltas/{round}`): the end-of-round native and asset balances of every account the ledger changed in that round must be what the
-database holds for that round (absolute, pinned to the round; ARC-200 balances are application state whose layout differs per contract, so they are not audited). While the worker follows the tip every round is audited
-(one request per round); while it backfills, and during the replay after a partial rebuild, one round in `worker.audit.backfillSampleEvery` (default 1000, at most one request per pass), which is what can catch an
+database holds for that round (absolute, pinned to the round; ARC-200 balances are application state whose layout differs per contract, so they are not audited). While the worker follows the tip one round in `worker.audit.followSampleEvery` is audited
+(default 10, one request of 30 to 70 KB each; 1 audits every round and is meant for an own node, see *Daily quota of a public node* below); while it backfills, and during the replay after a partial rebuild, one round in `worker.audit.backfillSampleEvery` (default 1000, at most one request per pass), which is what can catch an
 era-specific bug near the round where it happens. The audit runs after publication: it detects a bad round, it does not keep it from being served. It is one-directional: it reads the accounts the ledger lists for the round, so a wrong effect for an account the ledger did not change is only found at the next round in which the ledger lists that account. A node that does not answer, answers 404 for a round, or sends a document that
 cannot be read is counted as skipped and logged at most every ten minutes; it is never a failure. A node that has no deltas for 20 rounds in a row at the start (Voi, a private node) switches the audit off with one log line.
+A node that answers 403 or 429 (throttled, or its daily quota is used up) pauses the audit for 15 minutes with one warning; it then continues at the round published at that time, the rounds in between are not audited.
+
+#### Daily quota of a public node (issue #219)
+
+The built-in node URLs are the free Nodely endpoints. Their [fair usage policy](https://nodely.io/docs/free/policy) allows 200,000 requests or 5 GB per day per IP and site (128,000 requests and 2 GB from 2027-01-01),
+counted per UTC day; near the quota a growing share of requests is answered `403 Daily free API quota exceeded`, after it all of them until 00:00 UTC, and refused requests count too.
+A following worker asks for the status every `Indexer:FollowPollInterval` (2 s, about 45,000 to 70,000 requests a day on Algorand) and for the deltas of the audited rounds (every round would be about 30,000 requests and 1 to 2 GB a day, which is what
+used the TestNet quota up after #181). The worker treats the quota answer as expected: it logs *The node of ... answered that its daily request quota is used up* (one line, Warning), waits `Indexer:QuotaBackoff` (1 minute) and tries again,
+without counting towards `Indexer:MaxConsecutiveFailures`, so it does not restart; the status goes stale meanwhile and the staleness alert fires. If it happens every day: point `Algorand:AlgodUrl` at an own node or a paid plan,
+raise `worker.audit.followSampleEvery`, or set it to 0. A 403 that does not name the quota (a blocked IP, a bad token) is still a failure that stops the worker after the retries.
 
 On a mismatch the worker logs the round, account, token, indexed and ledger amounts (Error), records the stop in the database (`audit_stop`), and, with `worker.audit.stopOnMismatch` (default true), stops with exit code 1 and the line
 *Ledger audit of ... failed at round S ...; this writer has published up to T; the last round that agreed is S - 1*. The stop survives restarts: a recorded, unacknowledged stop makes every worker refuse to index (the same message).

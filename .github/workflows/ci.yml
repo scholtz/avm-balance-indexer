@@ -161,6 +161,9 @@ jobs:
           t | grep -q 'Worker__Audit__Enabled: "true"'
           t | grep -q 'Worker__Audit__StopOnMismatch: "true"'
           t | grep -q 'Worker__Audit__BackfillSampleEvery: "1000"'
+          t | grep -q 'Worker__Audit__FollowSampleEvery: "10"'
+          t --set worker.audit.followSampleEvery=1 | grep -q 'Worker__Audit__FollowSampleEvery: "1"'
+          t --set worker.audit.followSampleEvery=0 | grep -q 'Worker__Audit__FollowSampleEvery: "0"'
           if t | grep -q 'Worker__Audit__AcknowledgeRound'; then echo "no acknowledged round by default"; exit 1; fi
           if t | grep -q 'Worker__Audit__IgnoreRounds'; then echo "no ignored rounds by default"; exit 1; fi
           helm template ci deploy/helm/avm-balance-indexer -f deploy/helm/values/prod-algorand.yaml --set cassandra.embedded.node=ci-node | grep -q 'Worker__Audit__StopOnMismatch: "false"'
@@ -195,6 +198,8 @@ jobs:
           refused 'worker.audit.ignoreRounds' --set "worker.audit.ignoreRounds={1.5}"
           refused 'worker.audit.acknowledgeRound' --set worker.audit.acknowledgeRound=-4
           refused 'worker.audit.backfillSampleEvery' --set worker.audit.backfillSampleEvery=-1
+          refused 'worker.audit.followSampleEvery' --set worker.audit.followSampleEvery=-1
+          refused 'worker.audit.followSampleEvery' --set worker.audit.followSampleEvery=2.5
           refused 'storage.cassandra.keyspace' --set storage.cassandra.keyspace=1bad
           refused 'storage.cassandra.keyspace' --set storage.cassandra.keyspace=bad-name
           refused 'storage.cassandra.localDatacenter' --set "storage.cassandra.localDatacenter=dc'1"
