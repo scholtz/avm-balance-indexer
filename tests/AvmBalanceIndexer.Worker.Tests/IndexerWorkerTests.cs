@@ -138,6 +138,25 @@ public class IndexerWorkerTests : IDisposable
     }
 
     [Fact]
+    public async Task Failures_Before_And_After_A_Quota_Answer_Are_Not_Consecutive()
+    {
+        var storage = NewStorage();
+        Exception Outage() => new HttpRequestException("503");
+        Exception Refused() => new NodeQuotaExceededException("The node answered HTTP 403 for /v2/status: Daily free API quota exceeded");
+        var errors = new Queue<Exception>([Outage(), Refused(), Outage(), Refused(), Outage()]);
+        var adapter = new FlakyAdapter(Scenario.Adapter(), failuresBeforeSuccess: 5, errors: errors);
+
+        // Two failures in a row would stop the worker; three with a quota answer between them do not.
+        var (worker, lifetime) = Create(storage, adapter, maxFailures: 2);
+        await worker.StartAsync(CancellationToken.None);
+        await WaitForRoundAsync(storage, Scenario.LastRound);
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.False(lifetime.StopRequested);
+        Assert.Equal(5, adapter.Failures);
+    }
+
+    [Fact]
     public async Task A_Node_That_Names_Its_Quota_For_Longer_Than_A_Day_Without_Any_Progress_Stops_The_Application()
     {
         var storage = NewStorage();

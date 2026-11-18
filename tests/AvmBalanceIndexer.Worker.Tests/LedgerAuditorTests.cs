@@ -366,7 +366,7 @@ public sealed class LedgerAuditorTests : IDisposable
             await Task.Delay(50);
             await Indexer(storage).RunAsync(round, CancellationToken.None);
             await SetStateAsync(storage, IngestionState.Following);
-            await UntilAsync(() => ledger.Requested.Count == resumes + 1);
+            await UntilAsync(() => rig.Logger.Entries.Count(static e => e.Level == LogLevel.Warning) == resumes + 1);
         }
 
         var pauses = rig.Logger.Entries.Where(static e => e.Level == LogLevel.Warning).Select(static e => e.Message).ToArray();
@@ -394,6 +394,43 @@ public sealed class LedgerAuditorTests : IDisposable
         var stop = await storage.GetAuditStopAsync(CancellationToken.None);
         Assert.Equal(3UL, stop!.Round);
         Assert.Contains("last audited round that agreed: none known below that round", stop.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_Quota_Answer_Does_Not_Drop_A_Mismatch_Whose_Stop_Could_Not_Be_Recorded_Yet()
+    {
+        // Requests: round 3 agrees, round 4 disagrees but the stop cannot be recorded, round 4 again gets the quota answer, then round 4 once more.
+        var reference = new InMemoryChainStorage(new ChainContext(ChainId.AlgorandTestnet));
+        await Indexer(reference).RunAsync(Scenario.LastRound, CancellationToken.None);
+        var storage = new RecordFailsOnce();
+        await Indexer(storage).RunAsync(2, CancellationToken.None);
+        await SetStateAsync(storage, IngestionState.Following);
+        var correct = await LedgerOfAsync(reference);
+        var ledger = new FakeDeltas { QuotaAtRequest = 3 };
+        foreach (var (round, delta) in correct.Rounds)
+        {
+            ledger.Rounds[round] = delta;
+        }
+
+        var good = ledger.Rounds[4];
+        ledger.Rounds[4] = good with { Algo = new Dictionary<Address, ulong>(good.Algo) { [Scenario.Bob] = good.Algo[Scenario.Bob] + 1 } };
+        await using var rig = Start(storage, ledger, new AuditOptions { FollowSampleEvery = 1 });
+        await Task.Delay(100);
+
+        await FinishTheScenarioAsync(storage);
+        await UntilAsync(() => rig.Lifetime.StopRequested);
+
+        Assert.Equal([3UL, 4UL, 4UL, 4UL], ledger.Requested.ToArray());
+        Assert.Equal(4UL, (await storage.GetAuditStopAsync(CancellationToken.None))!.Round);
+        Assert.Equal(1, rig.Health.AuditMismatches); // counted once
+    }
+
+    private sealed class RecordFailsOnce() : InMemoryChainStorage(new ChainContext(ChainId.AlgorandTestnet))
+    {
+        private int _attempts;
+
+        public override Task RecordAuditStopAsync(AuditStop auditStop, CancellationToken cancellationToken) =>
+            Interlocked.Increment(ref _attempts) == 1 ? Task.FromException(new IOException("database is busy")) : base.RecordAuditStopAsync(auditStop, cancellationToken);
     }
 
     [Fact]
@@ -501,6 +538,9 @@ public sealed class LedgerAuditorTests : IDisposable
         /// <summary>Answers of a gateway that throttles or has no quota left (403, 429), given before anything else.</summary>
         public Queue<HttpStatusCode> Throttled { get; } = [];
 
+        /// <summary>The request (counted from 1) that gets the quota answer; 0 for none.</summary>
+        public int QuotaAtRequest { get; init; }
+
         /// <summary>Whether a 403 is the quota answer (as the algod client reports it) or a plain 403.</summary>
         public bool QuotaAnswer { get; init; } = true;
 
@@ -527,6 +567,11 @@ public sealed class LedgerAuditorTests : IDisposable
                 {
                     _failures++;
                     throw new HttpRequestException("unavailable", null, HttpStatusCode.ServiceUnavailable);
+                }
+
+                if (_requested.Count == QuotaAtRequest)
+                {
+                    throw new NodeQuotaExceededException("The node answered HTTP 403 for /v2/deltas: Daily free API quota exceeded");
                 }
 
                 if (Throttled.TryDequeue(out var status))

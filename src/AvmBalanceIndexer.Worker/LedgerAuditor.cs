@@ -155,6 +155,11 @@ public sealed partial class LedgerAuditor(
                 }
 
                 _audited = round;
+                if (_pausedAt is not null)
+                {
+                    // Given up on a round the node kept throttling: the pause holds for the next round too.
+                    break;
+                }
             }
 
             return !NodeHasNoDeltas();
@@ -245,7 +250,13 @@ public sealed partial class LedgerAuditor(
             _pausedAt = _time.GetTimestamp();
             _pause = TimeSpan.FromTicks(Math.Min((_nextQuotaPause ?? QuotaPauseFirst).Ticks, QuotaPause.Ticks));
             _nextQuotaPause = _pause * 2;
-            _audited = null;
+
+            // A round whose mismatch is known but whose stop is not recorded yet stays the next one to look at.
+            if (_reportedMismatch != round)
+            {
+                _audited = null;
+            }
+
             health.AuditSkipped();
             LogQuotaPause(logger, chain.Chain, round, _pause);
             return Step.Retry;

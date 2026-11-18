@@ -45,7 +45,7 @@ public partial class InMemoryChainStorage(ChainContext context) : IChainStorage
         }
     }
 
-    public Task RecordAuditStopAsync(AuditStop auditStop, CancellationToken cancellationToken)
+    public virtual Task RecordAuditStopAsync(AuditStop auditStop, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(auditStop);
         lock (_gate)
