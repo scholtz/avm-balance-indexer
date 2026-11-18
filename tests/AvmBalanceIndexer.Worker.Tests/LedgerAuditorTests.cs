@@ -468,6 +468,34 @@ public sealed class LedgerAuditorTests : IDisposable
         Assert.Equal(3UL, (await storage.GetAuditStopAsync(CancellationToken.None))!.Round);
     }
 
+    [Fact]
+    public async Task A_Mismatch_Whose_Stop_Could_Not_Be_Recorded_Is_Not_Given_Up_On_When_The_Node_Then_Fails_Again_And_Again()
+    {
+        // Round 3 disagrees and the stop cannot be recorded; the next six requests for it fail (more than the retry budget of a round).
+        var reference = new InMemoryChainStorage(new ChainContext(ChainId.AlgorandTestnet));
+        await Indexer(reference).RunAsync(Scenario.LastRound, CancellationToken.None);
+        var storage = new RecordFailsOnce();
+        await Indexer(storage).RunAsync(2, CancellationToken.None);
+        await SetStateAsync(storage, IngestionState.Following);
+        var correct = await LedgerOfAsync(reference);
+        var ledger = new FakeDeltas { UnavailableAtRequests = [2, 3, 4, 5, 6, 7] };
+        foreach (var (round, delta) in correct.Rounds)
+        {
+            ledger.Rounds[round] = delta;
+        }
+
+        var good = ledger.Rounds[3];
+        ledger.Rounds[3] = good with { Algo = new Dictionary<Address, ulong>(good.Algo) { [Scenario.Bob] = good.Algo[Scenario.Bob] + 1 } };
+        await using var rig = Start(storage, ledger, new AuditOptions { FollowSampleEvery = 1 });
+        await Task.Delay(100);
+
+        await FinishTheScenarioAsync(storage);
+        await UntilAsync(() => rig.Lifetime.StopRequested);
+
+        Assert.Equal(Enumerable.Repeat(3UL, 8).ToArray(), ledger.Requested.ToArray());
+        Assert.Equal(3UL, (await storage.GetAuditStopAsync(CancellationToken.None))!.Round);
+    }
+
     private sealed class RecordFailsOnce() : InMemoryChainStorage(new ChainContext(ChainId.AlgorandTestnet))
     {
         private int _attempts;
@@ -613,6 +641,9 @@ public sealed class LedgerAuditorTests : IDisposable
         /// <summary>Answers of a gateway that throttles or has no quota left (403, 429), given before anything else.</summary>
         public Queue<HttpStatusCode> Throttled { get; } = [];
 
+        /// <summary>The requests (counted from 1) that fail with a 503.</summary>
+        public HashSet<int> UnavailableAtRequests { get; init; } = [];
+
         /// <summary>The request (counted from 1) that gets the quota answer; 0 for none.</summary>
         public int QuotaAtRequest { get; init; }
 
@@ -641,6 +672,11 @@ public sealed class LedgerAuditorTests : IDisposable
                 if (_failures < FailuresBeforeSuccess)
                 {
                     _failures++;
+                    throw new HttpRequestException("unavailable", null, HttpStatusCode.ServiceUnavailable);
+                }
+
+                if (UnavailableAtRequests.Contains(_requested.Count))
+                {
                     throw new HttpRequestException("unavailable", null, HttpStatusCode.ServiceUnavailable);
                 }
 

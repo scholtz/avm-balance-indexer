@@ -10,7 +10,7 @@ internal readonly record struct QuotaStep(TimeSpan Wait, bool Log, bool GiveUp);
 /// The waits of the writer while a public node answers that its daily quota is used up. Near the quota only a share of the requests is
 /// refused, so the wait starts short; it doubles up to the longest wait while nothing is indexed between two refusals (every refused
 /// request counts against the quota too). A daily quota is renewed within a day: a node that still refuses after
-/// <see cref="GiveUpAfter"/> of refusals (none further apart than <see cref="LogInterval"/>) without progress has another problem (a plan without quota, a monthly limit) and the writer stops.
+/// <see cref="GiveUpAfter"/> of refusals (none much further apart than the longest wait) without progress has another problem (a plan without quota, a monthly limit) and the writer stops.
 /// </summary>
 internal sealed class QuotaWait(TimeSpan first, TimeSpan longest, TimeProvider time)
 {
@@ -20,6 +20,8 @@ internal sealed class QuotaWait(TimeSpan first, TimeSpan longest, TimeProvider t
 
     private readonly TimeSpan _first = first < longest ? first : longest;
     private TimeSpan _next = first < longest ? first : longest;
+    // Further apart than the longest wait between two attempts can be, or the waits themselves would look like new outages.
+    private readonly TimeSpan _apart = longest * 2 > LogInterval ? longest * 2 : LogInterval;
     private long? _progress;
     private long _refusedSince;
     private long? _lastRefusal;
@@ -31,7 +33,7 @@ internal sealed class QuotaWait(TimeSpan first, TimeSpan longest, TimeProvider t
     {
         var now = time.GetTimestamp();
         // A refusal long after the previous one is a new outage, also without progress in between (a chain that stands still).
-        var apart = _lastRefusal is { } last && time.GetElapsedTime(last, now) >= LogInterval;
+        var apart = _lastRefusal is { } last && time.GetElapsedTime(last, now) >= _apart;
         _lastRefusal = now;
         if (_progress != progress || apart)
         {

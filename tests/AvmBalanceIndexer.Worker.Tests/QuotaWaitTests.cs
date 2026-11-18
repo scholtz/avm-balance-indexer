@@ -69,6 +69,29 @@ public class QuotaWaitTests
     }
 
     [Fact]
+    public void A_Long_Configured_Wait_Is_Not_Taken_For_A_New_Outage()
+    {
+        var time = new ManualTime();
+        var longest = TimeSpan.FromMinutes(15); // longer than the ten minutes between two log lines
+        var wait = new QuotaWait(TimeSpan.FromMinutes(5), longest, time);
+
+        // The worker waits as long as it is told between two refusals.
+        var waits = new List<double>();
+        var gaveUp = false;
+        for (var i = 0; i < 120 && !gaveUp; i++)
+        {
+            var step = wait.Next(5);
+            waits.Add(step.Wait.TotalMinutes);
+            gaveUp = step.GiveUp;
+            time.Advance(step.Wait);
+        }
+
+        Assert.Equal(new double[] { 5, 10, 15, 15 }, waits.Take(4));
+        Assert.All(waits.Skip(2), static w => Assert.Equal(15, w));
+        Assert.True(gaveUp);
+    }
+
+    [Fact]
     public void Two_Refusals_Far_Apart_Are_Two_Outages_Also_Without_Progress()
     {
         var time = new ManualTime();

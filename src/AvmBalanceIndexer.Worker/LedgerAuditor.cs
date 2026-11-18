@@ -123,6 +123,12 @@ public sealed partial class LedgerAuditor(
             return true;
         }
 
+        // The published round moved back below a round that agreed: its data is replaced, what agreed before says nothing about it.
+        if (_lastAgreed is { } agreed && status.IndexedRound < agreed)
+        {
+            _lastAgreed = null;
+        }
+
         // History is not audited: the audit starts at the round the writer had published when it became active.
         _audited ??= status.IndexedRound;
         _sampled ??= status.IndexedRound;
@@ -174,9 +180,7 @@ public sealed partial class LedgerAuditor(
         _audited = status.IndexedRound;
         if (status.IndexedRound < _sampled)
         {
-            // The data above that round is replaced: what agreed before says nothing about it.
             _sampled = status.IndexedRound;
-            _lastAgreed = null;
         }
 
         if (settings.BackfillSampleEvery > 0 && status.State == IngestionState.Backfilling)
@@ -227,6 +231,12 @@ public sealed partial class LedgerAuditor(
     /// <summary>True while the budget of retries for this round is left (and counts the retry).</summary>
     private bool ShouldRetry(ulong round)
     {
+        // A round whose mismatch is known but whose stop is not recorded yet is never given up on.
+        if (_reportedMismatch == round)
+        {
+            return true;
+        }
+
         if (_failingRound != round)
         {
             _failingRound = round;
@@ -355,7 +365,7 @@ public sealed partial class LedgerAuditor(
 
         // Not every round is audited (sampling, pauses, a node without an answer): the round before this one is not known to be good.
         // A sample of an older round (backfill after falling behind) can fail below a round that agreed earlier: that one says nothing.
-        var good = _lastAgreed is { } agreed && agreed < round ? agreed.ToString(CultureInfo.InvariantCulture) : "none known below that round";
+        var good = _lastAgreed is { } lastAgreed && lastAgreed < round ? lastAgreed.ToString(CultureInfo.InvariantCulture) : "none known below that round";
         var reason = $"round {round}: {description}; last audited round that agreed: {good}";
         try
         {
