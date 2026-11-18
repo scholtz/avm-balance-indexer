@@ -17,7 +17,9 @@ namespace AvmBalanceIndexer.Worker.Tests;
 public sealed class LedgerAuditorTests : IDisposable
 {
     private static readonly TimeSpan Tick = TimeSpan.FromMilliseconds(5);
-    private static readonly TimeSpan ThrottlePause = TimeSpan.FromMilliseconds(400);
+    private static readonly TimeSpan ThrottlePause = TimeSpan.FromMilliseconds(30);
+    private static readonly TimeSpan QuotaPauseFirst = TimeSpan.FromMilliseconds(200);
+    private static readonly TimeSpan QuotaPause = TimeSpan.FromMilliseconds(300);
     private static readonly Address[] Accounts = [Scenario.Alice, Scenario.Bob, Scenario.Carol, Scenario.Dave];
     private readonly int _previousExitCode = Environment.ExitCode;
 
@@ -77,7 +79,7 @@ public sealed class LedgerAuditorTests : IDisposable
 
         var logger = new CapturingLogger();
         var lifetime = new StopSignal();
-        var auditor = new LedgerAuditor(deltas, storage, new ChainContext(ChainId.AlgorandTestnet), health, Options.Create(new WorkerOptions { Audit = audit }), lifetime, logger) { Interval = Tick, ThrottlePause = ThrottlePause, QuotaPause = ThrottlePause };
+        var auditor = new LedgerAuditor(deltas, storage, new ChainContext(ChainId.AlgorandTestnet), health, Options.Create(new WorkerOptions { Audit = audit }), lifetime, logger) { Interval = Tick, ThrottlePause = ThrottlePause, QuotaPauseFirst = QuotaPauseFirst, QuotaPause = QuotaPause };
         auditor.StartAsync(CancellationToken.None).GetAwaiter().GetResult();
         return new Rig { Auditor = auditor, Health = health, Logger = logger, Lifetime = lifetime };
     }
@@ -327,6 +329,74 @@ public sealed class LedgerAuditorTests : IDisposable
     }
 
     [Fact]
+    public async Task A_Node_That_Keeps_Throttling_A_Round_Is_Given_Up_On_For_That_Round_Like_Any_Failure()
+    {
+        var (storage, ledger) = await AtRoundTwoAsync();
+        for (var i = 0; i < 5; i++)
+        {
+            ledger.Throttled.Enqueue(HttpStatusCode.TooManyRequests);
+        }
+
+        await using var rig = Start(storage, ledger, new AuditOptions { FollowSampleEvery = 1 });
+        await Task.Delay(100);
+
+        await FinishTheScenarioAsync(storage);
+        await UntilAsync(() => rig.Health.LastAuditedRound == (long)Scenario.LastRound);
+
+        Assert.Equal([3UL, 3UL, 3UL, 3UL, 3UL, 4UL, 5UL], ledger.Requested.ToArray());
+        Assert.Equal(1, rig.Health.AuditSkippedCount);
+        Assert.Single(rig.Logger.Entries, static e => e.Level == LogLevel.Warning);
+    }
+
+    [Fact]
+    public async Task Quota_Answers_In_A_Row_Lengthen_The_Pause_Up_To_Its_Limit()
+    {
+        var (storage, ledger) = await AtRoundTwoAsync();
+        ledger.Throttled.Enqueue(HttpStatusCode.Forbidden);
+        ledger.Throttled.Enqueue(HttpStatusCode.Forbidden);
+        ledger.Throttled.Enqueue(HttpStatusCode.Forbidden);
+        await using var rig = Start(storage, ledger, new AuditOptions { FollowSampleEvery = 1 });
+        await Task.Delay(100);
+
+        // Each resumed audit finds a newly published round, and is refused again.
+        for (ulong round = 3; round <= 5; round++)
+        {
+            var resumes = (int)(round - 3);
+            await UntilAsync(() => rig.Logger.Entries.Count(static e => e.Message.Contains("resumes", StringComparison.Ordinal)) == resumes);
+            await Task.Delay(50);
+            await Indexer(storage).RunAsync(round, CancellationToken.None);
+            await SetStateAsync(storage, IngestionState.Following);
+            await UntilAsync(() => ledger.Requested.Count == resumes + 1);
+        }
+
+        var pauses = rig.Logger.Entries.Where(static e => e.Level == LogLevel.Warning).Select(static e => e.Message).ToArray();
+        Assert.Equal(3, pauses.Length);
+        Assert.Contains("pauses for 00:00:00.2000000", pauses[0], StringComparison.Ordinal);
+        Assert.Contains("pauses for 00:00:00.3000000", pauses[1], StringComparison.Ordinal); // doubled, and limited
+        Assert.Contains("pauses for 00:00:00.3000000", pauses[2], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_Sampled_Older_Round_That_Disagrees_Does_Not_Name_A_Later_Round_As_Good()
+    {
+        var (storage, ledger) = await AtRoundTwoAsync();
+        await using var rig = Start(storage, ledger, new AuditOptions { FollowSampleEvery = 1, BackfillSampleEvery = 3 });
+        await Task.Delay(100);
+        await FinishTheScenarioAsync(storage);
+        await UntilAsync(() => rig.Health.LastAuditedRound == (long)Scenario.LastRound); // rounds 3 to 5 agreed
+
+        // The writer falls behind and backfills: round 3 is sampled, and the ledger now disagrees there.
+        var good = ledger.Rounds[3];
+        ledger.Rounds[3] = good with { Algo = new Dictionary<Address, ulong>(good.Algo) { [Scenario.Bob] = good.Algo[Scenario.Bob] + 1 } };
+        await SetStateAsync(storage, IngestionState.Backfilling);
+        await UntilAsync(() => rig.Lifetime.StopRequested);
+
+        var stop = await storage.GetAuditStopAsync(CancellationToken.None);
+        Assert.Equal(3UL, stop!.Round);
+        Assert.Contains("last audited round that agreed: none known below that round", stop.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task A_403_That_Is_Not_About_The_Quota_Is_A_Node_That_Does_Not_Answer_The_Round_Is_Tried_Again_Without_A_Pause()
     {
         var (storage, ledger) = await AtRoundTwoAsync();
@@ -378,7 +448,7 @@ public sealed class LedgerAuditorTests : IDisposable
         await Indexer(storage).RunAsync(3, CancellationToken.None);
         await SetStateAsync(storage, IngestionState.Following);
         await UntilAsync(() => ledger.Requested.Count == 1);
-        await Task.Delay(ThrottlePause / 2);
+        await Task.Delay(QuotaPauseFirst / 2);
         Assert.Equal([3UL], ledger.Requested.ToArray());
         Assert.True(rig.Health.AuditSkippedCount >= 1);
         var warning = Assert.Single(rig.Logger.Entries, static e => e.Level == LogLevel.Warning);

@@ -61,6 +61,53 @@ public class AlgodQuotaHandlerTests
         Assert.Equal(page[..1025], await response.Content.ReadAsStringAsync());
     }
 
+    [Fact]
+    public async Task A_403_Body_That_Cannot_Be_Read_Is_A_Failed_Request()
+    {
+        using var http = new HttpClient(new AlgodQuotaHandler(new Broken())) { BaseAddress = new Uri("https://node.example/") };
+
+        var ex = await Assert.ThrowsAsync<HttpRequestException>(() => http.GetAsync(new Uri("v2/status", UriKind.Relative)));
+
+        Assert.IsNotType<NodeQuotaExceededException>(ex);
+        Assert.IsType<IOException>(ex.InnerException);
+    }
+
+    /// <summary>The clients the factory builds carry the handler: a real request to a server that names its quota.</summary>
+    [Fact]
+    public async Task The_Algod_Clients_Of_The_Factory_Report_The_Quota_Answer()
+    {
+        using var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var server = Task.Run(async () =>
+        {
+            using var client = await listener.AcceptTcpClientAsync();
+            var stream = client.GetStream();
+            var request = new byte[4096];
+            _ = await stream.ReadAsync(request);
+            const string Body = "Daily free API quota exceeded";
+            await stream.WriteAsync(Encoding.ASCII.GetBytes($"HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\nContent-Length: {Body.Length}\r\nConnection: close\r\n\r\n{Body}"));
+        });
+        var options = new AlgorandChainOptions { Chain = Domain.Chains.ChainId.AlgorandTestnet, AlgodUrl = $"http://127.0.0.1:{port}" };
+        using var deltas = AlgorandChainFactory.CreateLedgerDeltaSource(options, Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance);
+
+        await Assert.ThrowsAsync<NodeQuotaExceededException>(() => deltas.TryGetAsync(7, CancellationToken.None));
+        await server;
+    }
+
+    private sealed class Broken : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.Forbidden) { Content = new StreamContent(new Resetting()), RequestMessage = request });
+    }
+
+    private sealed class Resetting() : MemoryStream(new byte[8])
+    {
+        public override bool CanSeek => false;
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) => throw new IOException("Connection reset by peer");
+    }
+
     private sealed class NoLength(byte[] bytes) : MemoryStream(bytes)
     {
         public override bool CanSeek => false;

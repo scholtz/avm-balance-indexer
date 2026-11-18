@@ -62,9 +62,9 @@ Two facts make that possible:
   out by the worker that holds the writer lease, reported by the deploy job.
 - **Finding R early.**
   - Ledger audit: the writer compares balances with the ledger deltas of the node (`/v2/deltas/{round}`, Algorand networks):
-    every round while following the tip, and a sample of rounds during backfill and during the replay after a partial rebuild,
+    one round in `followSampleEvery` while following the tip (every round with an own node; #219), and a sample of rounds during backfill and during the replay after a partial rebuild,
     as far as the node serves deltas for them. The audit runs after publication: it detects, it does not prevent. A node that
-    is unavailable, rate-limited or answers something unreadable is a skipped round, never a failure. A disagreement stops the
+    is unavailable, rate-limited, out of its daily quota or answers something unreadable means rounds that are not audited, never a failure. A disagreement stops the
     writer (configurable per release), because every further round would have to be rebuilt. The audit runs after
     publication and batches publish several rounds at once, so the writer stops at its current tip, which can be past the bad
     round S; a rebuild must choose R below S. The stop is recorded in the database, so a restarted worker does not index on

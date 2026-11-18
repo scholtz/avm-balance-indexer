@@ -43,13 +43,17 @@ public sealed partial class LedgerAuditor(
     private long? _lastWarning;
     private long? _pausedAt;
     private TimeSpan _pause;
+    private TimeSpan? _nextQuotaPause;
     private ulong? _lastAgreed;
 
     /// <summary>Tests pass a shorter pause than the configuration (whole seconds) allows.</summary>
     internal TimeSpan? Interval { get; init; }
 
-    /// <summary>How long nothing is asked after the node refused for its daily quota (403): the indexer needs the requests more.</summary>
+    /// <summary>Longest time nothing is asked after the node refused for its daily quota (403): the indexer needs the requests more.</summary>
     internal TimeSpan QuotaPause { get; init; } = TimeSpan.FromMinutes(15);
+
+    /// <summary>The pause after a first quota answer (near the quota only a share of the requests is refused); doubled per further answer without an audited round in between.</summary>
+    internal TimeSpan QuotaPauseFirst { get; init; } = TimeSpan.FromMinutes(1);
 
     /// <summary>How long nothing is asked after the node throttled (429, a limit per second); the round is then asked for again.</summary>
     internal TimeSpan ThrottlePause { get; init; } = TimeSpan.FromSeconds(30);
@@ -162,7 +166,6 @@ public sealed partial class LedgerAuditor(
         if (status.IndexedRound < _sampled)
         {
             _sampled = status.IndexedRound;
-            _lastAgreed = null;
         }
 
         if (settings.BackfillSampleEvery > 0 && status.State == IngestionState.Backfilling)
@@ -240,7 +243,8 @@ public sealed partial class LedgerAuditor(
             // The daily quota of a public node is used up (and it counts the refused request too): the audit stops asking for a while
             // and continues with the round that is published then. The rounds in between are not audited.
             _pausedAt = _time.GetTimestamp();
-            _pause = QuotaPause;
+            _pause = TimeSpan.FromTicks(Math.Min((_nextQuotaPause ?? QuotaPauseFirst).Ticks, QuotaPause.Ticks));
+            _nextQuotaPause = _pause * 2;
             _audited = null;
             health.AuditSkipped();
             LogQuotaPause(logger, chain.Chain, round, _pause);
@@ -248,11 +252,18 @@ public sealed partial class LedgerAuditor(
         }
         catch (HttpRequestException ex) when (ex.StatusCode is HttpStatusCode.TooManyRequests)
         {
-            // A limit per second: the same round is asked for again after a short pause, nothing is skipped.
+            // A limit per second: the same round is asked for again after a short pause, and given up on after a few answers like any failure.
             _pausedAt = _time.GetTimestamp();
             _pause = ThrottlePause;
-            LogThrottled(logger, chain.Chain, round, _pause);
-            return Step.Retry;
+            if (ShouldRetry(round))
+            {
+                LogThrottled(logger, chain.Chain, round, _pause);
+                return Step.Retry;
+            }
+
+            Warn(ex);
+            health.AuditSkipped();
+            return Step.Done;
         }
         catch (Exception ex) when (ex is HttpRequestException or InvalidDataException or TimeoutException || (ex is OperationCanceledException && !cancellationToken.IsCancellationRequested))
         {
@@ -286,6 +297,7 @@ public sealed partial class LedgerAuditor(
         }
 
         _consecutiveNoDeltas = 0;
+        _nextQuotaPause = null;
         var mismatches = await LedgerAudit.CompareAsync(storage, delta, round, ReadsInFlight, cancellationToken).ConfigureAwait(false);
         _auditedRounds++;
         health.ReportAudited(round);
@@ -386,6 +398,6 @@ public sealed partial class LedgerAuditor(
     [LoggerMessage(EventId = 1357, Level = LogLevel.Warning, Message = "The ledger audit of {Chain} could not record its stop at round {Round}; the database is tried again at the next pass and the worker keeps running until then")]
     private static partial void LogStopNotRecorded(ILogger logger, Exception exception, string chain, ulong round);
 
-    [LoggerMessage(EventId = 1356, Level = LogLevel.Critical, Message = "Ledger audit of {Chain} failed at round {Round}: the ledger disagrees at that round and this writer has published up to {Published}; the last audited round that agreed is {Good}. Fix the cause, then rebuild from a round that was audited and agreed (docs/operations.md). {Reason}")]
+    [LoggerMessage(EventId = 1356, Level = LogLevel.Critical, Message = "Ledger audit of {Chain} failed at round {Round}: the ledger disagrees at that round and this writer has published up to {Published}; the last audited round that agreed is {Good}. Not every round is audited and a round only shows the accounts it changed, so the first wrong round can lie before both: find it, fix the cause, then rebuild from a round below it (docs/operations.md). {Reason}")]
     private static partial void LogStop(ILogger logger, string chain, ulong round, ulong published, string good, string reason);
 }

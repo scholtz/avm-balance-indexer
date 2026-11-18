@@ -138,6 +138,27 @@ public class IndexerWorkerTests : IDisposable
     }
 
     [Fact]
+    public async Task A_Node_That_Names_Its_Quota_For_Longer_Than_A_Day_Without_Any_Progress_Stops_The_Application()
+    {
+        var storage = NewStorage();
+        var time = new ManualTime();
+        // A plan without quota, a monthly limit: the answer looks the same, but it does not end at midnight.
+        var errors = new Queue<Exception>(Enumerable.Range(0, 20).Select(_ => (Exception)new NodeQuotaExceededException("The node answered HTTP 403 for /v2/status: No quota assigned")));
+        var adapter = new FlakyAdapter(Scenario.Adapter(), failuresBeforeSuccess: int.MaxValue, errors: errors, onFailure: () => time.Advance(TimeSpan.FromHours(7)));
+        var logger = new ListLogger();
+
+        var (worker, lifetime) = Create(storage, adapter, maxFailures: 1000, logger: logger, clock: time);
+        await worker.StartAsync(CancellationToken.None);
+        await lifetime.WaitForStopAsync();
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.Equal(1, Environment.ExitCode);
+        Assert.Equal(5, adapter.Failures); // at 0, 7, 14, 21 and 28 hours
+        var fatal = Assert.Single(logger.Entries, static e => e.Level == LogLevel.Critical);
+        Assert.Contains("not a daily quota", fatal.Exception!.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task A_Chain_Divergence_Stops_The_Application_Immediately_Without_Retrying()
     {
         var storage = NewStorage();
@@ -436,7 +457,7 @@ public class IndexerWorkerTests : IDisposable
             Assert.Null(await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None));
             var fatal = Assert.Single(logger.Entries, static e => e.Level == LogLevel.Critical);
             Assert.Contains("Ledger audit of algorand-testnet failed at round 4", fatal.Exception!.Message, StringComparison.Ordinal);
-            Assert.Contains("rebuild from a round below 4 that was audited and agreed", fatal.Exception.Message, StringComparison.Ordinal);
+            Assert.Contains("Find the first wrong round (at or below 4;", fatal.Exception.Message, StringComparison.Ordinal);
             Environment.ExitCode = 0;
         }
     }
@@ -716,7 +737,7 @@ public class IndexerWorkerTests : IDisposable
 
     private static InMemoryChainStorage NewStorage() => new(new ChainContext(ChainId.AlgorandTestnet));
 
-    private static (IndexerWorker Worker, FakeLifetime Lifetime) Create(InMemoryChainStorage storage, IChainAdapter adapter, int maxFailures, WorkerHealth? health = null, ILogger<IndexerWorker>? logger = null, string? version = null, IPartialRebuild? rebuild = null, WorkerOptions? workerOptions = null)
+    private static (IndexerWorker Worker, FakeLifetime Lifetime) Create(InMemoryChainStorage storage, IChainAdapter adapter, int maxFailures, WorkerHealth? health = null, ILogger<IndexerWorker>? logger = null, string? version = null, IPartialRebuild? rebuild = null, WorkerOptions? workerOptions = null, TimeProvider? clock = null)
     {
         var options = Options.Create(new IndexerOptions
         {
@@ -730,7 +751,7 @@ public class IndexerWorkerTests : IDisposable
         });
         var indexer = new RoundIndexer(adapter, new AlgoEffectNormalizer(), storage, options, NullLogger<RoundIndexer>.Instance);
         var lifetime = new FakeLifetime();
-        return (new IndexerWorker(indexer, storage, new ChainContext(ChainId.AlgorandTestnet), options, lifetime, storage, storage, health ?? new WorkerHealth(), logger ?? NullLogger<IndexerWorker>.Instance, buildVersion: version, partialRebuilds: rebuild is null ? null : [rebuild], workerOptions: workerOptions is null ? null : Options.Create(workerOptions)), lifetime);
+        return (new IndexerWorker(indexer, storage, new ChainContext(ChainId.AlgorandTestnet), options, lifetime, storage, storage, health ?? new WorkerHealth(), logger ?? NullLogger<IndexerWorker>.Instance, clock: clock, buildVersion: version, partialRebuilds: rebuild is null ? null : [rebuild], workerOptions: workerOptions is null ? null : Options.Create(workerOptions)), lifetime);
     }
 
     private static async Task WaitForRoundAsync(InMemoryChainStorage storage, ulong round)
