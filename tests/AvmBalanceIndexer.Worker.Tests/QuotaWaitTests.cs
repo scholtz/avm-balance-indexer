@@ -55,16 +55,33 @@ public class QuotaWaitTests
         var time = new ManualTime();
         var wait = new QuotaWait(First, Longest, time);
 
-        Assert.False(wait.Next(5).GiveUp);
-        time.Advance(TimeSpan.FromHours(25));
-        Assert.False(wait.Next(5).GiveUp);
-        time.Advance(TimeSpan.FromHours(1));
+        // Refused every minute: given up on at the first refusal 26 hours after the first one.
+        for (var minute = 0; minute < 26 * 60; minute++)
+        {
+            Assert.False(wait.Next(5).GiveUp);
+            time.Advance(TimeSpan.FromMinutes(1));
+        }
+
         Assert.True(wait.Next(5).GiveUp);
 
         // Progress means the quota was renewed in between: the time starts again.
         Assert.False(wait.Next(6).GiveUp);
-        time.Advance(TimeSpan.FromHours(25));
-        Assert.False(wait.Next(6).GiveUp);
+    }
+
+    [Fact]
+    public void Two_Refusals_Far_Apart_Are_Two_Outages_Also_Without_Progress()
+    {
+        var time = new ManualTime();
+        var wait = new QuotaWait(First, Longest, time);
+        wait.Next(5);
+        wait.Next(5);
+
+        // A chain that stands still: the node answered in between, nothing was indexed.
+        time.Advance(TimeSpan.FromHours(30));
+        var step = wait.Next(5);
+
+        Assert.False(step.GiveUp);
+        Assert.Equal(First, step.Wait);
     }
 }
 

@@ -369,10 +369,12 @@ public sealed class LedgerAuditorTests : IDisposable
             await Task.Delay(50);
             await Indexer(storage).RunAsync(round, CancellationToken.None);
             await SetStateAsync(storage, IngestionState.Following);
-            await UntilAsync(() => rig.Logger.Entries.Count(static e => e.Level == LogLevel.Warning) == resumes + 1);
+            await UntilAsync(() => rig.Logger.Entries.Count(static e => e.Message.Contains("pauses for", StringComparison.Ordinal)) == resumes + 1);
         }
 
-        var pauses = rig.Logger.Entries.Where(static e => e.Level == LogLevel.Warning).Select(static e => e.Message).ToArray();
+        // One Warning for the outage; the further pauses are Information.
+        Assert.Single(rig.Logger.Entries, static e => e.Level == LogLevel.Warning);
+        var pauses = rig.Logger.Entries.Where(static e => e.Message.Contains("pauses for", StringComparison.Ordinal)).Select(static e => e.Message).ToArray();
         Assert.Equal(3, pauses.Length);
         Assert.Contains("pauses for 00:00:00.2000000", pauses[0], StringComparison.Ordinal);
         Assert.Contains("pauses for 00:00:00.3000000", pauses[1], StringComparison.Ordinal); // doubled, and limited
@@ -441,6 +443,29 @@ public sealed class LedgerAuditorTests : IDisposable
 
         public override Task<ChainStatus?> GetAsync(string chain, CancellationToken cancellationToken) =>
             Published is { } published ? Task.FromResult<ChainStatus?>(published) : base.GetAsync(chain, cancellationToken);
+    }
+
+    [Fact]
+    public async Task Sampling_Does_Not_Skip_A_Mismatch_Whose_Stop_Could_Not_Be_Recorded_Yet()
+    {
+        // Round 3 is the first comparison (asked for whatever the sampling) and disagrees; the stop cannot be recorded at first.
+        // Round 3 is not a sampled round (one in 10), and must be looked at again all the same.
+        var reference = new InMemoryChainStorage(new ChainContext(ChainId.AlgorandTestnet));
+        await Indexer(reference).RunAsync(Scenario.LastRound, CancellationToken.None);
+        var storage = new RecordFailsOnce();
+        await Indexer(storage).RunAsync(2, CancellationToken.None);
+        await SetStateAsync(storage, IngestionState.Following);
+        var ledger = await LedgerOfAsync(reference);
+        var good = ledger.Rounds[3];
+        ledger.Rounds[3] = good with { Algo = new Dictionary<Address, ulong>(good.Algo) { [Scenario.Bob] = good.Algo[Scenario.Bob] + 1 } };
+        await using var rig = Start(storage, ledger, new AuditOptions { FollowSampleEvery = 10 });
+        await Task.Delay(100);
+
+        await FinishTheScenarioAsync(storage);
+        await UntilAsync(() => rig.Lifetime.StopRequested);
+
+        Assert.Equal([3UL, 3UL], ledger.Requested.ToArray());
+        Assert.Equal(3UL, (await storage.GetAuditStopAsync(CancellationToken.None))!.Round);
     }
 
     private sealed class RecordFailsOnce() : InMemoryChainStorage(new ChainContext(ChainId.AlgorandTestnet))

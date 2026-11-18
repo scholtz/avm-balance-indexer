@@ -44,6 +44,7 @@ public sealed partial class LedgerAuditor(
     private long? _pausedAt;
     private TimeSpan _pause;
     private TimeSpan? _nextQuotaPause;
+    private long? _quotaWarnedAt;
     private ulong? _lastAgreed;
 
     /// <summary>Tests pass a shorter pause than the configuration (whole seconds) allows.</summary>
@@ -134,7 +135,8 @@ public sealed partial class LedgerAuditor(
             for (var round = _audited.Value + 1; round <= status.IndexedRound; round++)
             {
                 var every = settings.FollowSampleEvery <= 0 ? 0UL : _auditedRounds == 0 ? 1UL : (ulong)settings.FollowSampleEvery;
-                if (every == 0 || round % every != 0)
+                // A round whose mismatch is known but whose stop is not recorded yet is looked at again, whatever the sampling.
+                if ((every == 0 || round % every != 0) && _reportedMismatch != round)
                 {
                     _audited = round;
                     continue;
@@ -262,7 +264,14 @@ public sealed partial class LedgerAuditor(
             }
 
             health.AuditSkipped();
-            LogQuotaPause(logger, chain.Chain, round, _pause);
+            // A Warning for the first pause, then at most every ten minutes: near the quota the answer comes again and again.
+            var warn = _quotaWarnedAt is not { } warnedAt || _time.GetElapsedTime(warnedAt) >= WarnEvery;
+            if (warn)
+            {
+                _quotaWarnedAt = _time.GetTimestamp();
+            }
+
+            LogQuotaPause(logger, warn ? LogLevel.Warning : LogLevel.Information, chain.Chain, round, _pause);
             return Step.Retry;
         }
         catch (HttpRequestException ex) when (ex.StatusCode is HttpStatusCode.TooManyRequests)
@@ -404,8 +413,8 @@ public sealed partial class LedgerAuditor(
     [LoggerMessage(EventId = 1359, Level = LogLevel.Information, Message = "The ledger audit of {Chain} continues after its pause")]
     private static partial void LogResumed(ILogger logger, string chain);
 
-    [LoggerMessage(EventId = 1358, Level = LogLevel.Warning, Message = "The daily quota of the node of {Chain} is used up (HTTP 403 for the ledger deltas of round {Round}); the ledger audit pauses for {Pause}; while following, the rounds published meanwhile are not audited")]
-    private static partial void LogQuotaPause(ILogger logger, string chain, ulong round, TimeSpan pause);
+    [LoggerMessage(EventId = 1358, Message = "The daily quota of the node of {Chain} is used up (HTTP 403 for the ledger deltas of round {Round}); the ledger audit pauses for {Pause}; while following, the rounds published meanwhile are not audited")]
+    private static partial void LogQuotaPause(ILogger logger, LogLevel level, string chain, ulong round, TimeSpan pause);
 
     [LoggerMessage(EventId = 1360, Level = LogLevel.Information, Message = "The node of {Chain} throttles (HTTP 429 for the ledger deltas of round {Round}); the ledger audit asks again in {Pause}")]
     private static partial void LogThrottled(ILogger logger, string chain, ulong round, TimeSpan pause);

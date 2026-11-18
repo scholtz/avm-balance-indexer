@@ -10,7 +10,7 @@ internal readonly record struct QuotaStep(TimeSpan Wait, bool Log, bool GiveUp);
 /// The waits of the writer while a public node answers that its daily quota is used up. Near the quota only a share of the requests is
 /// refused, so the wait starts short; it doubles up to the longest wait while nothing is indexed between two refusals (every refused
 /// request counts against the quota too). A daily quota is renewed within a day: a node that still refuses after
-/// <see cref="GiveUpAfter"/> without progress has another problem (a plan without quota, a monthly limit) and the writer stops.
+/// <see cref="GiveUpAfter"/> of refusals (none further apart than <see cref="LogInterval"/>) without progress has another problem (a plan without quota, a monthly limit) and the writer stops.
 /// </summary>
 internal sealed class QuotaWait(TimeSpan first, TimeSpan longest, TimeProvider time)
 {
@@ -22,6 +22,7 @@ internal sealed class QuotaWait(TimeSpan first, TimeSpan longest, TimeProvider t
     private TimeSpan _next = first < longest ? first : longest;
     private long? _progress;
     private long _refusedSince;
+    private long? _lastRefusal;
     private long? _loggedAt;
 
     /// <summary>The step after a quota answer.</summary>
@@ -29,7 +30,10 @@ internal sealed class QuotaWait(TimeSpan first, TimeSpan longest, TimeProvider t
     public QuotaStep Next(long progress)
     {
         var now = time.GetTimestamp();
-        if (_progress != progress)
+        // A refusal long after the previous one is a new outage, also without progress in between (a chain that stands still).
+        var apart = _lastRefusal is { } last && time.GetElapsedTime(last, now) >= LogInterval;
+        _lastRefusal = now;
+        if (_progress != progress || apart)
         {
             _progress = progress;
             _next = _first;

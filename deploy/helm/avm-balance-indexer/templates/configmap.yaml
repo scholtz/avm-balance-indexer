@@ -35,8 +35,8 @@ data:
   {{- fail (printf "worker.audit.backfillSampleEvery %v must be a whole number, 0 or more" .Values.worker.audit.backfillSampleEvery) }}
   {{- end }}
   {{- $sample := float64 (default 0 .Values.worker.audit.backfillSampleEvery) }}
-  {{- if or (lt $sample 0.0) (ne $sample (floor $sample)) }}
-  {{- fail (printf "worker.audit.backfillSampleEvery %v must be a whole number, 0 or more" .Values.worker.audit.backfillSampleEvery) }}
+  {{- if or (lt $sample 0.0) (ne $sample (floor $sample)) (gt $sample 2147483647.0) }}
+  {{- fail (printf "worker.audit.backfillSampleEvery %v must be a whole number from 0 to 2147483647" .Values.worker.audit.backfillSampleEvery) }}
   {{- end }}
   Worker__Audit__BackfillSampleEvery: {{ int64 $sample | quote }}
   {{- /* Absent (values kept from a release before this setting): no entry, so the default of the application applies, not 0, which would switch the audit off at the tip. */}}
@@ -45,8 +45,8 @@ data:
   {{- fail (printf "worker.audit.followSampleEvery %v must be a whole number, 0 or more" .Values.worker.audit.followSampleEvery) }}
   {{- end }}
   {{- $follow := float64 .Values.worker.audit.followSampleEvery }}
-  {{- if or (lt $follow 0.0) (ne $follow (floor $follow)) }}
-  {{- fail (printf "worker.audit.followSampleEvery %v must be a whole number, 0 or more" .Values.worker.audit.followSampleEvery) }}
+  {{- if or (lt $follow 0.0) (ne $follow (floor $follow)) (gt $follow 2147483647.0) }}
+  {{- fail (printf "worker.audit.followSampleEvery %v must be a whole number from 0 to 2147483647" .Values.worker.audit.followSampleEvery) }}
   {{- end }}
   Worker__Audit__FollowSampleEvery: {{ int64 $follow | quote }}
   {{- end }}

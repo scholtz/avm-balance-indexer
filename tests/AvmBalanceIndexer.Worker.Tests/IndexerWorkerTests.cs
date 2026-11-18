@@ -163,8 +163,8 @@ public class IndexerWorkerTests : IDisposable
         var storage = NewStorage();
         var time = new ManualTime();
         // A plan without quota, a monthly limit: the answer looks the same, but it does not end at midnight.
-        var errors = new Queue<Exception>(Enumerable.Range(0, 20).Select(_ => (Exception)new NodeQuotaExceededException("The node answered HTTP 403 for /v2/status: No quota assigned")));
-        var adapter = new FlakyAdapter(Scenario.Adapter(), failuresBeforeSuccess: int.MaxValue, errors: errors, onFailure: () => time.Advance(TimeSpan.FromHours(7)));
+        var errors = new Queue<Exception>(Enumerable.Range(0, 200).Select(_ => (Exception)new NodeQuotaExceededException("The node answered HTTP 403: No quota assigned")));
+        var adapter = new FlakyAdapter(Scenario.Adapter(), failuresBeforeSuccess: int.MaxValue, errors: errors, onFailure: () => time.Advance(TimeSpan.FromMinutes(9)));
         var logger = new ListLogger();
 
         var (worker, lifetime) = Create(storage, adapter, maxFailures: 1000, logger: logger, clock: time);
@@ -173,7 +173,7 @@ public class IndexerWorkerTests : IDisposable
         await worker.StopAsync(CancellationToken.None);
 
         Assert.Equal(1, Environment.ExitCode);
-        Assert.Equal(5, adapter.Failures); // at 0, 7, 14, 21 and 28 hours
+        Assert.Equal(175, adapter.Failures); // one every nine minutes, the 175th is 26 hours and 6 minutes after the first
         var fatal = Assert.Single(logger.Entries, static e => e.Level == LogLevel.Critical);
         Assert.Contains("not a daily quota", fatal.Exception!.Message, StringComparison.Ordinal);
     }
