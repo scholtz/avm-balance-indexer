@@ -151,6 +151,9 @@ worker:
     # Stop the worker at the first mismatch and keep it stopped, also after a restart, until the round is acknowledged or the database is
     # rebuilt from an earlier round. False only logs and counts.
     stopOnMismatch: true
+    # While following the tip one round in this many is audited (one request of 30 to 70 KB each); 1 = every round, 0 = none. 10 keeps
+    # the worker within the daily quota of a public node (Nodely: a 403 "Daily free API quota exceeded"); use 1 with an own node.
+    followSampleEvery: 10
     # While backfilling (and replaying after a partial rebuild) one round in this many is audited; 0 audits nothing then.
     backfillSampleEvery: 1000
     # The round of a recorded stop that you decided is fine (a difference on the side of the oracle): the stop is acknowledged.

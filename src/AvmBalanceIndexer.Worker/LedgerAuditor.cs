@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Net;
 using AvmBalanceIndexer.Domain.Chains;
 using AvmBalanceIndexer.Domain.Storage;
 using AvmBalanceIndexer.Indexing.Adapters;
@@ -9,7 +10,7 @@ namespace AvmBalanceIndexer.Worker;
 
 /// <summary>
 /// Audits the rounds the writer has published against the ledger (ADR 0021, "Finding R early"): the end-of-round balances of every account the
-/// ledger changed in a round must be what the database holds for that round. While the writer follows the tip every round is audited, while it
+/// ledger changed in a round must be what the database holds for that round. While the writer follows the tip one round in <see cref="AuditOptions.FollowSampleEvery"/> is audited, while it
 /// backfills (also the replay after a partial rebuild) one round in <see cref="AuditOptions.BackfillSampleEvery"/>. The first disagreement is logged,
 /// recorded in the database (so that a restart does not index past it) and, by default, stops the worker.
 /// The audit reads rounds that are already published: it detects a bad round, it does not keep it from being served. A node that does not answer is
@@ -40,9 +41,23 @@ public sealed partial class LedgerAuditor(
     private ulong _failingRound;
     private ulong? _reportedMismatch;
     private long? _lastWarning;
+    private long? _pausedAt;
+    private TimeSpan _pause;
+    private TimeSpan? _nextQuotaPause;
+    private long? _quotaWarnedAt;
+    private ulong? _lastAgreed;
 
     /// <summary>Tests pass a shorter pause than the configuration (whole seconds) allows.</summary>
     internal TimeSpan? Interval { get; init; }
+
+    /// <summary>Longest time nothing is asked after the node refused for its daily quota (403): the indexer needs the requests more.</summary>
+    internal TimeSpan QuotaPause { get; init; } = TimeSpan.FromMinutes(15);
+
+    /// <summary>The pause after a first quota answer (near the quota only a share of the requests is refused); doubled per further answer without an audited round in between.</summary>
+    internal TimeSpan QuotaPauseFirst { get; init; } = TimeSpan.FromMinutes(1);
+
+    /// <summary>How long nothing is asked after the node throttled (429, a limit per second); the round is then asked for again.</summary>
+    internal TimeSpan ThrottlePause { get; init; } = TimeSpan.FromSeconds(30);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -53,7 +68,7 @@ public sealed partial class LedgerAuditor(
             return;
         }
 
-        LogStarted(logger, chain.Chain, settings.StopOnMismatch, settings.BackfillSampleEvery);
+        LogStarted(logger, chain.Chain, settings.FollowSampleEvery, settings.BackfillSampleEvery, settings.StopOnMismatch);
         using var timer = new PeriodicTimer(Interval ?? TimeSpan.FromSeconds(Math.Max(1, settings.IntervalSeconds)));
         try
         {
@@ -88,10 +103,30 @@ public sealed partial class LedgerAuditor(
             return true;
         }
 
+        if (_pausedAt is { } pausedAt)
+        {
+            if (_time.GetElapsedTime(pausedAt) < _pause)
+            {
+                return true;
+            }
+
+            _pausedAt = null;
+            if (_audited is null)
+            {
+                LogResumed(logger, chain.Chain);
+            }
+        }
+
         var status = await storage.GetAsync(chain.Chain, cancellationToken).ConfigureAwait(false);
         if (status is null)
         {
             return true;
+        }
+
+        // The published round moved back below a round that agreed: its data is replaced, what agreed before says nothing about it.
+        if (_lastAgreed is { } agreed && status.IndexedRound < agreed)
+        {
+            _lastAgreed = null;
         }
 
         // History is not audited: the audit starts at the round the writer had published when it became active.
@@ -101,8 +136,23 @@ public sealed partial class LedgerAuditor(
         if (status.State == IngestionState.Following)
         {
             var budget = Math.Max(1, settings.MaxRoundsPerPass);
-            for (var round = _audited.Value + 1; round <= status.IndexedRound && budget-- > 0; round++)
+            // Until a first round was compared every round is asked for, so that a node without deltas is found (and the audit switched
+            // off) as fast as without sampling.
+            for (var round = _audited.Value + 1; round <= status.IndexedRound; round++)
             {
+                var every = settings.FollowSampleEvery <= 0 ? 0UL : _auditedRounds == 0 ? 1UL : (ulong)settings.FollowSampleEvery;
+                // A round whose mismatch is known but whose stop is not recorded yet is looked at again, whatever the sampling.
+                if ((every == 0 || round % every != 0) && _reportedMismatch != round)
+                {
+                    _audited = round;
+                    continue;
+                }
+
+                if (budget-- <= 0)
+                {
+                    break;
+                }
+
                 var step = await AuditRoundAsync(round, status.IndexedRound, settings, countNoDeltas: true, cancellationToken).ConfigureAwait(false);
                 if (step == Step.Stop)
                 {
@@ -115,6 +165,11 @@ public sealed partial class LedgerAuditor(
                 }
 
                 _audited = round;
+                if (_pausedAt is not null)
+                {
+                    // Given up on a round the node kept throttling: the pause holds for the next round too.
+                    break;
+                }
             }
 
             return !NodeHasNoDeltas();
@@ -176,6 +231,12 @@ public sealed partial class LedgerAuditor(
     /// <summary>True while the budget of retries for this round is left (and counts the retry).</summary>
     private bool ShouldRetry(ulong round)
     {
+        // A round whose mismatch is known but whose stop is not recorded yet is never given up on.
+        if (_reportedMismatch == round)
+        {
+            return true;
+        }
+
         if (_failingRound != round)
         {
             _failingRound = round;
@@ -197,6 +258,46 @@ public sealed partial class LedgerAuditor(
         try
         {
             delta = await deltas.TryGetAsync(round, cancellationToken).ConfigureAwait(false);
+        }
+        catch (NodeQuotaExceededException)
+        {
+            // The daily quota of a public node is used up (and it counts the refused request too): the audit stops asking for a while
+            // and continues with the round that is published then. The rounds in between are not audited.
+            _pausedAt = _time.GetTimestamp();
+            _pause = TimeSpan.FromTicks(Math.Min((_nextQuotaPause ?? QuotaPauseFirst).Ticks, QuotaPause.Ticks));
+            _nextQuotaPause = _pause * 2;
+
+            // A round whose mismatch is known but whose stop is not recorded yet stays the next one to look at.
+            if (_reportedMismatch != round)
+            {
+                _audited = null;
+            }
+
+            health.AuditSkipped();
+            // A Warning for the first pause, then at most every ten minutes: near the quota the answer comes again and again.
+            var warn = _quotaWarnedAt is not { } warnedAt || _time.GetElapsedTime(warnedAt) >= WarnEvery;
+            if (warn)
+            {
+                _quotaWarnedAt = _time.GetTimestamp();
+            }
+
+            LogQuotaPause(logger, warn ? LogLevel.Warning : LogLevel.Information, chain.Chain, round, _pause);
+            return Step.Retry;
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode is HttpStatusCode.TooManyRequests)
+        {
+            // A limit per second: the same round is asked for again after a short pause, and given up on after a few answers like any failure.
+            _pausedAt = _time.GetTimestamp();
+            _pause = ThrottlePause;
+            if (ShouldRetry(round))
+            {
+                LogThrottled(logger, chain.Chain, round, _pause);
+                return Step.Retry;
+            }
+
+            Warn(ex);
+            health.AuditSkipped();
+            return Step.Done;
         }
         catch (Exception ex) when (ex is HttpRequestException or InvalidDataException or TimeoutException || (ex is OperationCanceledException && !cancellationToken.IsCancellationRequested))
         {
@@ -230,11 +331,13 @@ public sealed partial class LedgerAuditor(
         }
 
         _consecutiveNoDeltas = 0;
+        _nextQuotaPause = null;
         var mismatches = await LedgerAudit.CompareAsync(storage, delta, round, ReadsInFlight, cancellationToken).ConfigureAwait(false);
         _auditedRounds++;
         health.ReportAudited(round);
         if (mismatches.Count == 0)
         {
+            _lastAgreed = round;
             return Step.Done;
         }
 
@@ -260,7 +363,10 @@ public sealed partial class LedgerAuditor(
             return Step.Done;
         }
 
-        var reason = $"round {round}: {description}";
+        // Not every round is audited (sampling, pauses, a node without an answer): the round before this one is not known to be good.
+        // A sample of an older round (backfill after falling behind) can fail below a round that agreed earlier: that one says nothing.
+        var good = _lastAgreed is { } lastAgreed && lastAgreed < round ? lastAgreed.ToString(CultureInfo.InvariantCulture) : "none known below that round";
+        var reason = $"round {round}: {description}; last audited round that agreed: {good}";
         try
         {
             await storage.RecordAuditStopAsync(new AuditStop(round, reason, published, _time.GetUtcNow(), false), cancellationToken).ConfigureAwait(false);
@@ -272,7 +378,7 @@ public sealed partial class LedgerAuditor(
             return Step.Retry;
         }
 
-        LogStop(logger, chain.Chain, round, published, round > 0 ? round - 1 : 0, reason);
+        LogStop(logger, chain.Chain, round, published, good, reason);
         Environment.ExitCode = 1;
         lifetime.StopApplication();
         return Step.Stop;
@@ -299,8 +405,8 @@ public sealed partial class LedgerAuditor(
     [LoggerMessage(EventId = 1350, Level = LogLevel.Information, Message = "The ledger audit of {Chain} is switched off (Worker:Audit:Enabled)")]
     private static partial void LogDisabled(ILogger logger, string chain);
 
-    [LoggerMessage(EventId = 1351, Level = LogLevel.Information, Message = "The ledger audit of {Chain} runs: every followed round and one backfilled round in {SampleEvery} are compared with the ledger deltas of the node; stop on a mismatch: {StopOnMismatch}")]
-    private static partial void LogStarted(ILogger logger, string chain, bool stopOnMismatch, int sampleEvery);
+    [LoggerMessage(EventId = 1351, Level = LogLevel.Information, Message = "The ledger audit of {Chain} runs: one followed round in {FollowSampleEvery} (0 = none) and one backfilled round in {SampleEvery} are compared with the ledger deltas of the node; stop on a mismatch: {StopOnMismatch}")]
+    private static partial void LogStarted(ILogger logger, string chain, int followSampleEvery, int sampleEvery, bool stopOnMismatch);
 
     [LoggerMessage(EventId = 1352, Level = LogLevel.Information, Message = "The node of {Chain} offers no ledger deltas (none for {Count} rounds in a row); the audit is off")]
     private static partial void LogNoDeltas(ILogger logger, string chain, int count);
@@ -314,9 +420,18 @@ public sealed partial class LedgerAuditor(
     [LoggerMessage(EventId = 1355, Level = LogLevel.Warning, Message = "Ledger audit of {Chain}: round {Round} disagrees with the ledger but is listed in Worker:Audit:IgnoreRounds ({Details})")]
     private static partial void LogIgnored(ILogger logger, string chain, ulong round, string details);
 
+    [LoggerMessage(EventId = 1359, Level = LogLevel.Information, Message = "The ledger audit of {Chain} continues after its pause")]
+    private static partial void LogResumed(ILogger logger, string chain);
+
+    [LoggerMessage(EventId = 1358, Message = "The daily quota of the node of {Chain} is used up (HTTP 403 for the ledger deltas of round {Round}); the ledger audit pauses for {Pause}; while following, the rounds published meanwhile are not audited")]
+    private static partial void LogQuotaPause(ILogger logger, LogLevel level, string chain, ulong round, TimeSpan pause);
+
+    [LoggerMessage(EventId = 1360, Level = LogLevel.Information, Message = "The node of {Chain} throttles (HTTP 429 for the ledger deltas of round {Round}); the ledger audit asks again in {Pause}")]
+    private static partial void LogThrottled(ILogger logger, string chain, ulong round, TimeSpan pause);
+
     [LoggerMessage(EventId = 1357, Level = LogLevel.Warning, Message = "The ledger audit of {Chain} could not record its stop at round {Round}; the database is tried again at the next pass and the worker keeps running until then")]
     private static partial void LogStopNotRecorded(ILogger logger, Exception exception, string chain, ulong round);
 
-    [LoggerMessage(EventId = 1356, Level = LogLevel.Critical, Message = "Ledger audit of {Chain} failed at round {Round}: the ledger disagrees at that round and this writer has published up to {Published}; the last round that agreed is {Good}. Fix the cause, then rebuild from a round below {Round} (docs/operations.md). {Reason}")]
-    private static partial void LogStop(ILogger logger, string chain, ulong round, ulong published, ulong good, string reason);
+    [LoggerMessage(EventId = 1356, Level = LogLevel.Critical, Message = "Ledger audit of {Chain} failed at round {Round}: the ledger disagrees at that round and this writer has published up to {Published}; the last audited round that agreed is {Good}. Not every round is audited and a round only shows the accounts it changed, so the first wrong round can lie before both: find it, fix the cause, then rebuild from a round below it (docs/operations.md). {Reason}")]
+    private static partial void LogStop(ILogger logger, string chain, ulong round, ulong published, string good, string reason);
 }

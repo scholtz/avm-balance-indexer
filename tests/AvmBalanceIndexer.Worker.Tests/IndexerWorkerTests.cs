@@ -108,6 +108,76 @@ public class IndexerWorkerTests : IDisposable
         Assert.Equal(1, Environment.ExitCode);
     }
 
+    [Theory]
+    [InlineData(false)] // the algod client reports the quota answer itself (status, genesis, deltas)
+    [InlineData(true)] // a caller in between wrapped it
+    public async Task A_Used_Up_Daily_Quota_Of_A_Public_Node_Is_Waited_Out_It_Never_Stops_The_Worker_And_Is_Logged_Once_Without_A_Stack_Trace(bool wrapped)
+    {
+        var storage = NewStorage();
+        // What nodely.io answers when the daily quota of the free tier is used up (and, near the quota, to a growing share of requests).
+        var errors = new Queue<Exception>(Enumerable.Range(0, 8).Select(_ =>
+        {
+            var refused = new NodeQuotaExceededException("The node answered HTTP 403 for /v2/status: Daily free API quota exceeded");
+            return wrapped ? new InvalidOperationException("status", refused) : (Exception)refused;
+        }));
+        var adapter = new FlakyAdapter(Scenario.Adapter(), failuresBeforeSuccess: 8, errors: errors);
+        var logger = new ListLogger();
+
+        // Two failures without progress would stop the worker: eight quota answers do not.
+        var (worker, lifetime) = Create(storage, adapter, maxFailures: 2, logger: logger);
+        await worker.StartAsync(CancellationToken.None);
+        await WaitForRoundAsync(storage, Scenario.LastRound);
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.False(lifetime.StopRequested);
+        Assert.Equal(8, adapter.Failures);
+        // One line for the whole outage (repeated every ten minutes at most), not one per attempt.
+        var warning = Assert.Single(logger.Entries, static e => e.Level == LogLevel.Warning);
+        Assert.Null(warning.Exception);
+        Assert.Contains("quota", warning.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task A_Source_That_Keeps_Failing_Stops_The_Worker_Also_When_The_Node_Refuses_For_Its_Quota_In_Between()
+    {
+        var storage = NewStorage();
+        Exception Outage() => new HttpRequestException("503");
+        Exception Refused() => new NodeQuotaExceededException("The node answered HTTP 403: Daily free API quota exceeded");
+        var errors = new Queue<Exception>([Outage(), Refused(), Outage(), Refused(), Outage(), Refused()]);
+        var adapter = new FlakyAdapter(Scenario.Adapter(), failuresBeforeSuccess: int.MaxValue, errors: errors);
+
+        // The quota answers neither count nor end the streak: the third outage is the third failure without progress.
+        var (worker, lifetime) = Create(storage, adapter, maxFailures: 3);
+        await worker.StartAsync(CancellationToken.None);
+        await lifetime.WaitForStopAsync();
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.True(lifetime.StopRequested);
+        Assert.Equal(5, adapter.Failures);
+        Assert.Equal(1, Environment.ExitCode);
+    }
+
+    [Fact]
+    public async Task A_Node_That_Names_Its_Quota_For_Longer_Than_A_Day_Without_Any_Progress_Stops_The_Application()
+    {
+        var storage = NewStorage();
+        var time = new ManualTime();
+        // A plan without quota, a monthly limit: the answer looks the same, but it does not end at midnight.
+        var errors = new Queue<Exception>(Enumerable.Range(0, 200).Select(_ => (Exception)new NodeQuotaExceededException("The node answered HTTP 403: No quota assigned")));
+        var adapter = new FlakyAdapter(Scenario.Adapter(), failuresBeforeSuccess: int.MaxValue, errors: errors, onFailure: () => time.Advance(TimeSpan.FromMinutes(9)));
+        var logger = new ListLogger();
+
+        var (worker, lifetime) = Create(storage, adapter, maxFailures: 1000, logger: logger, clock: time);
+        await worker.StartAsync(CancellationToken.None);
+        await lifetime.WaitForStopAsync();
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.Equal(1, Environment.ExitCode);
+        Assert.Equal(175, adapter.Failures); // one every nine minutes, the 175th is 26 hours and 6 minutes after the first
+        var fatal = Assert.Single(logger.Entries, static e => e.Level == LogLevel.Critical);
+        Assert.Contains("not a daily quota", fatal.Exception!.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task A_Chain_Divergence_Stops_The_Application_Immediately_Without_Retrying()
     {
@@ -407,7 +477,7 @@ public class IndexerWorkerTests : IDisposable
             Assert.Null(await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None));
             var fatal = Assert.Single(logger.Entries, static e => e.Level == LogLevel.Critical);
             Assert.Contains("Ledger audit of algorand-testnet failed at round 4", fatal.Exception!.Message, StringComparison.Ordinal);
-            Assert.Contains("the last round that agreed is 3", fatal.Exception.Message, StringComparison.Ordinal);
+            Assert.Contains("Find the first wrong round (at or below 4;", fatal.Exception.Message, StringComparison.Ordinal);
             Environment.ExitCode = 0;
         }
     }
@@ -687,7 +757,7 @@ public class IndexerWorkerTests : IDisposable
 
     private static InMemoryChainStorage NewStorage() => new(new ChainContext(ChainId.AlgorandTestnet));
 
-    private static (IndexerWorker Worker, FakeLifetime Lifetime) Create(InMemoryChainStorage storage, IChainAdapter adapter, int maxFailures, WorkerHealth? health = null, ILogger<IndexerWorker>? logger = null, string? version = null, IPartialRebuild? rebuild = null, WorkerOptions? workerOptions = null)
+    private static (IndexerWorker Worker, FakeLifetime Lifetime) Create(InMemoryChainStorage storage, IChainAdapter adapter, int maxFailures, WorkerHealth? health = null, ILogger<IndexerWorker>? logger = null, string? version = null, IPartialRebuild? rebuild = null, WorkerOptions? workerOptions = null, TimeProvider? clock = null)
     {
         var options = Options.Create(new IndexerOptions
         {
@@ -695,12 +765,13 @@ public class IndexerWorkerTests : IDisposable
             FollowPollInterval = TimeSpan.FromMilliseconds(5),
             RetryInitialBackoff = TimeSpan.FromMilliseconds(1),
             RetryMaxBackoff = TimeSpan.FromMilliseconds(5),
+            QuotaBackoff = TimeSpan.FromMilliseconds(2),
             MaxConsecutiveFailures = maxFailures,
             LeaseRetryInterval = TimeSpan.FromMilliseconds(5),
         });
         var indexer = new RoundIndexer(adapter, new AlgoEffectNormalizer(), storage, options, NullLogger<RoundIndexer>.Instance);
         var lifetime = new FakeLifetime();
-        return (new IndexerWorker(indexer, storage, new ChainContext(ChainId.AlgorandTestnet), options, lifetime, storage, storage, health ?? new WorkerHealth(), logger ?? NullLogger<IndexerWorker>.Instance, buildVersion: version, partialRebuilds: rebuild is null ? null : [rebuild], workerOptions: workerOptions is null ? null : Options.Create(workerOptions)), lifetime);
+        return (new IndexerWorker(indexer, storage, new ChainContext(ChainId.AlgorandTestnet), options, lifetime, storage, storage, health ?? new WorkerHealth(), logger ?? NullLogger<IndexerWorker>.Instance, clock: clock, buildVersion: version, partialRebuilds: rebuild is null ? null : [rebuild], workerOptions: workerOptions is null ? null : Options.Create(workerOptions)), lifetime);
     }
 
     private static async Task WaitForRoundAsync(InMemoryChainStorage storage, ulong round)

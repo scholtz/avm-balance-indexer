@@ -161,6 +161,14 @@ jobs:
           t | grep -q 'Worker__Audit__Enabled: "true"'
           t | grep -q 'Worker__Audit__StopOnMismatch: "true"'
           t | grep -q 'Worker__Audit__BackfillSampleEvery: "1000"'
+          t | grep -q 'Worker__Audit__FollowSampleEvery: "10"'
+          t --set worker.audit.followSampleEvery=1 | grep -q 'Worker__Audit__FollowSampleEvery: "1"'
+          t --set worker.audit.followSampleEvery=0 | grep -q 'Worker__Audit__FollowSampleEvery: "0"'
+          out=$(t --set worker.audit.followSampleEvery=null)
+          if echo "$out" | grep -q 'Worker__Audit__FollowSampleEvery'; then echo "an absent followSampleEvery must leave the default to the application"; exit 1; fi
+          out=$(t --set-string worker.audit.followSampleEvery=5 --set-string worker.audit.backfillSampleEvery=500)
+          echo "$out" | grep -q 'Worker__Audit__FollowSampleEvery: "5"'
+          echo "$out" | grep -q 'Worker__Audit__BackfillSampleEvery: "500"'
           if t | grep -q 'Worker__Audit__AcknowledgeRound'; then echo "no acknowledged round by default"; exit 1; fi
           if t | grep -q 'Worker__Audit__IgnoreRounds'; then echo "no ignored rounds by default"; exit 1; fi
           helm template ci deploy/helm/avm-balance-indexer -f deploy/helm/values/prod-algorand.yaml --set cassandra.embedded.node=ci-node | grep -q 'Worker__Audit__StopOnMismatch: "false"'
@@ -195,6 +203,14 @@ jobs:
           refused 'worker.audit.ignoreRounds' --set "worker.audit.ignoreRounds={1.5}"
           refused 'worker.audit.acknowledgeRound' --set worker.audit.acknowledgeRound=-4
           refused 'worker.audit.backfillSampleEvery' --set worker.audit.backfillSampleEvery=-1
+          refused 'worker.audit.followSampleEvery' --set worker.audit.followSampleEvery=-1
+          refused 'worker.audit.followSampleEvery' --set worker.audit.followSampleEvery=2.5
+          refused 'worker.audit.followSampleEvery' --set-string worker.audit.followSampleEvery=1O
+          refused 'worker.audit.followSampleEvery' --set worker.audit.followSampleEvery=3000000000
+          refused 'worker.audit.followSampleEvery' --set worker.audit.followSampleEvery=true
+          refused 'worker.audit.backfillSampleEvery' --set "worker.audit.backfillSampleEvery={10}"
+          refused 'worker.audit.backfillSampleEvery' --set worker.audit.backfillSampleEvery=3000000000
+          refused 'worker.audit.backfillSampleEvery' --set-string worker.audit.backfillSampleEvery=1O
           refused 'storage.cassandra.keyspace' --set storage.cassandra.keyspace=1bad
           refused 'storage.cassandra.keyspace' --set storage.cassandra.keyspace=bad-name
           refused 'storage.cassandra.localDatacenter' --set "storage.cassandra.localDatacenter=dc'1"

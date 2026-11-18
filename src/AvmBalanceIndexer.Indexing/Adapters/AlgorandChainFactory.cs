@@ -105,7 +105,7 @@ public static class AlgorandChainFactory
             options.AlgodToken ?? string.Empty,
             string.Empty,
             -1,
-            CreateHandler());
+            new AlgodQuotaHandler(CreateHandler()));
 
     internal static Uri WithTrailingSlash(Uri address) =>
         address.AbsolutePath.EndsWith('/') ? address : new UriBuilder(address) { Path = address.AbsolutePath + "/" }.Uri;

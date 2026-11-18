@@ -31,11 +31,27 @@ data:
   Worker__Audit__Enabled: {{ .Values.worker.audit.enabled | quote }}
   Worker__Audit__StopOnMismatch: {{ .Values.worker.audit.stopOnMismatch | quote }}
   {{- /* The same rules as the options (whole numbers): a wrong value must fail here, not in a pod that cannot start. */}}
-  {{- $sample := float64 (default 0 .Values.worker.audit.backfillSampleEvery) }}
-  {{- if or (lt $sample 0.0) (ne $sample (floor $sample)) }}
+  {{- $rawSample := .Values.worker.audit.backfillSampleEvery }}
+  {{- if not (or (kindIs "invalid" $rawSample) (kindIs "float64" $rawSample) (kindIs "int64" $rawSample) (kindIs "int" $rawSample) (and (kindIs "string" $rawSample) (regexMatch "^[0-9]+$" $rawSample))) }}
   {{- fail (printf "worker.audit.backfillSampleEvery %v must be a whole number, 0 or more" .Values.worker.audit.backfillSampleEvery) }}
   {{- end }}
+  {{- $sample := float64 (default 0 .Values.worker.audit.backfillSampleEvery) }}
+  {{- if or (lt $sample 0.0) (ne $sample (floor $sample)) (gt $sample 2147483647.0) }}
+  {{- fail (printf "worker.audit.backfillSampleEvery %v must be a whole number from 0 to 2147483647" .Values.worker.audit.backfillSampleEvery) }}
+  {{- end }}
   Worker__Audit__BackfillSampleEvery: {{ int64 $sample | quote }}
+  {{- /* Absent (values kept from a release before this setting): no entry, so the default of the application applies, not 0, which would switch the audit off at the tip. */}}
+  {{- if not (kindIs "invalid" .Values.worker.audit.followSampleEvery) }}
+  {{- $rawFollow := .Values.worker.audit.followSampleEvery }}
+  {{- if not (or (kindIs "float64" $rawFollow) (kindIs "int64" $rawFollow) (kindIs "int" $rawFollow) (and (kindIs "string" $rawFollow) (regexMatch "^[0-9]+$" $rawFollow))) }}
+  {{- fail (printf "worker.audit.followSampleEvery %v must be a whole number, 0 or more" .Values.worker.audit.followSampleEvery) }}
+  {{- end }}
+  {{- $follow := float64 .Values.worker.audit.followSampleEvery }}
+  {{- if or (lt $follow 0.0) (ne $follow (floor $follow)) (gt $follow 2147483647.0) }}
+  {{- fail (printf "worker.audit.followSampleEvery %v must be a whole number from 0 to 2147483647" .Values.worker.audit.followSampleEvery) }}
+  {{- end }}
+  Worker__Audit__FollowSampleEvery: {{ int64 $follow | quote }}
+  {{- end }}
   {{- $acknowledge := float64 (default 0 .Values.worker.audit.acknowledgeRound) }}
   {{- if or (lt $acknowledge 0.0) (ne $acknowledge (floor $acknowledge)) }}
   {{- fail (printf "worker.audit.acknowledgeRound %v must be a round number (a whole number, 0 for none)" .Values.worker.audit.acknowledgeRound) }}

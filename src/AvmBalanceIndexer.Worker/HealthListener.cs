@@ -33,6 +33,12 @@ public sealed class AuditOptions
     /// <summary>Seconds between two looks at the published round.</summary>
     public int IntervalSeconds { get; set; } = 10;
 
+    /// <summary>
+    /// While following the tip one round in this many is audited (one request of 30 to 70 KB each); 1 audits every round, 0 (or less) none.
+    /// The default fits the daily quota of a public node next to the indexing itself; with an own node use 1.
+    /// </summary>
+    public int FollowSampleEvery { get; set; } = 10;
+
     /// <summary>Most rounds audited in one look while following the tip (one request per round).</summary>
     public int MaxRoundsPerPass { get; set; } = 50;
 

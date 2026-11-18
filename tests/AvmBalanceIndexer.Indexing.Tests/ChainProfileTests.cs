@@ -51,6 +51,23 @@ public class ChainProfileTests
     }
 
     [Fact]
+    public async Task A_Quota_Answer_For_The_Genesis_Is_Not_Asked_For_Again_Every_Refused_Request_Counts()
+    {
+        var calls = 0;
+        var handler = new RecordingHandler(_ =>
+        {
+            calls++;
+            throw new NodeQuotaExceededException("The node answered HTTP 403 for /genesis: Daily free API quota exceeded");
+        });
+        using var algod = Algorand.HttpClientConfigurator.ConfigureHttpClient("https://gateway.test/algod/", string.Empty, string.Empty, -1, handler);
+        using var adapter = new AlgorandChainAdapter(ChainProfile.For(ChainId.AlgorandTestnet), new byte[32], new NoBlocks(), algod);
+
+        await Assert.ThrowsAsync<NodeQuotaExceededException>(() => adapter.GetGenesisAsync(CancellationToken.None));
+
+        Assert.Equal(1, calls);
+    }
+
+    [Fact]
     public async Task Genesis_Request_Survives_Transient_Connection_Resets()
     {
         var calls = 0;

@@ -1,6 +1,6 @@
 # 0021 Partial rebuild instead of a block archive
 
-Status: accepted as the design (issue #176). Implemented for Cassandra: the copy (#178), the worker, the chart values, the deploy step and the runbook (#179). Implemented in the PostgreSQL provider (#180, the rewind in one transaction), but not started by the worker for PostgreSQL deployments (no chart values yet). Build records (#182) are implemented (the `indexing_term` table and `indexedBy` in the status). The ledger audit (#181) is implemented: absolute comparison of published rounds with `/v2/deltas` (every followed round, sampled while backfilling), the stop is recorded in the database and released by a rebuild. Not implemented yet: #168 (the status reports a frozen keyspace as stalled).
+Status: accepted as the design (issue #176). Implemented for Cassandra: the copy (#178), the worker, the chart values, the deploy step and the runbook (#179). Implemented in the PostgreSQL provider (#180, the rewind in one transaction), but not started by the worker for PostgreSQL deployments (no chart values yet). Build records (#182) are implemented (the `indexing_term` table and `indexedBy` in the status). The ledger audit (#181) is implemented: absolute comparison of published rounds with `/v2/deltas` (one followed round in `followSampleEvery`, default 10 since #219 because every round used up the daily quota of the public node; sampled while backfilling), the stop is recorded in the database and released by a rebuild. Not implemented yet: #168 (the status reports a frozen keyspace as stalled).
 
 ## Context
 A fix in the normalizer or the balance tracker only changes rounds indexed afterwards. Rows already written cannot be edited
@@ -62,9 +62,9 @@ Two facts make that possible:
   out by the worker that holds the writer lease, reported by the deploy job.
 - **Finding R early.**
   - Ledger audit: the writer compares balances with the ledger deltas of the node (`/v2/deltas/{round}`, Algorand networks):
-    every round while following the tip, and a sample of rounds during backfill and during the replay after a partial rebuild,
+    one round in `followSampleEvery` while following the tip (every round with an own node; #219), and a sample of rounds during backfill and during the replay after a partial rebuild,
     as far as the node serves deltas for them. The audit runs after publication: it detects, it does not prevent. A node that
-    is unavailable, rate-limited or answers something unreadable is a skipped round, never a failure. A disagreement stops the
+    is unavailable, rate-limited, out of its daily quota or answers something unreadable means rounds that are not audited, never a failure. A disagreement stops the
     writer (configurable per release), because every further round would have to be rebuilt. The audit runs after
     publication and batches publish several rounds at once, so the writer stops at its current tip, which can be past the bad
     round S; a rebuild must choose R below S. The stop is recorded in the database, so a restarted worker does not index on
