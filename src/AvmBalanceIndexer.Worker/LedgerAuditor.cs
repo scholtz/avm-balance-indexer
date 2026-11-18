@@ -129,9 +129,11 @@ public sealed partial class LedgerAuditor(
         if (status.State == IngestionState.Following)
         {
             var budget = Math.Max(1, settings.MaxRoundsPerPass);
-            var every = (ulong)Math.Max(0, settings.FollowSampleEvery);
+            // Until a first round was compared every round is asked for, so that a node without deltas is found (and the audit switched
+            // off) as fast as without sampling.
             for (var round = _audited.Value + 1; round <= status.IndexedRound; round++)
             {
+                var every = settings.FollowSampleEvery <= 0 ? 0UL : _auditedRounds == 0 ? 1UL : (ulong)settings.FollowSampleEvery;
                 if (every == 0 || round % every != 0)
                 {
                     _audited = round;
@@ -170,7 +172,9 @@ public sealed partial class LedgerAuditor(
         _audited = status.IndexedRound;
         if (status.IndexedRound < _sampled)
         {
+            // The data above that round is replaced: what agreed before says nothing about it.
             _sampled = status.IndexedRound;
+            _lastAgreed = null;
         }
 
         if (settings.BackfillSampleEvery > 0 && status.State == IngestionState.Backfilling)
@@ -397,10 +401,10 @@ public sealed partial class LedgerAuditor(
     [LoggerMessage(EventId = 1355, Level = LogLevel.Warning, Message = "Ledger audit of {Chain}: round {Round} disagrees with the ledger but is listed in Worker:Audit:IgnoreRounds ({Details})")]
     private static partial void LogIgnored(ILogger logger, string chain, ulong round, string details);
 
-    [LoggerMessage(EventId = 1359, Level = LogLevel.Information, Message = "The ledger audit of {Chain} resumes at the published round")]
+    [LoggerMessage(EventId = 1359, Level = LogLevel.Information, Message = "The ledger audit of {Chain} continues after its pause")]
     private static partial void LogResumed(ILogger logger, string chain);
 
-    [LoggerMessage(EventId = 1358, Level = LogLevel.Warning, Message = "The daily quota of the node of {Chain} is used up (HTTP 403 for the ledger deltas of round {Round}); the ledger audit pauses for {Pause} and does not audit the rounds published meanwhile")]
+    [LoggerMessage(EventId = 1358, Level = LogLevel.Warning, Message = "The daily quota of the node of {Chain} is used up (HTTP 403 for the ledger deltas of round {Round}); the ledger audit pauses for {Pause}; while following, the rounds published meanwhile are not audited")]
     private static partial void LogQuotaPause(ILogger logger, string chain, ulong round, TimeSpan pause);
 
     [LoggerMessage(EventId = 1360, Level = LogLevel.Information, Message = "The node of {Chain} throttles (HTTP 429 for the ledger deltas of round {Round}); the ledger audit asks again in {Pause}")]

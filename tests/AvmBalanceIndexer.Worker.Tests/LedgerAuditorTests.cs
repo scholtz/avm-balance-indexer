@@ -211,7 +211,8 @@ public sealed class LedgerAuditorTests : IDisposable
     {
         var (storage, ledger) = await AtRoundTwoAsync();
         await SetStateAsync(storage, IngestionState.Backfilling);
-        await using var rig = Start(storage, ledger, new AuditOptions { FollowSampleEvery = 1, BackfillSampleEvery = 0 });
+        // No sampling at the tip either: finishing the scenario passes through the state Following for a moment.
+        await using var rig = Start(storage, ledger, new AuditOptions { FollowSampleEvery = 0, BackfillSampleEvery = 0 });
         await Task.Delay(100);
 
         await FinishTheScenarioAsync(storage);
@@ -243,12 +244,14 @@ public sealed class LedgerAuditorTests : IDisposable
         Assert.Equal(0, rig.Health.AuditMismatches);
     }
 
-    [Fact]
-    public async Task A_Node_Without_Deltas_Switches_The_Audit_Off_Once_Without_An_Error()
+    [Theory]
+    [InlineData(1)]
+    [InlineData(10)] // sampling does not delay it: every round is asked for until a first one was compared
+    public async Task A_Node_Without_Deltas_Switches_The_Audit_Off_Once_Without_An_Error(int followSampleEvery)
     {
         var (storage, _) = await AtRoundTwoAsync();
         var none = new FakeDeltas { AlwaysNull = true };
-        await using var rig = Start(storage, none, new AuditOptions { FollowSampleEvery = 1 });
+        await using var rig = Start(storage, none, new AuditOptions { FollowSampleEvery = followSampleEvery });
         await Task.Delay(100);
 
         // Thirty more rounds follow; the node has none of their deltas.
@@ -294,7 +297,7 @@ public sealed class LedgerAuditorTests : IDisposable
         await UntilAsync(() => rig.Health.LastAuditedRound == 4);
         await Task.Delay(100); // round 5 is published and must not be asked for
 
-        Assert.Equal([4UL], ledger.Requested.ToArray());
+        Assert.Equal([3UL, 4UL], ledger.Requested.ToArray()); // round 3 is the first comparison (asked for whatever the sampling), then every second round
         Assert.Equal(0, rig.Health.AuditMismatches);
     }
 
@@ -362,7 +365,7 @@ public sealed class LedgerAuditorTests : IDisposable
         for (ulong round = 3; round <= 5; round++)
         {
             var resumes = (int)(round - 3);
-            await UntilAsync(() => rig.Logger.Entries.Count(static e => e.Message.Contains("resumes", StringComparison.Ordinal)) == resumes);
+            await UntilAsync(() => rig.Logger.Entries.Count(static e => e.Message.Contains("continues after its pause", StringComparison.Ordinal)) == resumes);
             await Task.Delay(50);
             await Indexer(storage).RunAsync(round, CancellationToken.None);
             await SetStateAsync(storage, IngestionState.Following);
@@ -425,12 +428,59 @@ public sealed class LedgerAuditorTests : IDisposable
         Assert.Equal(1, rig.Health.AuditMismatches); // counted once
     }
 
+    /// <summary>A storage whose published status a test can replace for a while (the published round moving back, as after a rewind).</summary>
+    private sealed class Rewindable() : InMemoryChainStorage(new ChainContext(ChainId.AlgorandTestnet))
+    {
+        private ChainStatus? _published;
+
+        public ChainStatus? Published
+        {
+            get => Volatile.Read(ref _published);
+            set => Volatile.Write(ref _published, value);
+        }
+
+        public override Task<ChainStatus?> GetAsync(string chain, CancellationToken cancellationToken) =>
+            Published is { } published ? Task.FromResult<ChainStatus?>(published) : base.GetAsync(chain, cancellationToken);
+    }
+
     private sealed class RecordFailsOnce() : InMemoryChainStorage(new ChainContext(ChainId.AlgorandTestnet))
     {
         private int _attempts;
 
         public override Task RecordAuditStopAsync(AuditStop auditStop, CancellationToken cancellationToken) =>
             Interlocked.Increment(ref _attempts) == 1 ? Task.FromException(new IOException("database is busy")) : base.RecordAuditStopAsync(auditStop, cancellationToken);
+    }
+
+    [Fact]
+    public async Task After_The_Published_Round_Moved_Back_A_Round_That_Agreed_Before_Is_Not_Named_As_Good()
+    {
+        var reference = new InMemoryChainStorage(new ChainContext(ChainId.AlgorandTestnet));
+        await Indexer(reference).RunAsync(Scenario.LastRound, CancellationToken.None);
+        var ledger = await LedgerOfAsync(reference);
+        var storage = new Rewindable();
+        await Indexer(storage).RunAsync(2, CancellationToken.None);
+        await SetStateAsync(storage, IngestionState.Following);
+        await using var rig = Start(storage, ledger, new AuditOptions { FollowSampleEvery = 1, BackfillSampleEvery = 0 });
+        await Task.Delay(100);
+        await Indexer(storage).RunAsync(3, CancellationToken.None);
+        await SetStateAsync(storage, IngestionState.Following);
+        await UntilAsync(() => rig.Health.LastAuditedRound == 3); // round 3 agreed
+
+        // A rewind to round 1, then the replay: the node has no deltas for rounds 2 and 3 any more, and round 4 disagrees.
+        var status = (await storage.GetAsync(ChainId.AlgorandTestnet, CancellationToken.None))!;
+        storage.Published = status with { IndexedRound = 1, State = IngestionState.Backfilling };
+        await Task.Delay(100);
+        storage.Published = null;
+        ledger.Rounds.Remove(2);
+        ledger.Rounds.Remove(3);
+        var good = ledger.Rounds[4];
+        ledger.Rounds[4] = good with { Algo = new Dictionary<Address, ulong>(good.Algo) { [Scenario.Bob] = good.Algo[Scenario.Bob] + 1 } };
+        await FinishTheScenarioAsync(storage);
+        await UntilAsync(() => rig.Lifetime.StopRequested);
+
+        var stop = await storage.GetAuditStopAsync(CancellationToken.None);
+        Assert.Equal(4UL, stop!.Round);
+        Assert.Contains("last audited round that agreed: none known below that round", stop.Reason, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -492,7 +542,7 @@ public sealed class LedgerAuditorTests : IDisposable
         Assert.Contains("the ledger audit pauses", warning.Message, StringComparison.Ordinal); // an expected answer of a public node: one line
 
         // After the pause it continues with what is published then; the refused round is not asked for again.
-        await UntilAsync(() => rig.Logger.Entries.Any(static e => e.Level == LogLevel.Information && e.Message.Contains("resumes", StringComparison.Ordinal)));
+        await UntilAsync(() => rig.Logger.Entries.Any(static e => e.Level == LogLevel.Information && e.Message.Contains("continues after its pause", StringComparison.Ordinal)));
         await Task.Delay(50); // the pass that resumed has read the published round (3)
         await FinishTheScenarioAsync(storage);
         await UntilAsync(() => rig.Health.LastAuditedRound == (long)Scenario.LastRound);

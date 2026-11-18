@@ -65,6 +65,7 @@ internal sealed class AlgodQuotaHandler(HttpMessageHandler inner) : DelegatingHa
         }
 
         response.Dispose();
-        throw new NodeQuotaExceededException($"The node answered HTTP 403 for {request.RequestUri?.AbsolutePath}: {body.Trim()}");
+        // Without the request path: some gateways carry the API key in it.
+        throw new NodeQuotaExceededException($"The node answered HTTP 403: {body.Trim()}");
     }
 }

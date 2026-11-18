@@ -12,14 +12,14 @@ public class AlgodQuotaHandlerTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task The_Quota_Answer_Of_A_Public_Gateway_Becomes_Its_Own_Exception_That_Names_The_Request_And_The_Answer(bool streamed)
+    public async Task The_Quota_Answer_Of_A_Public_Gateway_Becomes_Its_Own_Exception_That_Names_The_Answer_But_Not_The_Path(bool streamed)
     {
         using var http = Client(HttpStatusCode.Forbidden, "Daily free API quota exceeded\n", streamed: streamed);
 
-        var ex = await Assert.ThrowsAsync<NodeQuotaExceededException>(() => http.GetAsync(new Uri("v2/status", UriKind.Relative)));
+        var ex = await Assert.ThrowsAsync<NodeQuotaExceededException>(() => http.GetAsync(new Uri("secret-key/v2/status", UriKind.Relative)));
 
         Assert.Equal(HttpStatusCode.Forbidden, ex.StatusCode);
-        Assert.Contains("/v2/status", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret-key", ex.Message, StringComparison.Ordinal); // some gateways carry the API key in the path
         Assert.Contains("Daily free API quota exceeded", ex.Message, StringComparison.Ordinal);
     }
 

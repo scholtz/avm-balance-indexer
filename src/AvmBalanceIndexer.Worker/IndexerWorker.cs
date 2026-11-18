@@ -287,11 +287,9 @@ public sealed partial class IndexerWorker(
                 // The daily quota of a public node: nothing is wrong, and a restart would only spend more requests. Waited out without
                 // counting a failure; the status goes stale meanwhile, which is what the alerts look at. Near the quota only a share of
                 // the requests is refused: the wait starts short and grows only while nothing is indexed between two refusals (QuotaWait).
+                // A quota answer neither counts as a failure nor ends a streak of failures: a source that keeps failing next to a node
+                // that refuses now and then must still stop the worker.
                 var step = quota.Next(indexer.RoundsCommitted + Interlocked.Read(ref _rebuildReports));
-
-                // The node answers: failures counted before this are not consecutive any more (a long wait must not add them up to a stop).
-                failures = 0;
-                backoff = settings.RetryInitialBackoff;
                 if (step.GiveUp)
                 {
                     throw new InvalidOperationException(
