@@ -33,7 +33,7 @@
   </ItemGroup>
 
   <ItemGroup Label="Storage">
-    <PackageVersion Include="Npgsql" Version="10.0.3" />
+    <PackageVersion Include="Npgsql" Version="11.0.0" />
     <PackageVersion Include="CassandraCSharpDriver" Version="3.23.0" />
     <!-- Transitive pin: CassandraCSharpDriver references a vulnerable Newtonsoft.Json 9.x -->
     <PackageVersion Include="Newtonsoft.Json" Version="13.0.4" />
