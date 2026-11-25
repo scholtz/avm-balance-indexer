@@ -4,45 +4,45 @@ PostgreSQL against Cassandra on the newest MainNet and Voi rounds. Updated every
 
 ## algorand-mainnet
 
-Measured on 2026-11-24 at commit `ee61ce36`: the 10,000 newest rounds of algorand-mainnet (chain rounds 67,248,099 to 67,258,098) were indexed from an empty database by the production indexer. Both databases indexed exactly this range, each running alone next to the API on Ubuntu 26.04.1 LTS, 4 cores, 16 GiB.
+Measured on 2026-11-25 at commit `ee61ce36`: the 10,000 newest rounds of algorand-mainnet (chain rounds 67,277,176 to 67,287,175) were indexed from an empty database by the production indexer. Both databases indexed exactly this range, each running alone next to the API on Ubuntu 26.04.1 LTS, 4 cores, 16 GiB.
 
 #### Indexing and storage
 
 | | Cassandra 5.0.9 | PostgreSQL 17.12 |
 |---|---:|---:|
-| Indexing speed | 127 rounds/s | 274 rounds/s |
-| Effects written | 804,068 (10,188/s) | 804,068 (22,054/s) |
-| Time for the range | 78.9 s | 36.5 s |
-| Stored size | 138.8 MiB | 543.4 MiB |
-| Per round | 14.22 KiB | 55.65 KiB |
-| Per effect | 177 bytes | 691 bytes |
-| If all 66 M MainNet rounds were like these | 0.9 TiB | 3.4 TiB |
+| Indexing speed | 127 rounds/s | 228 rounds/s |
+| Effects written | 679,284 (8,649/s) | 679,284 (15,461/s) |
+| Time for the range | 78.5 s | 43.9 s |
+| Stored size | 120.0 MiB | 464.0 MiB |
+| Per round | 12.29 KiB | 47.51 KiB |
+| Per effect | 180 bytes | 696 bytes |
+| If all 66 M MainNet rounds were like these | 0.8 TiB | 2.9 TiB |
 
-Block download is the same for both and not part of the table: 304 rounds/s from the public archival nodes (213,570 transactions).
+Block download is the same for both and not part of the table: 296 rounds/s from the public archival nodes (195,986 transactions).
 
 #### Largest tables
 
-- Cassandra 5.0.9: effects_by_account_token_bucket 69.5 MiB, effects_by_token_bucket 54.0 MiB, effect_buckets_by_account_token 5.8 MiB, holdings_by_token 2.9 MiB, accounts_touched_by_token 2.9 MiB
-- PostgreSQL 17.12: effects_by_account_token 287.7 MiB, effects_by_token_bucket 216.5 MiB, holdings_by_token 12.3 MiB, accounts_touched_by_token 12.2 MiB, holdings_by_account 11.1 MiB
+- Cassandra 5.0.9: effects_by_account_token_bucket 59.0 MiB, effects_by_token_bucket 46.9 MiB, effect_buckets_by_account_token 5.4 MiB, holdings_by_token 2.6 MiB, accounts_touched_by_token 2.6 MiB
+- PostgreSQL 17.12: effects_by_account_token 243.5 MiB, effects_by_token_bucket 183.0 MiB, holdings_by_token 11.5 MiB, accounts_touched_by_token 11.5 MiB, holdings_by_account 10.5 MiB
 
 #### What the range contains
 
-Tokens with at least one effect in the range: 1 native, 8,848 ASAs. 5,240 of those ASAs were created inside the range, 0 of them ARC-20 Smart ASAs.
+Tokens with at least one effect in the range: 1 native, 2 ARC-200 tokens, 9,886 ASAs. 4,283 of those ASAs were created inside the range, 0 of them ARC-20 Smart ASAs.
 
 Holders are counted among the accounts that had an effect in the range (plus the starting balances the replay needed); a token with a long history has more holders on the real chain than shown here. Names exist only for tokens created inside the range.
 
 | Token | Name | Effects | Holders (non-zero) | Opted in (incl. zero) |
 |---|---|---:|---:|---:|
-| algo:0 | ALGO | 537,884 | 6,977 | 18,552 |
-| asa:849191641 |  | 66,358 | 4,067 | 11,599 |
-| asa:31566704 |  | 34,550 | 290 | 5,448 |
-| asa:127746157 |  | 34,119 | 0 | 1 |
-| asa:3145862805 |  | 24,399 | 3,332 | 3,333 |
-| asa:127745593 |  | 19,904 | 0 | 1 |
-| asa:127746786 |  | 10,860 | 0 | 1 |
-| asa:312769 |  | 6,276 | 65 | 94 |
-| asa:1284444444 |  | 5,030 | 29 | 46 |
-| asa:3737581431 |  | 4,800 | 24 | 24 |
+| algo:0 | ALGO | 462,922 | 5,912 | 17,866 |
+| asa:849191641 |  | 56,630 | 3,986 | 10,937 |
+| asa:127746157 |  | 34,432 | 0 | 1 |
+| asa:31566704 |  | 22,154 | 248 | 5,401 |
+| asa:3145862805 |  | 21,450 | 3,087 | 3,088 |
+| asa:127745593 |  | 21,136 | 0 | 1 |
+| asa:127746786 |  | 10,456 | 0 | 1 |
+| asa:3737581431 |  | 4,800 | 23 | 24 |
+| asa:1284444444 |  | 4,072 | 11 | 21 |
+| asa:3178895177 |  | 1,773 | 40 | 145 |
 
 #### API latency
 
@@ -50,57 +50,58 @@ One request at a time (p50 / p95 / p99), then 16 requests at a time (throughput 
 
 | Request | cassandra | postgres |
 |---|---:|---:|
-| status | 1.0 / 1.8 / 2.9 ms; 3,259 req/s, p95 10 ms | 0.6 / 0.7 / 0.8 ms; 5,516 req/s, p95 5 ms |
-| account holdings | 1.5 / 3.3 / 5.3 ms; 2,443 req/s, p95 12 ms | 1.2 / 1.7 / 2.0 ms; 2,469 req/s, p95 10 ms |
-| balance, latest | 2.4 / 3.3 / 4.8 ms; 1,743 req/s, p95 15 ms | 1.8 / 2.3 / 2.8 ms; 1,734 req/s, p95 14 ms |
-| balance, past round | 2.1 / 2.6 / 3.5 ms; 2,015 req/s, p95 12 ms | 1.5 / 2.4 / 3.9 ms; 1,821 req/s, p95 13 ms |
-| history, busiest account | 6.0 / 8.7 / 10.7 ms; 538 req/s, p95 69 ms | 4.7 / 6.0 / 6.7 ms; 864 req/s, p95 34 ms |
-| history, typical account | 1.3 / 1.5 / 1.9 ms; 3,360 req/s, p95 9 ms | 1.5 / 1.9 / 2.5 ms; 2,595 req/s, p95 9 ms |
-| holders, native, latest | 8.1 / 9.9 / 11.8 ms; 446 req/s, p95 48 ms | 2.0 / 2.7 / 3.3 ms; 1,500 req/s, p95 18 ms |
-| holders, native, past round | 24.0 / 31.7 / 36.8 ms; 93 req/s, p95 211 ms | 6.1 / 6.7 / 7.9 ms; 384 req/s, p95 64 ms |
-| holders, busiest ASA, latest | 9.7 / 10.8 / 14.7 ms; 390 req/s, p95 53 ms | 1.6 / 2.0 / 2.4 ms; 1,609 req/s, p95 14 ms |
-| token info | 0.5 / 0.6 / 1.0 ms; 7,575 req/s, p95 4 ms | 0.4 / 0.6 / 0.6 ms; 7,782 req/s, p95 4 ms |
+| status | 1.0 / 2.1 / 3.6 ms; 3,599 req/s, p95 9 ms | 0.8 / 1.0 / 1.1 ms; 3,191 req/s, p95 9 ms |
+| account holdings | 1.8 / 4.1 / 6.3 ms; 1,993 req/s, p95 15 ms | 1.9 / 2.7 / 3.6 ms; 1,511 req/s, p95 16 ms |
+| balance, latest | 2.6 / 5.5 / 7.3 ms; 1,447 req/s, p95 18 ms | 3.0 / 4.1 / 4.8 ms; 1,053 req/s, p95 23 ms |
+| balance, past round | 2.8 / 4.6 / 8.0 ms; 1,510 req/s, p95 19 ms | 2.5 / 3.3 / 3.9 ms; 1,131 req/s, p95 21 ms |
+| history, busiest account | 7.2 / 12.1 / 17.9 ms; 617 req/s, p95 54 ms | 7.0 / 10.1 / 11.1 ms; 544 req/s, p95 58 ms |
+| history, typical account | 1.3 / 4.1 / 7.3 ms; 2,609 req/s, p95 13 ms | 1.9 / 2.2 / 2.6 ms; 1,637 req/s, p95 15 ms |
+| holders, native, latest | 15.6 / 28.0 / 32.8 ms; 335 req/s, p95 64 ms | 2.9 / 3.8 / 4.3 ms; 879 req/s, p95 27 ms |
+| holders, native, past round | 28.9 / 41.3 / 57.6 ms; 81 req/s, p95 241 ms | 9.3 / 10.1 / 12.6 ms; 241 req/s, p95 96 ms |
+| holders, busiest ASA, latest | 10.5 / 17.2 / 26.1 ms; 340 req/s, p95 64 ms | 2.6 / 3.3 / 5.4 ms; 915 req/s, p95 25 ms |
+| holders, busiest ARC-200, latest | 1.7 / 5.9 / 11.9 ms; 2,348 req/s, p95 12 ms | 1.6 / 1.9 / 2.2 ms; 2,048 req/s, p95 10 ms |
+| token info | 0.5 / 0.9 / 1.4 ms; 7,733 req/s, p95 5 ms | 0.7 / 0.9 / 0.9 ms; 4,875 req/s, p95 5 ms |
 
 ## voi
 
-Measured on 2026-11-24 at commit `ee61ce36`: the 100,000 newest rounds of voi (chain rounds 24,737,732 to 24,837,731) were indexed from an empty database by the production indexer. Both databases indexed exactly this range, each running alone next to the API on Ubuntu 26.04.1 LTS, 4 cores, 16 GiB.
+Measured on 2026-11-25 at commit `ee61ce36`: the 100,000 newest rounds of voi (chain rounds 24,767,118 to 24,867,117) were indexed from an empty database by the production indexer. Both databases indexed exactly this range, each running alone next to the API on Ubuntu 26.04.1 LTS, 4 cores, 16 GiB.
 
 #### Indexing and storage
 
 | | Cassandra 5.0.9 | PostgreSQL 17.12 |
 |---|---:|---:|
-| Indexing speed | 1,263 rounds/s | 6,879 rounds/s |
-| Effects written | 143,964 (1,818/s) | 143,964 (9,903/s) |
-| Time for the range | 79.2 s | 14.5 s |
-| Stored size | 9.0 MiB | 79.7 MiB |
-| Per round | 0.09 KiB | 0.82 KiB |
-| Per effect | 66 bytes | 579 bytes |
+| Indexing speed | 906 rounds/s | 4,720 rounds/s |
+| Effects written | 142,083 (1,288/s) | 142,083 (6,706/s) |
+| Time for the range | 110.3 s | 21.2 s |
+| Stored size | 6.7 MiB | 75.1 MiB |
+| Per round | 0.07 KiB | 0.77 KiB |
+| Per effect | 49 bytes | 554 bytes |
 
-Block download is the same for both and not part of the table: 47 rounds/s from the public archival nodes (12,190 transactions).
+Block download is the same for both and not part of the table: 55 rounds/s from the public archival nodes (6,474 transactions).
 
 #### Largest tables
 
-- Cassandra 5.0.9: effects_by_account_token_bucket 5.4 MiB, effects_by_token_bucket 3.4 MiB, effect_buckets_by_account_token 0.1 MiB, holdings_by_token 0.0 MiB, accounts_touched_by_token 0.0 MiB
-- PostgreSQL 17.12: effects_by_account_token 45.2 MiB, effects_by_token_bucket 33.6 MiB, holdings_by_token 0.2 MiB, accounts_touched_by_token 0.2 MiB, holdings_by_account 0.2 MiB
+- Cassandra 5.0.9: effects_by_account_token_bucket 4.0 MiB, effects_by_token_bucket 2.6 MiB, effect_buckets_by_account_token 0.0 MiB, holdings_by_token 0.0 MiB, accounts_touched_by_token 0.0 MiB
+- PostgreSQL 17.12: effects_by_account_token 42.4 MiB, effects_by_token_bucket 32.1 MiB, holdings_by_account 0.1 MiB, holdings_by_token 0.1 MiB, accounts_touched_by_token 0.1 MiB
 
 #### What the range contains
 
-Tokens with at least one effect in the range: 1 native, 45 ARC-200 tokens, 9 ASAs. 0 of those ASAs were created inside the range, 0 of them ARC-20 Smart ASAs.
+Tokens with at least one effect in the range: 1 native, 29 ARC-200 tokens, 4 ASAs. 0 of those ASAs were created inside the range, 0 of them ARC-20 Smart ASAs.
 
 Holders are counted among the accounts that had an effect in the range (plus the starting balances the replay needed); a token with a long history has more holders on the real chain than shown here. Names exist only for tokens created inside the range.
 
 | Token | Name | Effects | Holders (non-zero) | Opted in (incl. zero) |
 |---|---|---:|---:|---:|
-| algo:0 | VOI | 127,155 | 124 | 170 |
-| arc200:390001 |  | 5,176 | 16 | 38 |
-| arc200:395614 |  | 2,152 | 13 | 21 |
-| arc200:47138068 |  | 1,742 | 16 | 22 |
-| arc200:300279 |  | 1,590 | 28 | 30 |
-| arc200:410811 |  | 768 | 13 | 15 |
-| arc200:412682 |  | 662 | 12 | 14 |
-| arc200:420069 |  | 606 | 18 | 30 |
-| arc200:410111 |  | 514 | 16 | 21 |
-| arc200:40153155 |  | 472 | 8 | 15 |
+| algo:0 | VOI | 139,718 | 82 | 120 |
+| arc200:390001 |  | 524 | 5 | 19 |
+| arc200:395614 |  | 308 | 10 | 13 |
+| arc200:47138068 |  | 305 | 7 | 12 |
+| asa:586896 |  | 254 | 1 | 2 |
+| arc200:300279 |  | 218 | 24 | 27 |
+| arc200:420069 |  | 74 | 8 | 14 |
+| arc200:404004 |  | 70 | 14 | 17 |
+| arc200:411311 |  | 66 | 13 | 14 |
+| arc200:416000 |  | 66 | 13 | 14 |
 
 #### API latency
 
@@ -108,15 +109,15 @@ One request at a time (p50 / p95 / p99), then 16 requests at a time (throughput 
 
 | Request | cassandra | postgres |
 |---|---:|---:|
-| status | 0.8 / 1.0 / 1.1 ms; 3,955 req/s, p95 8 ms | 0.5 / 0.6 / 0.8 ms; 5,517 req/s, p95 5 ms |
-| account holdings | 1.3 / 1.6 / 2.3 ms; 2,378 req/s, p95 12 ms | 1.1 / 1.5 / 2.1 ms; 2,619 req/s, p95 10 ms |
-| balance, latest | 2.2 / 2.5 / 2.9 ms; 1,856 req/s, p95 13 ms | 1.8 / 2.4 / 2.8 ms; 1,861 req/s, p95 13 ms |
-| balance, past round | 2.2 / 2.5 / 3.0 ms; 1,953 req/s, p95 12 ms | 1.5 / 1.9 / 2.2 ms; 1,889 req/s, p95 12 ms |
-| history, busiest account | 6.7 / 10.1 / 14.6 ms; 504 req/s, p95 64 ms | 4.9 / 6.0 / 6.8 ms; 752 req/s, p95 40 ms |
-| history, typical account | 1.5 / 2.6 / 3.0 ms; 1,973 req/s, p95 15 ms | 1.4 / 2.2 / 2.6 ms; 1,682 req/s, p95 14 ms |
-| holders, native, latest | 3.3 / 4.5 / 6.7 ms; 794 req/s, p95 31 ms | 1.8 / 2.5 / 4.1 ms; 1,351 req/s, p95 19 ms |
-| holders, native, past round | 12.3 / 14.9 / 18.6 ms; 134 req/s, p95 145 ms | 6.2 / 8.5 / 12.4 ms; 378 req/s, p95 65 ms |
-| holders, busiest ASA, latest | 1.6 / 1.8 / 2.6 ms; 2,045 req/s, p95 12 ms | 0.9 / 1.0 / 1.4 ms; 3,365 req/s, p95 7 ms |
-| holders, busiest ARC-200, latest | 1.7 / 2.3 / 2.7 ms; 1,547 req/s, p95 18 ms | 1.0 / 1.3 / 1.5 ms; 2,933 req/s, p95 8 ms |
-| token info | 0.5 / 0.6 / 0.7 ms; 8,156 req/s, p95 4 ms | 0.3 / 0.4 / 0.5 ms; 8,053 req/s, p95 4 ms |
+| status | 0.9 / 1.7 / 4.9 ms; 4,194 req/s, p95 8 ms | 0.8 / 0.9 / 1.0 ms; 3,437 req/s, p95 8 ms |
+| account holdings | 1.5 / 3.0 / 7.2 ms; 2,192 req/s, p95 13 ms | 1.8 / 2.4 / 3.1 ms; 1,551 req/s, p95 17 ms |
+| balance, latest | 2.1 / 4.5 / 5.9 ms; 1,689 req/s, p95 16 ms | 2.6 / 3.8 / 5.5 ms; 1,140 req/s, p95 21 ms |
+| balance, past round | 2.2 / 4.2 / 7.1 ms; 1,627 req/s, p95 17 ms | 2.2 / 2.7 / 3.2 ms; 1,294 req/s, p95 18 ms |
+| history, busiest account | 5.9 / 9.8 / 14.2 ms; 612 req/s, p95 56 ms | 4.4 / 6.0 / 6.7 ms; 709 req/s, p95 34 ms |
+| history, typical account | 1.9 / 3.8 / 7.8 ms; 1,861 req/s, p95 16 ms | 2.3 / 3.8 / 4.6 ms; 1,053 req/s, p95 23 ms |
+| holders, native, latest | 2.6 / 4.6 / 7.0 ms; 926 req/s, p95 29 ms | 2.7 / 3.7 / 4.2 ms; 1,063 req/s, p95 21 ms |
+| holders, native, past round | 8.5 / 13.9 / 16.6 ms; 185 req/s, p95 116 ms | 8.4 / 9.4 / 11.2 ms; 250 req/s, p95 96 ms |
+| holders, busiest ASA, latest | 1.3 / 2.5 / 4.5 ms; 2,514 req/s, p95 12 ms | 1.7 / 2.8 / 3.7 ms; 2,219 req/s, p95 10 ms |
+| holders, busiest ARC-200, latest | 1.6 / 3.1 / 5.5 ms; 2,327 req/s, p95 12 ms | 1.7 / 2.0 / 2.5 ms; 1,975 req/s, p95 11 ms |
+| token info | 0.6 / 1.4 / 8.2 ms; 9,639 req/s, p95 4 ms | 0.6 / 0.7 / 0.8 ms; 4,569 req/s, p95 6 ms |
 
